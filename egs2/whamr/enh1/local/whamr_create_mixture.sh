@@ -39,7 +39,7 @@ echo "Downloading WHAMR! data generation scripts and documentation."
 
 if [ -z "$wham_noise" ]; then
   # 17.65 GB unzipping to 35 GB
-  wham_noise_url=https://storage.googleapis.com/whisper-public/wham_noise.zip
+  wham_noise_url=https://my-bucket-a8b4b49c25c811ee9a7e8bba05fa24c7.s3.amazonaws.com/wham_noise.zip
   wget --continue -O $wdir/wham_noise.zip ${wham_noise_url}
   if [ $(ls ${dir}/wham_noise 2>/dev/null | wc -l) -eq 4 ]; then
     echo "'${dir}/wham_noise/' already exists. Skipping..."
@@ -49,7 +49,7 @@ if [ -z "$wham_noise" ]; then
   wham_noise=${dir}/wham_noise
 fi
 
-script_url=https://storage.googleapis.com/whisper-public/whamr_scripts.tar.gz
+script_url=https://my-bucket-a8b4b49c25c811ee9a7e8bba05fa24c7.s3.amazonaws.com/whamr_scripts.tar.gz
 wget --continue -O $wdir/whamr_scripts.tar.gz ${script_url}
 tar -xzf ${wdir}/whamr_scripts.tar.gz -C ${dir}
 

@@ -25,7 +25,7 @@ EOF
 wsj_full_wav=$PWD/data/wsj0/wsj0_wav
 # Path to the directory containing WHAM! noise
 # (will download from the official site if not specified)
-wham_noise=
+wham_noise=/net/midgar/work/nitsu/data/wsj/wham_noise
 whamr_wav=$PWD/data/whamr/2speakers
 whamr_scripts=$PWD/data/whamr
 
