@@ -9,8 +9,8 @@ if ! command -v "${sph2pipe}" &> /dev/null; then
   exit 1;
 fi
 
-ndx2flist=$KALDI_ROOT/egs/wsj/s5/local/ndx2flist.pl
-flist2scp=$KALDI_ROOT/egs/wsj/s5/local/flist2scp.pl
+ndx2flist=$(dirname $0)/ndx2flist.pl
+flist2scp=$(dirname $0)/flist2scp.pl
 
 WSJ0=$1
 dir=$2
