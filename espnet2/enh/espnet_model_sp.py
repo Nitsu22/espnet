@@ -17,6 +17,7 @@ from espnet2.enh.loss.wrappers.abs_wrapper import AbsLossWrapper
 from espnet2.enh.separator.abs_separator import AbsSeparator
 from espnet2.enh.separator.dan_separator import DANSeparator
 from espnet2.enh.separator.uses_separator import USESSeparator
+from espnet2.enh.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
 
@@ -36,6 +37,8 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         decoder: AbsDecoder,
         mask_module: Optional[AbsMask],
         loss_wrappers: Optional[List[AbsLossWrapper]],
+        spatial_encoder: Optional[AbsSpatialEncoder] = None,
+        spatial_encoder_conf: Optional[Dict] = None,
         stft_consistency: bool = False,
         loss_type: str = "mask_mse",
         mask_type: Optional[str] = None,
@@ -97,6 +100,15 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         self.separator = separator
         self.decoder = decoder
         self.mask_module = mask_module
+        self.spatial_encoder = spatial_encoder
+        self.spatial_encoder_conf = spatial_encoder_conf
+
+        # 学習済みパラメータの読み込み
+        if self.spatial_encoder is not None and self.spatial_encoder_conf is not None:
+            spatial_encoder_path = self.spatial_encoder_conf.get("path")
+            if spatial_encoder_path is not None and spatial_encoder_path != "":
+                state_dict = torch.load(spatial_encoder_path, map_location='cpu')
+                self.spatial_encoder.load_state_dict(state_dict)
         # set num_spk to -1 if None for compatibility with `espnet2.enh.diffusion_enh`
         self.num_spk = separator.num_spk if separator is not None else -1
         # If True, self.num_spk is regarded as the MAXIMUM possible number of speakers
@@ -324,6 +336,21 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         fs: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         feature_mix, flens = self.encoder(speech_mix, speech_lengths, fs=fs)
+        
+        if additional is None:
+            additional = {}
+        
+        if self.spatial_encoder is not None:
+            if speech_mix.dim() == 2:
+                mixture_1ch = speech_mix
+            elif speech_mix.dim() == 3:
+                mixture_1ch = speech_mix[:, 0]
+            else:
+                raise ValueError(f"Unexpected speech_mix dim: {speech_mix.dim()}")
+            
+            spatial_emb = self.spatial_encoder(mixture_1ch)
+            additional["spatial_embedding"] = spatial_emb
+        
         if self.mask_module is None:
             feature_pre, flens, others = self.separator(feature_mix, flens, additional)
         else:

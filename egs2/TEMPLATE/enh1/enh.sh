@@ -609,7 +609,7 @@ if ! "${skip_train}"; then
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
         else
-            train_module=espnet2.bin.enh_train
+            train_module=espnet2.bin.enh_train_sp
         fi
         # shellcheck disable=SC2046,SC2086
         ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
@@ -773,7 +773,7 @@ if ! "${skip_train}"; then
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
         else
-            train_module=espnet2.bin.enh_train
+            train_module=espnet2.bin.enh_train_sp
         fi
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \

@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from espnet2.enh.layers.complex_utils import new_complex_like
+from espnet2.enh.layers.film import FiLM
 from packaging.version import parse as V
 from rotary_embedding_torch import RotaryEmbedding
 
@@ -86,6 +87,9 @@ class TFLocoformerSeparatorSP(AbsSeparator):
         dropout: float = 0.0,
         # others
         eps: float = 1.0e-5,
+        # spatial encoder related
+        use_spatial_encoder: bool = False,
+        spatial_embed_dim: int = 128,
     ):
         super().__init__()
         assert is_torch_2_0_plus, "Support only pytorch >= 2.0.0"
@@ -136,6 +140,14 @@ class TFLocoformerSeparatorSP(AbsSeparator):
 
         self.deconv = nn.ConvTranspose2d(emb_dim, num_spk * 2, ks, padding=padding)
 
+        # Spatial encoder用のFiLM
+        self.use_spatial_encoder = use_spatial_encoder
+        if use_spatial_encoder:
+            self.film = FiLM(
+                embed_dim=spatial_embed_dim,
+                feature_dim=emb_dim
+            )
+
     def forward(
         self,
         input: torch.Tensor,
@@ -169,7 +181,13 @@ class TFLocoformerSeparatorSP(AbsSeparator):
         n_batch, _, n_frames, n_freqs = batch.shape
 
         with torch.cuda.amp.autocast(enabled=False):
-            batch = self.conv(batch)  # [B, -1, T, F]
+            batch = self.conv(batch)  # [B, emb_dim, T, F]
+
+        # Apply FiLM if spatial encoder is enabled
+        if self.use_spatial_encoder and additional is not None:
+            spatial_emb = additional.get("spatial_embedding")
+            if spatial_emb is not None:
+                batch = self.film(spatial_emb, batch)  # [B, emb_dim, T, F]
 
         # separation
         for ii in range(self.n_layers):

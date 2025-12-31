@@ -67,6 +67,8 @@ from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
 from espnet2.enh.separator.tflocoformer_separator_sp import TFLocoformerSeparatorSP
 from espnet2.enh.separator.transformer_separator import TransformerSeparator
 from espnet2.enh.separator.uses_separator import USESSeparator
+from espnet2.enh.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
+from espnet2.enh.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
@@ -187,6 +189,16 @@ diffusion_choices = ClassChoices(
     default=None,
 )
 
+spatial_encoder_choices = ClassChoices(
+    name="spatial_encoder",
+    classes=dict(
+        resnet2d=ResNet2DSpatialEncoder,
+    ),
+    type_check=AbsSpatialEncoder,
+    default=None,
+    optional=True,
+)
+
 
 MAX_REFERENCE_NUM = 100
 
@@ -208,6 +220,8 @@ class EnhancementTask(AbsTask):
         preprocessor_choices,
         # --diffusion_model and --diffusion_model_conf
         diffusion_choices,
+        # --spatial_encoder and --spatial_encoder_conf
+        spatial_encoder_choices,
     ]
 
     # If you need to modify train() or eval() procedures, change Trainer class here
@@ -502,8 +516,32 @@ class EnhancementTask(AbsTask):
     def build_model(cls, args: argparse.Namespace) -> ESPnetEnhancementModel:
 
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
+        
+        # Spatial encoderの構築（separator構築の前に必要）
+        spatial_encoder = None
+        spatial_encoder_conf = None
+        if getattr(args, "spatial_encoder", None) is not None:
+            spatial_encoder_conf = getattr(args, "spatial_encoder_conf", {})
+            # pathを除外してモデル構築に使用
+            spatial_encoder_conf_model = {
+                k: v for k, v in spatial_encoder_conf.items() if k != "path"
+            }
+            spatial_encoder = spatial_encoder_choices.get_class(args.spatial_encoder)(
+                **spatial_encoder_conf_model
+            )
+            
+            # separator_confにspatial_embed_dimが指定されていない場合、
+            # spatial_encoder_confのembedding_dimを使用
+            separator_conf = args.separator_conf.copy()
+            if "spatial_embed_dim" not in separator_conf:
+                embedding_dim = spatial_encoder_conf.get("embedding_dim")
+                if embedding_dim is not None:
+                    separator_conf["spatial_embed_dim"] = embedding_dim
+        else:
+            separator_conf = args.separator_conf
+        
         separator = separator_choices.get_class(args.separator)(
-            encoder.output_dim, **args.separator_conf
+            encoder.output_dim, **separator_conf
         )
         decoder = decoder_choices.get_class(args.decoder)(**args.decoder_conf)
 
@@ -548,6 +586,8 @@ class EnhancementTask(AbsTask):
                 decoder=decoder,
                 loss_wrappers=loss_wrappers,
                 mask_module=mask_module,
+                spatial_encoder=spatial_encoder,
+                spatial_encoder_conf=spatial_encoder_conf,
                 **args.model_conf,
             )
 

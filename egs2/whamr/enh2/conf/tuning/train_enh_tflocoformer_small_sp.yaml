@@ -81,11 +81,11 @@ separator_conf:
     # others
     eps: 1.0e-5
     use_spatial_encoder: true
+    spatial_embed_dim: &emb_dim 128
 spatial_encoder: resnet2d
 spatial_encoder_conf:
-    path: 
-    embedding_dim: 128
-    # 適切に
+    path: "path/to/spatial_encoder.pth"
+    embedding_dim: *emb_dim
 
 criterions:
     # The first criterion
