@@ -14,7 +14,7 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-CUDA_VISIBLE_DEVICES=5 ./enh_sp.sh \
+CUDA_VISIBLE_DEVICES=0 ./enh_sp.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
@@ -23,11 +23,11 @@ CUDA_VISIBLE_DEVICES=5 ./enh_sp.sh \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_small_sp.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_sp_repro \
+    --enh_exp exp/enh_train_enh_tflocoformer_small_sp \
     --use_dereverb_ref false \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
     --stage 5 \
-    --stop_stage 8 \
+    --stop_stage 6 \
     "$@"
