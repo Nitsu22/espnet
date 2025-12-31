@@ -84,7 +84,7 @@ separator_conf:
     spatial_embed_dim: &emb_dim 128
 spatial_encoder: resnet2d
 spatial_encoder_conf:
-    path: "path/to/spatial_encoder.pth"
+    path: "/net/midgar/work/nitsu/learning/sepformer/SepReformer/models202512/SepReformer_Tiny_WHAMRc_contrastive_pair_scratch_resnet10_ce/log/scratch_weights/epoch.0010.pth"
     embedding_dim: *emb_dim
 
 criterions:
