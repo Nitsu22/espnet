@@ -107,7 +107,23 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         if self.spatial_encoder is not None and self.spatial_encoder_conf is not None:
             spatial_encoder_path = self.spatial_encoder_conf.get("path")
             if spatial_encoder_path is not None and spatial_encoder_path != "":
-                state_dict = torch.load(spatial_encoder_path, map_location='cpu')
+                checkpoint = torch.load(spatial_encoder_path, map_location='cpu')
+                
+                # ESPnetの標準チェックポイント形式に対応
+                if isinstance(checkpoint, dict):
+                    # "model"キーがあればそれを使用（ESPnet標準形式）
+                    if "model" in checkpoint:
+                        state_dict = checkpoint["model"]
+                    # "model_state_dict"キーがあればそれを使用（一部のチェックポイント形式）
+                    elif "model_state_dict" in checkpoint:
+                        state_dict = checkpoint["model_state_dict"]
+                    else:
+                        # 直接state_dictの場合
+                        state_dict = checkpoint
+                else:
+                    # 直接state_dictの場合
+                    state_dict = checkpoint
+                
                 self.spatial_encoder.load_state_dict(state_dict)
         # set num_spk to -1 if None for compatibility with `espnet2.enh.diffusion_enh`
         self.num_spk = separator.num_spk if separator is not None else -1
