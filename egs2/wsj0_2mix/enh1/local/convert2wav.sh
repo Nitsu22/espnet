@@ -9,8 +9,9 @@ if ! command -v "${sph2pipe}" &> /dev/null; then
   exit 1;
 fi
 
-ndx2flist=$(dirname $0)/ndx2flist.pl
-flist2scp=$(dirname $0)/flist2scp.pl
+script_dir=$(cd $(dirname $0) && pwd)
+ndx2flist=${script_dir}/ndx2flist.pl
+flist2scp=${script_dir}/flist2scp.pl
 
 WSJ0=$1
 dir=$2
