@@ -5,28 +5,31 @@ set -e
 set -u
 set -o pipefail
 
-# Assumes existing /data and /dump already exist
-# This script adds reverse speaker position data (reverbse and anechoic_reverse) to existing data
-
-min_or_max=min # "min" or "max". This should match the existing data.
+min_or_max=min # "min" or "max". This is to determine how the mixtures are generated in local/data.sh.
 sample_rate=8k
 
-# Use existing dataset names (reverse data will be automatically added via --use_reverse_mix)
+
+
 train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-./enh_reverse.sh \
+CUDA_VISIBLE_DEVICES=0 ./enh.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
     --fs ${sample_rate} \
+    --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
+    --enh_config ./conf/tuning/train_enh_tflocoformer_small.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_small_pretrained \
     --use_dereverb_ref false \
     --use_noise_ref true \
+    --inference_model "valid.loss.ave_5best.pth" \
+    --gpu_inference true \
     --audio_format wav \
-    --stage 3 \
-    --stop_stage 4 \
-    --dumpdir dump_reverse \
+    --stage 7 \
+    --stop_stage 8 \
     "$@"
+
