@@ -1,0 +1,98 @@
+# pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/tt_mix_both_reverb_min_8k/logs/spk2/wav.32.scp dump_reverse/raw/tt_mix_both_reverb_min_8k/data/spk2/format.32 
+# Started at Sun Jan  4 03:39:35 JST 2026
+#
+2026-01-04 03:39:36,469 (format_wav_scp:151) INFO: /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python3 pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/tt_mix_both_reverb_min_8k/logs/spk2/wav.32.scp dump_reverse/raw/tt_mix_both_reverb_min_8k/data/spk2/format.32
+0it [00:00, ?it/s]
+0it [00:00, ?it/s][A1it [00:00,  1.17it/s]
+1it [00:00,  1.69it/s][A2it [00:01,  1.17it/s]
+2it [00:01,  1.34it/s][A3it [00:02,  1.33it/s]
+3it [00:02,  1.24it/s][A4it [00:03,  1.26it/s]
+4it [00:02,  1.38it/s][A5it [00:04,  1.21it/s]
+5it [00:03,  1.27it/s][A6it [00:04,  1.34it/s]
+6it [00:04,  1.39it/s][A7it [00:05,  1.44it/s]
+7it [00:04,  1.48it/s][A8it [00:06,  1.33it/s]
+8it [00:05,  1.35it/s][A9it [00:07,  1.18it/s]
+9it [00:06,  1.19it/s][A10it [00:08,  1.06it/s]
+10it [00:08,  1.07it/s][A11it [00:09,  1.09it/s]
+11it [00:08,  1.09it/s][A12it [00:10,  1.07s/it]
+12it [00:10,  1.07s/it][A13it [00:11,  1.01s/it]
+13it [00:11,  1.01s/it][A14it [00:12,  1.13it/s]
+14it [00:11,  1.13it/s][A15it [00:12,  1.25it/s]
+15it [00:12,  1.25it/s][A16it [00:13,  1.23it/s]
+16it [00:13,  1.23it/s][A17it [00:14,  1.34it/s]
+17it [00:13,  1.35it/s][A18it [00:15,  1.23it/s]
+18it [00:14,  1.23it/s][A19it [00:15,  1.22it/s]
+19it [00:15,  1.22it/s][A20it [00:16,  1.37it/s]
+20it [00:16,  1.37it/s][A21it [00:16,  1.62it/s]
+21it [00:16,  1.62it/s][A23it [00:17,  2.58it/s]
+23it [00:16,  2.59it/s][A24it [00:17,  2.93it/s]
+24it [00:16,  2.93it/s][A25it [00:17,  3.36it/s]
+25it [00:17,  3.36it/s][A26it [00:17,  3.83it/s]
+26it [00:17,  3.83it/s][A27it [00:17,  4.42it/s]
+27it [00:17,  4.42it/s][A28it [00:17,  5.07it/s]
+28it [00:17,  5.07it/s][A29it [00:17,  5.64it/s]
+29it [00:17,  5.64it/s][A30it [00:18,  6.11it/s]
+30it [00:17,  6.11it/s][A31it [00:18,  5.88it/s]
+31it [00:18,  5.88it/s][A32it [00:18,  6.35it/s]
+32it [00:18,  6.35it/s][A33it [00:18,  6.35it/s]
+33it [00:18,  6.35it/s][A34it [00:18,  6.31it/s]
+34it [00:18,  6.31it/s][A35it [00:18,  6.62it/s]
+35it [00:18,  6.62it/s][A36it [00:19,  5.48it/s]
+36it [00:18,  5.48it/s][A37it [00:19,  5.90it/s]
+37it [00:19,  5.90it/s][A38it [00:19,  6.55it/s]
+38it [00:19,  6.55it/s][A39it [00:19,  7.05it/s]
+39it [00:19,  7.05it/s][A40it [00:19,  6.55it/s]
+40it [00:19,  6.55it/s][A41it [00:19,  6.09it/s]
+41it [00:19,  6.09it/s][A42it [00:20,  6.14it/s]
+42it [00:19,  6.14it/s][A43it [00:20,  6.05it/s]
+43it [00:19,  6.05it/s][A44it [00:20,  5.61it/s]
+44it [00:20,  5.61it/s][A45it [00:20,  6.16it/s]
+45it [00:20,  6.16it/s][A46it [00:20,  5.47it/s]
+46it [00:20,  5.47it/s][A47it [00:20,  6.13it/s]
+47it [00:20,  6.13it/s][A48it [00:20,  6.82it/s]
+48it [00:20,  6.82it/s][A49it [00:21,  6.08it/s]
+49it [00:20,  6.08it/s][A50it [00:21,  6.59it/s]
+50it [00:21,  6.59it/s][A51it [00:21,  6.68it/s]
+51it [00:21,  6.68it/s][A52it [00:21,  7.22it/s]
+52it [00:21,  7.22it/s][A53it [00:21,  7.76it/s]
+53it [00:21,  7.76it/s][A54it [00:21,  6.87it/s]
+54it [00:21,  6.87it/s][A55it [00:22,  6.95it/s]
+55it [00:21,  6.95it/s][A56it [00:22,  7.34it/s]
+56it [00:21,  7.34it/s][A57it [00:22,  7.73it/s]
+57it [00:21,  7.73it/s][A58it [00:22,  6.49it/s]
+58it [00:22,  6.49it/s][A59it [00:22,  6.68it/s]
+59it [00:22,  6.68it/s][A60it [00:22,  6.79it/s]
+60it [00:22,  6.79it/s][A61it [00:22,  6.86it/s]
+61it [00:22,  6.86it/s][A62it [00:23,  7.07it/s]
+62it [00:22,  7.07it/s][A63it [00:23,  7.62it/s]
+63it [00:22,  7.62it/s][A64it [00:23,  6.83it/s]
+64it [00:23,  6.83it/s][A65it [00:23,  6.20it/s]
+65it [00:23,  6.20it/s][A66it [00:23,  5.51it/s]
+66it [00:23,  5.51it/s][A67it [00:23,  5.75it/s]
+67it [00:23,  5.75it/s][A69it [00:24,  6.98it/s]
+69it [00:23,  6.98it/s][A70it [00:24,  7.10it/s]
+70it [00:23,  7.10it/s][A71it [00:24,  7.30it/s]
+71it [00:24,  7.30it/s][A72it [00:24,  7.58it/s]
+72it [00:24,  7.58it/s][A73it [00:24,  7.59it/s]
+73it [00:24,  7.59it/s][A74it [00:24,  7.59it/s]
+74it [00:24,  7.59it/s][A75it [00:24,  7.66it/s]
+75it [00:24,  7.66it/s][A76it [00:25,  7.27it/s]
+76it [00:24,  7.27it/s][A77it [00:25,  7.12it/s]
+77it [00:24,  7.12it/s][A78it [00:25,  7.78it/s]
+78it [00:24,  7.78it/s][A80it [00:25,  8.96it/s]
+80it [00:25,  8.96it/s][A81it [00:25,  7.90it/s]
+81it [00:25,  7.90it/s][A82it [00:25,  7.36it/s]
+82it [00:25,  7.36it/s][A83it [00:25,  7.46it/s]
+83it [00:25,  7.46it/s][A85it [00:26,  7.99it/s]
+85it [00:25,  7.99it/s][A86it [00:26,  8.16it/s]
+86it [00:25,  8.16it/s][A87it [00:26,  7.24it/s]
+87it [00:26,  7.24it/s][A88it [00:26,  5.79it/s]
+88it [00:26,  5.79it/s][A89it [00:26,  5.58it/s]
+89it [00:26,  5.58it/s][A90it [00:27,  6.06it/s]
+90it [00:26,  6.06it/s][A91it [00:27,  5.83it/s]
+91it [00:26,  5.75it/s][A92it [00:27,  5.73it/s]
+92it [00:27,  5.76it/s][A93it [00:27,  5.93it/s]
+93it [00:27,  5.95it/s][A93it [00:27,  3.41it/s]
+93it [00:27,  3.38it/s]
+# Accounting: time=29 threads=1
+# Ended (code 0) at Sun Jan  4 03:40:04 JST 2026, elapsed time 29 seconds

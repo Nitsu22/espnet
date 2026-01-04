@@ -16,10 +16,15 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
+train_reverse_set=tr_mix_both_reverb_reverse_${min_or_max}_${sample_rate}
+valid_reverse_set=cv_mix_both_reverb_reverse_${min_or_max}_${sample_rate}
+
 ./enh_reverse.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
+    --train_reverse_set "${train_reverse_set}" \
+    --valid_reverse_set "${valid_reverse_set}" \
     --fs ${sample_rate} \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
