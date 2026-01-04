@@ -8,7 +8,7 @@ max_epoch: 150
 use_amp: false
 batch_type: folded
 batch_size: 4  # batch size 4 on 4 RTX 2080Ti
-num_workers: 4
+num_workers: 0
 
 # preprocessor
 preprocessor: enh
