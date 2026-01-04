@@ -1,7 +1,7 @@
 # pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/org/tr_mix_both_reverb_min_8k/logs/wav_reverse/wav.31.scp dump_reverse/raw/org/tr_mix_both_reverb_min_8k/data/wav_reverse/format.31 
-# Started at Sun Jan  4 05:13:31 JST 2026
+# Started at Sun Jan  4 23:39:38 JST 2026
 #
-2026-01-04 05:13:31,452 (format_wav_scp:151) INFO: /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python3 pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/org/tr_mix_both_reverb_min_8k/logs/wav_reverse/wav.31.scp dump_reverse/raw/org/tr_mix_both_reverb_min_8k/data/wav_reverse/format.31
+2026-01-04 23:39:40,888 (format_wav_scp:151) INFO: /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python3 pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/org/tr_mix_both_reverb_min_8k/logs/wav_reverse/wav.31.scp dump_reverse/raw/org/tr_mix_both_reverb_min_8k/data/wav_reverse/format.31
 0it [00:00, ?it/s]
 0it [00:00, ?it/s][A0it [00:00, ?it/s]
 0it [00:00, ?it/s]
@@ -19,5 +19,5 @@ Traceback (most recent call last):
   File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/site-packages/soundfile.py", line 1265, in _open
     raise LibsndfileError(err, prefix="Error opening {0!r}: ".format(self.name))
 soundfile.LibsndfileError: Error opening '/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh2/data/whamr/2speakers/wav8k/min/tr/mix_both_reverbse/40ja0111_0.1366_20go010m_-0.1366.wav': System error.
-# Accounting: time=1 threads=1
-# Ended (code 1) at Sun Jan  4 05:13:32 JST 2026, elapsed time 1 seconds
+# Accounting: time=3 threads=1
+# Ended (code 1) at Sun Jan  4 23:39:41 JST 2026, elapsed time 3 seconds

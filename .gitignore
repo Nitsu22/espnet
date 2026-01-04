@@ -104,4 +104,5 @@ tools/ffmpeg-release-*.tar.xz
 tools/Miniconda3-latest-*.sh
 
 qsub*.sh
+egs*/*/*/dump_reverse
 *.wav
