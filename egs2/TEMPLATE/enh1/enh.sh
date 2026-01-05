@@ -773,7 +773,7 @@ if ! "${skip_train}"; then
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
         else
-            train_module=espnet2.bin.enh_train_sp
+            train_module=espnet2.bin.enh_train
         fi
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \
