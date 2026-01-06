@@ -2298,3 +2298,7 @@ class S2TPreprocessor(CommonPreprocessor):
         data = self._text_process(data, round(init_pad / self.speech_resolution))
 
         return data
+
+
+# Import SePreprocessor from preprocessor_add.py
+from espnet2.train.preprocessor_add import SePreprocessor

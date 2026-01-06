@@ -2,11 +2,13 @@
 ResNet2D Spatial Encoder implementation.
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from espnet2.enh.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
+from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
 
 
 class WaveformNormalizer(nn.Module):
@@ -424,11 +426,22 @@ class SpatialResNetBranch(nn.Module):
 class ResNet2DSpatialEncoder(AbsSpatialEncoder):
     """Spatial ResNet Branch Encoder"""
     
-    def __init__(self, embedding_dim: int = 128):
+    def __init__(
+        self,
+        embedding_dim: int = 128,
+        num_channels_mc: int = 2,
+    ):
+        """Initialize ResNet2D Spatial Encoder.
+
+        Args:
+            embedding_dim: Embedding dimension
+            num_channels_mc: Number of channels for multi-channel input (default: 2)
+        """
         super().__init__()
         # Hardcode STFT parameters based on user's train_enh_tflocoformer_small_sp.yaml
         # n_fft: 256, hop_length: 64 => win_ms=32, hop_ms=8 for sr=8000
         self.model = SpatialResNetBranch(
+            num_channels_mc=num_channels_mc,
             projection_dim=32,  # Default from user's original code
             embed_dim=embedding_dim,
             sr=8000,  # Default from user's original code
@@ -437,20 +450,61 @@ class ResNet2DSpatialEncoder(AbsSpatialEncoder):
             n_fft=256,  # From user's yaml
             center=False  # From user's original code
         )
+        self.num_channels_mc = num_channels_mc
     
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        """
+    def forward(
+        self,
+        input: torch.Tensor,
+        num_channels: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Forward pass.
+
         Args:
             input: [B, T] or [B, C, T] - waveform
+            num_channels: Number of input channels (1 for SC, num_channels_mc for MC).
+                         If None, automatically determined from input shape.
+                         If specified, use this value to switch between SC/MC.
         Returns:
             embedding: [B, embed_dim] - spatial embedding
         """
-        if input.dim() == 2:
-            return self.model.forward_sc(input)
-        elif input.dim() == 3:
-            if input.shape[1] == 1:
-                return self.model.forward_sc(input.squeeze(1))
-            else:
-                return self.model.forward_mc(input)
+        # Determine number of channels
+        if num_channels is not None:
+            # Use explicitly specified channel number
+            use_sc = (num_channels == 1)
+            use_mc = (num_channels == self.num_channels_mc)
+            if not (use_sc or use_mc):
+                raise ValueError(
+                    f"num_channels must be 1 (SC) or {self.num_channels_mc} (MC), "
+                    f"but got {num_channels}"
+                )
         else:
-            raise ValueError(f"Unexpected input dim: {input.dim()}")
+            # Auto-detect from input shape
+            if input.dim() == 2:
+                # [B, T] -> SC
+                use_sc = True
+                use_mc = False
+            elif input.dim() == 3:
+                if input.shape[1] == 1:
+                    # [B, 1, T] -> SC
+                    use_sc = True
+                    use_mc = False
+                    input = input.squeeze(1)  # [B, 1, T] -> [B, T]
+                elif input.shape[1] == self.num_channels_mc:
+                    # [B, C_mc, T] -> MC
+                    use_sc = False
+                    use_mc = True
+                else:
+                    raise ValueError(
+                        f"Input channel dimension mismatch: expected 1 (SC) or "
+                        f"{self.num_channels_mc} (MC), but got {input.shape[1]}"
+                    )
+            else:
+                raise ValueError(f"Unexpected input dim: {input.dim()}")
+        
+        # Forward through appropriate branch
+        if use_sc:
+            return self.model.forward_sc(input)
+        elif use_mc:
+            return self.model.forward_mc(input)
+        else:
+            raise ValueError("Cannot determine whether to use SC or MC branch")
