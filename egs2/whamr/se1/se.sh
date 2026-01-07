@@ -72,6 +72,14 @@ download_model=
 inference_tag=  # Prefix to the result dir for SE inference.
 inference_enh_config= # Config for spatial encoder inference.
 
+# ASR evaluation related (not used in training, but needed for variable initialization)
+inference_asr_tag=    # Suffix to the result dir for decoding.
+inference_asr_config= # Config for ASR decoding.
+inference_asr_args=   # Arguments for ASR decoding.
+inference_asr_model=  # ASR model path for decoding.
+lm_exp=              # Language model experiment path.
+inference_lm=         # Language model path for decoding.
+
 # [Task dependent] Set the datadir name created by local/data.sh
 train_set=       # Name of training set.
 valid_set=       # Name of development set.
