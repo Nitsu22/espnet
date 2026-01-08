@@ -11,90 +11,6 @@ import math
 from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
 
 
-class WaveformNormalizer(nn.Module):
-    """
-    TF-GridNet流の波形正規化
-    入力mixtureのサンプル分散を1.0に正規化
-    """
-    def __init__(self, eps=1e-8):
-        super().__init__()
-        self.eps = eps
-    
-    def forward(self, x):
-        """
-        Args:
-            x: [B, C, L] or [B, L]
-        Returns:
-            normalized x: same shape as input
-        """
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # [B, L] -> [B, 1, L]
-        
-        # 各サンプル（バッチ要素）ごとに、そのサンプルの全チャネル・全時間にわたる分散を計算
-        # x: [B, C, L]
-        # 各サンプルごとに (C, L) 全体で分散を計算
-        var = x.var(dim=(1, 2), keepdim=True, unbiased=False)  # [B, 1, 1]
-        std = torch.sqrt(var + self.eps)  # [B, 1, 1]
-        x_norm = x / std  # [B, C, L]
-        
-        if x_norm.shape[1] == 1:
-            x_norm = x_norm.squeeze(1)  # [B, 1, L] -> [B, L]
-        
-        return x_norm
-
-
-class STFTProcessor(nn.Module):
-    """
-    TF-GridNet準拠のSTFT
-    - sr=8000, win_ms=32, hop_ms=8
-    - win_length=256, hop_length=64, n_fft=256
-    - Hann window, onesided=True, return_complex=True, center=False
-    """
-    def __init__(self, sr=8000, win_ms=32, hop_ms=8, n_fft=None, center=False):
-        super().__init__()
-        self.sr = sr
-        self.win_length = int(sr * win_ms / 1000)  # 256
-        self.hop_length = int(sr * hop_ms / 1000)  # 64
-        self.n_fft = n_fft if n_fft is not None else self.win_length  # 256
-        self.center = center
-        
-        # Hann window
-        self.register_buffer('window', torch.hann_window(self.win_length))
-    
-    def forward(self, x):
-        """
-        Args:
-            x: [B, C, L] or [B, L] - 波形
-        Returns:
-            X: [B, C, F, T] or [B, F, T] - 複素STFT
-        """
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # [B, L] -> [B, 1, L]
-        
-        B, C, L = x.shape
-        
-        # 各チャネルごとにSTFTを適用
-        X_list = []
-        for c in range(C):
-            x_c = x[:, c, :]  # [B, L]
-            X_c = torch.stft(
-                x_c,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length,
-                win_length=self.win_length,
-                window=self.window,
-                center=self.center,
-                return_complex=True,
-                normalized=False
-            )  # [B, F, T] (complex)
-            X_list.append(X_c)
-        
-        # Stack along channel dimension
-        X = torch.stack(X_list, dim=1)  # [B, C, F, T] (complex)
-        
-        return X
-
-
 class RIStack(nn.Module):
     """
     複素STFTをRIスタック（実数チャネル）に変換
@@ -299,12 +215,6 @@ class SpatialResNetBranch(nn.Module):
         num_channels_mc=2,
         projection_dim=32,
         embed_dim=256,
-        sr=8000,
-        win_ms=32,
-        hop_ms=8,
-        n_fft=256,
-        center=False,
-        eps_norm=1e-8,
         eps_gln=1e-5,
         eps_embed=1e-8
     ):
@@ -313,12 +223,6 @@ class SpatialResNetBranch(nn.Module):
             num_channels_mc: MCのチャネル数（固定、デフォルト2）
             projection_dim: チャネル投影のD（デフォルト32）
             embed_dim: 埋め込み次元（デフォルト256）
-            sr: サンプリングレート（デフォルト8000）
-            win_ms: STFT window size in ms（デフォルト32）
-            hop_ms: STFT hop size in ms（デフォルト8）
-            n_fft: FFT点数（デフォルト256）
-            center: STFT center（デフォルトFalse）
-            eps_norm: 波形正規化用eps（デフォルト1e-8）
             eps_gln: gLN用eps（デフォルト1e-5）
             eps_embed: Embedding正規化用eps（デフォルト1e-8）
         """
@@ -329,8 +233,6 @@ class SpatialResNetBranch(nn.Module):
         self.embed_dim = embed_dim
         
         # 前処理モジュール（共有）
-        self.waveform_normalizer = WaveformNormalizer(eps=eps_norm)
-        self.stft_processor = STFTProcessor(sr=sr, win_ms=win_ms, hop_ms=hop_ms, n_fft=n_fft, center=center)
         self.ri_stack = RIStack()
         
         # チャネル投影層（別々）
@@ -348,20 +250,20 @@ class SpatialResNetBranch(nn.Module):
         # Trunk出力は128チャネル、GlobalStatsPool後は256次元
         self.embedding_head = EmbeddingHead(in_dim=256, embed_dim=embed_dim, eps=eps_embed)
     
-    def forward_sc(self, x_sc):
+    def forward_sc(self, X_sc):
         """
         SC枝のforward
         Args:
-            x_sc: [B, 1, L] or [B, L] - 生波形（1ch）
+            X_sc: [B, T, F] - STFT spectrum (complex)
         Returns:
             e_sc: [B, embed_dim] - 埋め込み（L2正規化済み）
         """
-        # 前処理
-        x_norm = self.waveform_normalizer(x_sc)  # [B, 1, L] or [B, L]
-        if x_norm.dim() == 2:
-            x_norm = x_norm.unsqueeze(1)  # [B, L] -> [B, 1, L]
+        # 入力形式変換: [B, T, F] -> [B, 1, F, T]
+        # X_sc: [B, T, F] (complex)
+        X = X_sc.permute(0, 2, 1)  # [B, T, F] -> [B, F, T]
+        X = X.unsqueeze(1)  # [B, F, T] -> [B, 1, F, T]
         
-        X = self.stft_processor(x_norm)  # [B, 1, F, T] (complex)
+        # RIスタック
         X_ri = self.ri_stack(X)  # [B, 2, F, T] (real)
         
         # チャネル投影
@@ -376,18 +278,19 @@ class SpatialResNetBranch(nn.Module):
         
         return e
     
-    def forward_mc(self, x_mc):
+    def forward_mc(self, X_mc):
         """
         MC枝のforward
         Args:
-            x_mc: [B, C_mc, L] - 生波形（C_mc=2）
+            X_mc: [B, T, C_mc, F] - STFT spectrum (complex, C_mc=2)
         Returns:
             e_mc: [B, embed_dim] - 埋め込み（L2正規化済み）
         """
-        # 前処理
-        x_norm = self.waveform_normalizer(x_mc)  # [B, C_mc, L]
+        # 入力形式変換: [B, T, C_mc, F] -> [B, C_mc, F, T]
+        # X_mc: [B, T, C_mc, F] (complex)
+        X = X_mc.permute(0, 2, 3, 1)  # [B, T, C_mc, F] -> [B, C_mc, F, T]
         
-        X = self.stft_processor(x_norm)  # [B, C_mc, F, T] (complex)
+        # RIスタック
         X_ri = self.ri_stack(X)  # [B, 2*C_mc, F, T] (real)
         
         # チャネル投影
@@ -402,25 +305,47 @@ class SpatialResNetBranch(nn.Module):
         
         return e
     
-    def forward(self, x):
+    def forward(self, X, num_channels=None):
         """
-        デフォルトforward（後方互換性のため）
+        デフォルトforward
         SCかMCかを自動判定（チャネル数で判定）
         Args:
-            x: [B, C, L] - 生波形
+            X: [B, T, F] or [B, T, C, F] - STFT spectrum (complex)
+            num_channels: Number of channels (1 for SC, num_channels_mc for MC).
+                         If None, automatically determined from input shape.
         Returns:
             e: [B, embed_dim] - 埋め込み
         """
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # [B, L] -> [B, 1, L]
+        if num_channels is not None:
+            if num_channels == 1:
+                return self.forward_sc(X)
+            elif num_channels == self.num_channels_mc:
+                return self.forward_mc(X)
+            else:
+                raise ValueError(
+                    f"Unexpected num_channels: {num_channels}. "
+                    f"Expected 1 (SC) or {self.num_channels_mc} (MC)"
+                )
         
-        C = x.shape[1]
-        if C == 1:
-            return self.forward_sc(x)
-        elif C == self.num_channels_mc:
-            return self.forward_mc(x)
+        # Auto-detect from input shape
+        if X.ndim == 3:
+            # [B, T, F] -> SC
+            return self.forward_sc(X)
+        elif X.ndim == 4:
+            # [B, T, C, F] -> MC
+            C = X.shape[2]
+            if C == 1:
+                # [B, T, 1, F] -> squeeze to [B, T, F] and treat as SC
+                return self.forward_sc(X.squeeze(2))
+            elif C == self.num_channels_mc:
+                return self.forward_mc(X)
+            else:
+                raise ValueError(
+                    f"Unexpected number of channels: {C}. "
+                    f"Expected 1 (SC) or {self.num_channels_mc} (MC)"
+                )
         else:
-            raise ValueError(f"Unexpected number of channels: {C}. Expected 1 (SC) or {self.num_channels_mc} (MC)")
+            raise ValueError(f"Unexpected input dim: {X.ndim}. Expected 3 or 4")
 
 
 class ResNet2DSpatialEncoder(AbsSpatialEncoder):
@@ -438,73 +363,28 @@ class ResNet2DSpatialEncoder(AbsSpatialEncoder):
             num_channels_mc: Number of channels for multi-channel input (default: 2)
         """
         super().__init__()
-        # Hardcode STFT parameters based on user's train_enh_tflocoformer_small_sp.yaml
-        # n_fft: 256, hop_length: 64 => win_ms=32, hop_ms=8 for sr=8000
         self.model = SpatialResNetBranch(
             num_channels_mc=num_channels_mc,
             projection_dim=32,  # Default from user's original code
             embed_dim=embedding_dim,
-            sr=8000,  # Default from user's original code
-            win_ms=32,  # Derived from n_fft=256, sr=8000
-            hop_ms=8,   # Derived from hop_length=64, sr=8000
-            n_fft=256,  # From user's yaml
-            center=False  # From user's original code
         )
         self.num_channels_mc = num_channels_mc
     
     def forward(
         self,
         input: torch.Tensor,
+        ilens: torch.Tensor,
         num_channels: Optional[int] = None,
     ) -> torch.Tensor:
         """Forward pass.
 
         Args:
-            input: [B, T] or [B, C, T] - waveform
+            input: [B, T, F] or [B, T, C, F] - STFT spectrum (complex)
+            ilens: [B] - input lengths (not used in this implementation)
             num_channels: Number of input channels (1 for SC, num_channels_mc for MC).
                          If None, automatically determined from input shape.
                          If specified, use this value to switch between SC/MC.
         Returns:
             embedding: [B, embed_dim] - spatial embedding
         """
-        # Determine number of channels
-        if num_channels is not None:
-            # Use explicitly specified channel number
-            use_sc = (num_channels == 1)
-            use_mc = (num_channels == self.num_channels_mc)
-            if not (use_sc or use_mc):
-                raise ValueError(
-                    f"num_channels must be 1 (SC) or {self.num_channels_mc} (MC), "
-                    f"but got {num_channels}"
-                )
-        else:
-            # Auto-detect from input shape
-            if input.dim() == 2:
-                # [B, T] -> SC
-                use_sc = True
-                use_mc = False
-            elif input.dim() == 3:
-                if input.shape[1] == 1:
-                    # [B, 1, T] -> SC
-                    use_sc = True
-                    use_mc = False
-                    input = input.squeeze(1)  # [B, 1, T] -> [B, T]
-                elif input.shape[1] == self.num_channels_mc:
-                    # [B, C_mc, T] -> MC
-                    use_sc = False
-                    use_mc = True
-                else:
-                    raise ValueError(
-                        f"Input channel dimension mismatch: expected 1 (SC) or "
-                        f"{self.num_channels_mc} (MC), but got {input.shape[1]}"
-                    )
-            else:
-                raise ValueError(f"Unexpected input dim: {input.dim()}")
-        
-        # Forward through appropriate branch
-        if use_sc:
-            return self.model.forward_sc(input)
-        elif use_mc:
-            return self.model.forward_mc(input)
-        else:
-            raise ValueError("Cannot determine whether to use SC or MC branch")
+        return self.model(input, num_channels=num_channels)

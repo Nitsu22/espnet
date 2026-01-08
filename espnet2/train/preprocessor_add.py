@@ -188,43 +188,61 @@ class SePreprocessor(CommonPreprocessor):
 
         if self.train:
             # Random cropping if speech_segment is specified
+            # Same as EnhPreprocessor: crop in [Time] or [Time, Nmic] format
             if self.speech_segment is not None:
                 speech_segment = self.speech_segment // self.sample_rate * fs
                 start, end = self._random_crop_range(
                     data, speech_segment, uid=uid
                 )
-                # Apply same cropping range to all signals
+                # Apply same cropping range to all signals (same as EnhPreprocessor)
                 self._apply_to_speech_mix(data, lambda x: x[start:end])
                 data["speech_mix_mc"] = data["speech_mix_mc"][start:end]
                 data["speech_mix_reverse_mc"] = data["speech_mix_reverse_mc"][start:end]
 
-            # speech_mix processing (keep original logic from EnhPreprocessor)
-            speech_mix = self._ensure_2d(data[self.speech_name])
-            # Note: RIR and Noise processing are removed, but speech_mix processing flow is kept
+            # Process speech_mix (same as EnhPreprocessor with force_single_channel=True)
+            # 1. _ensure_2d converts to [Nmic, Time] format
+            speech_mix = self._ensure_2d(data[self.speech_name])  # [Nmic, Time]
+            # Note: RIR, Noise, and data_aug processing are removed for SE task
 
-            data[self.speech_name] = speech_mix.T
+            # 2. Convert to [Time, Nmic] format (same as EnhPreprocessor line 1403)
+            data[self.speech_name] = speech_mix.T  # [Time, Nmic]
+            # 3. Normalize if max abs > 1.0 (same as EnhPreprocessor lines 1404-1406)
             ma = np.max(np.abs(data[self.speech_name]))
             if ma > 1.0:
                 self._apply_to_speech_mix(data, lambda x: x / ma)
 
+            # 4. squeeze: only for speech_mix (same as EnhPreprocessor line 1408)
             self._apply_to_speech_mix(data, lambda x: x.squeeze())
 
-            # speech_mix_mc processing (force_single_channel=False version)
-            speech_mix_mc = self._ensure_2d(data["speech_mix_mc"])
-            data["speech_mix_mc"] = speech_mix_mc.T
+            # Process speech_mix_mc (same as EnhPreprocessor with force_single_channel=False)
+            # Note: squeeze() is applied regardless of force_single_channel in EnhPreprocessor (line 1408)
+            # 1. _ensure_2d converts to [Nmic, Time] format
+            speech_mix_mc = self._ensure_2d(data["speech_mix_mc"])  # [Nmic, Time]
+            # 2. Convert to [Time, Nmic] format
+            data["speech_mix_mc"] = speech_mix_mc.T  # [Time, Nmic]
+            # 3. Normalize if max abs > 1.0
             ma_mc = np.max(np.abs(data["speech_mix_mc"]))
             if ma_mc > 1.0:
                 data["speech_mix_mc"] = data["speech_mix_mc"] / ma_mc
-            # No squeeze for MC (keep multi-channel)
+            # 4. squeeze: same as EnhPreprocessor (applied regardless of force_single_channel)
+            # For multi-channel [Time, Nmic] where Nmic > 1, squeeze has no effect
+            data["speech_mix_mc"] = data["speech_mix_mc"].squeeze()
 
-            # speech_mix_reverse_mc processing (force_single_channel=False version)
-            speech_mix_reverse_mc = self._ensure_2d(data["speech_mix_reverse_mc"])
-            data["speech_mix_reverse_mc"] = speech_mix_reverse_mc.T
+            # Process speech_mix_reverse_mc (same as speech_mix_mc)
+            # 1. _ensure_2d converts to [Nmic, Time] format
+            speech_mix_reverse_mc = self._ensure_2d(data["speech_mix_reverse_mc"])  # [Nmic, Time]
+            # 2. Convert to [Time, Nmic] format
+            data["speech_mix_reverse_mc"] = speech_mix_reverse_mc.T  # [Time, Nmic]
+            # 3. Normalize if max abs > 1.0
             ma_rev = np.max(np.abs(data["speech_mix_reverse_mc"]))
             if ma_rev > 1.0:
                 data["speech_mix_reverse_mc"] = data["speech_mix_reverse_mc"] / ma_rev
-            # No squeeze for MC (keep multi-channel)
+            # 4. squeeze: same as EnhPreprocessor (applied regardless of force_single_channel)
+            # For multi-channel [Time, Nmic] where Nmic > 1, squeeze has no effect
+            data["speech_mix_reverse_mc"] = data["speech_mix_reverse_mc"].squeeze()
 
+        # Apply force_single_channel only to speech_mix (same as EnhPreprocessor lines 1410-1413)
+        # Note: speech_mix_mc and speech_mix_reverse_mc are NOT affected by force_single_channel
         if self.force_single_channel:
             self._apply_to_speech_mix(
                 data, lambda x: x if x.ndim == 1 else x[:, 0]

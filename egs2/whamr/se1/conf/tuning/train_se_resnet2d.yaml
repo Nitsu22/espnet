@@ -23,6 +23,10 @@ preprocessor_conf:
     avoid_allzero_segment: true
 
 # Spatial Encoder model configuration
+encoder: &encoder stft
+encoder_conf:
+    n_fft: &n_fft 256
+    hop_length: &hop_length 64
 spatial_encoder: resnet2d
 spatial_encoder_conf:
     embedding_dim: 128

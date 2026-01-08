@@ -10,6 +10,7 @@ from espnet2.train.abs_espnet_model import AbsESPnetModel
 
 # Type hint for forward reference
 if TYPE_CHECKING:
+    from espnet2.enh.encoder.abs_encoder import AbsEncoder
     from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import (
         AbsSpatialEncoder,
     )
@@ -24,17 +25,20 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
     @typechecked
     def __init__(
         self,
+        encoder: "AbsEncoder",
         spatial_encoder: "AbsSpatialEncoder",
         loss_wrappers: Optional[List] = None,
     ):
         """Initialize Spatial Encoder model.
 
         Args:
+            encoder: Waveform encoder that converts waveforms to feature representations
             spatial_encoder: Spatial encoder module (e.g., ResNet2DSpatialEncoder)
             loss_wrappers: List of loss wrappers for training
         """
         super().__init__()
         
+        self.encoder = encoder
         self.spatial_encoder = spatial_encoder
         
         self.loss_wrappers = loss_wrappers
@@ -103,6 +107,26 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         # Positive: MC (mix)
         # Negative: MC (reverse)
         
+        # Get sampling frequency if available
+        fs = kwargs.get("utt2fs", None)
+        if fs is not None:
+            # All samples must have the same sampling rate
+            fs = fs[0].item()
+            assert all([fs == f.item() for f in kwargs["utt2fs"]])
+        else:
+            fs = None
+        
+        # for data-parallel
+        speech_mix = speech_mix[:, : speech_lengths.max()]
+        if "speech_mix_mc" in kwargs:
+            speech_mix_mc = kwargs["speech_mix_mc"]  # [B, T, C]
+            speech_mix_mc = speech_mix_mc[:, : speech_lengths.max(), :]
+            kwargs["speech_mix_mc"] = speech_mix_mc
+        if "speech_mix_reverse_mc" in kwargs:
+            speech_mix_reverse_mc = kwargs["speech_mix_reverse_mc"]  # [B, T, C]
+            speech_mix_reverse_mc = speech_mix_reverse_mc[:, : speech_lengths.max(), :]
+            kwargs["speech_mix_reverse_mc"] = speech_mix_reverse_mc
+        
         if "embedding_anchor" in kwargs:
             # Use provided anchor embedding
             embedding_anchor = kwargs["embedding_anchor"]
@@ -114,16 +138,20 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
                     "speech_mix must be SC (1ch) when computing anchor embedding. "
                     "If speech_mix is MC, provide embedding_anchor via kwargs."
                 )
+            # Encode waveform to spectrum
+            feature_mix, flens = self.encoder(speech_mix, speech_lengths, fs=fs)  # [B, T, F] (complex)
             # Explicitly specify num_channels=1 for SC
-            embedding_anchor = self.spatial_encoder(speech_mix, num_channels=1)  # [B, embed_dim]
+            embedding_anchor = self.spatial_encoder(feature_mix, flens, num_channels=1)  # [B, embed_dim]
         
         # Positive: MC (mix)
         if "embedding_pos" in kwargs:
             embedding_pos = kwargs["embedding_pos"]
         elif "speech_mix_mc" in kwargs:
-            speech_mix_mc = kwargs["speech_mix_mc"]  # [B, C, T]
+            speech_mix_mc = kwargs["speech_mix_mc"]  # [B, T, C]
+            # Encode waveform to spectrum
+            feature_mc, flens_mc = self.encoder(speech_mix_mc, speech_lengths, fs=fs)  # [B, T, C, F] (complex)
             # Explicitly specify num_channels=num_channels_mc for MC
-            embedding_pos = self.spatial_encoder(speech_mix_mc, num_channels=num_channels_mc)  # [B, embed_dim]
+            embedding_pos = self.spatial_encoder(feature_mc, flens_mc, num_channels=num_channels_mc)  # [B, embed_dim]
         else:
             embedding_pos = None
         
@@ -131,9 +159,11 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         if "embedding_neg" in kwargs:
             embedding_neg = kwargs["embedding_neg"]
         elif "speech_mix_reverse_mc" in kwargs:
-            speech_mix_reverse_mc = kwargs["speech_mix_reverse_mc"]  # [B, C, T]
+            speech_mix_reverse_mc = kwargs["speech_mix_reverse_mc"]  # [B, T, C]
+            # Encode waveform to spectrum
+            feature_reverse_mc, flens_reverse_mc = self.encoder(speech_mix_reverse_mc, speech_lengths, fs=fs)  # [B, T, C, F] (complex)
             # Explicitly specify num_channels=num_channels_mc for MC
-            embedding_neg = self.spatial_encoder(speech_mix_reverse_mc, num_channels=num_channels_mc)  # [B, embed_dim]
+            embedding_neg = self.spatial_encoder(feature_reverse_mc, flens_reverse_mc, num_channels=num_channels_mc)  # [B, embed_dim]
         else:
             embedding_neg = None
         

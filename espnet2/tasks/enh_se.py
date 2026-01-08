@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from typeguard import typechecked
 
+from espnet2.enh.encoder.abs_encoder import AbsEncoder
+from espnet2.enh_se.encoder.stft_encoder import STFTEncoder
 from espnet2.enh_se.espnet_model import ESPnetSpatialEncoderModel
 from espnet2.enh_se.loss.criterions.abs_loss import AbsSELoss
 from espnet2.enh_se.loss.criterions.contrastive_loss import PairwiseNegativeLoss
@@ -33,6 +35,13 @@ from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
+
+encoder_choices = ClassChoices(
+    name="encoder",
+    classes=dict(stft=STFTEncoder),
+    type_check=AbsEncoder,
+    default="stft",
+)
 
 spatial_encoder_choices = ClassChoices(
     name="spatial_encoder",
@@ -68,6 +77,8 @@ class SpatialEncoderTask(AbsTask):
     num_optimizers: int = 1
 
     class_choices_list = [
+        # --encoder and --encoder_conf
+        encoder_choices,
         # --spatial_encoder and --spatial_encoder_conf
         spatial_encoder_choices,
         # --preprocessor and --preprocessor_conf
@@ -291,6 +302,7 @@ class SpatialEncoderTask(AbsTask):
     @typechecked
     def build_model(cls, args: argparse.Namespace) -> ESPnetSpatialEncoderModel:
 
+        encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
         spatial_encoder = spatial_encoder_choices.get_class(args.spatial_encoder)(
             **args.spatial_encoder_conf
         )
@@ -310,6 +322,7 @@ class SpatialEncoderTask(AbsTask):
 
         # Build model
         model = ESPnetSpatialEncoderModel(
+            encoder=encoder,
             spatial_encoder=spatial_encoder,
             loss_wrappers=loss_wrappers,
             **args.model_conf,
