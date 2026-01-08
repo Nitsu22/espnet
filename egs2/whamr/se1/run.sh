@@ -22,8 +22,9 @@ valid_set_reverse=cv_mix_both_reverb_reverse_${min_or_max}_${sample_rate}
     --train_set_reverse "${train_set_reverse}" \
     --valid_set_reverse "${valid_set_reverse}" \
     --fs ${sample_rate} \
-    --ngpu 2 \
+    --ngpu 1 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_se_resnet2d.yaml \
     --audio_format wav \
+    --stage 6 \
     "$@"

@@ -287,12 +287,12 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
-        # speech_mix and speech_mix_mc come from dumpdir, speech_mix_reverse_mc comes from dumpdir_reverse
+        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from dumpdir_reverse
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/speech_mix_mc.scp,speech_mix_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix_mc,${_type} "
         _train_data_param+="--train_data_path_and_name_and_type ${data_feats_reverse}/${train_set_reverse}/wav.scp,speech_mix_reverse_mc,${_type} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/speech_mix_mc.scp,speech_mix_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
         _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats_reverse}/${valid_set_reverse}/wav.scp,speech_mix_reverse_mc,${_type} "
 
         # NOTE: --*_shape_file doesn't require length information if --batch_type=unsorted,
@@ -345,9 +345,9 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
-        # speech_mix and speech_mix_mc come from dumpdir, speech_mix_reverse_mc comes from dumpdir_reverse
+        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from dumpdir_reverse
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/speech_mix_mc.scp,speech_mix_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix_mc,${_type} "
         _train_data_param+="--train_data_path_and_name_and_type ${data_feats_reverse}/${train_set_reverse}/wav.scp,speech_mix_reverse_mc,${_type} "
         _train_shape_param="--train_shape_file ${enh_stats_dir}/train/speech_mix_shape "
         _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_mix_mc_shape "
@@ -356,7 +356,7 @@ if ! "${skip_train}"; then
         _fold_length_param+="--fold_length ${_fold_length} "
         _fold_length_param+="--fold_length ${_fold_length} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/speech_mix_mc.scp,speech_mix_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
         _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats_reverse}/${valid_set_reverse}/wav.scp,speech_mix_reverse_mc,${_type} "
         _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
         _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_mc_shape "

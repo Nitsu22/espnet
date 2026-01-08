@@ -127,6 +127,27 @@ if ! "${skip_data_prep}"; then
                     "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
                     "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
             done
+            
+            # Convert keys from _reverse to _reverb to match dump side
+            # This must be done AFTER format_wav_scp.sh to ensure the output wav.scp has correct keys
+            # Only the first column (utt_id) should be converted, not file paths
+            if [ -f "${data_feats}${_suf}/${dset}/wav.scp" ]; then
+                awk '{if ($1 ~ /_reverse$/) sub(/_reverse$/, "_reverb", $1); print}' "${data_feats}${_suf}/${dset}/wav.scp" > "${data_feats}${_suf}/${dset}/wav.scp.tmp"
+                mv "${data_feats}${_suf}/${dset}/wav.scp.tmp" "${data_feats}${_suf}/${dset}/wav.scp"
+            fi
+            
+            # Also convert utt2spk keys from _reverse to _reverb
+            if [ -f "${data_feats}${_suf}/${dset}/utt2spk" ]; then
+                awk '{if ($1 ~ /_reverse$/) sub(/_reverse$/, "_reverb", $1); print}' "${data_feats}${_suf}/${dset}/utt2spk" > "${data_feats}${_suf}/${dset}/utt2spk.tmp"
+                mv "${data_feats}${_suf}/${dset}/utt2spk.tmp" "${data_feats}${_suf}/${dset}/utt2spk"
+                utils/utt2spk_to_spk2utt.pl "${data_feats}${_suf}/${dset}/utt2spk" > "${data_feats}${_suf}/${dset}/spk2utt"
+            fi
+            
+            # Also convert utt2num_samples keys from _reverse to _reverb if it exists
+            if [ -f "${data_feats}${_suf}/${dset}/utt2num_samples" ]; then
+                awk '{if ($1 ~ /_reverse$/) sub(/_reverse$/, "_reverb", $1); print}' "${data_feats}${_suf}/${dset}/utt2num_samples" > "${data_feats}${_suf}/${dset}/utt2num_samples.tmp"
+                mv "${data_feats}${_suf}/${dset}/utt2num_samples.tmp" "${data_feats}${_suf}/${dset}/utt2num_samples"
+            fi
 
             for f in $extra_wav_list; do
                 if [ -e "data/${dset}/$f" ]; then
@@ -142,7 +163,11 @@ if ! "${skip_data_prep}"; then
             echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
 
             for f in ${utt_extra_files}; do
-                [ -f data/${dset}/${f} ] && cp data/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
+                if [ -f data/${dset}/${f} ]; then
+                    # Convert keys from _reverse to _reverb to match dump side
+                    # Only the first column (utt_id) should be converted
+                    awk '{if ($1 ~ /_reverse$/) sub(/_reverse$/, "_reverb", $1); print}' data/${dset}/${f} > ${data_feats}${_suf}/${dset}/${f}
+                fi
             done
 
         done
@@ -173,6 +198,7 @@ if ! "${skip_data_prep}"; then
             _max_length=$(python3 -c "print(int(${max_wav_duration} * ${_fs}))")
 
             # utt2num_samples is created by format_wav_scp.sh
+            # Keys should already be converted to _reverb in Stage 3
             <"${data_feats}/org/${dset}/utt2num_samples" \
                 awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
                     '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
