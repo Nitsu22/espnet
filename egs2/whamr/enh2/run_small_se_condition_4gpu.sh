@@ -14,7 +14,7 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 CUDA_VISIBLE_DEVICES=0 ./enh_se_condition.sh \
+CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh_se_condition.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
@@ -28,6 +28,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 CUDA_VISIBLE_DEVICES=0 ./enh_se_condition.sh \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --stage 5 \
-    --stop_stage 6 \
+    --stage 6 \
+    --stop_stage 8 \
     "$@"
