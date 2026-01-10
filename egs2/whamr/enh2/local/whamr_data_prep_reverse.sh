@@ -91,8 +91,8 @@ for x in tr cv tt; do
     # reverb scps (use reverbse directory if available, otherwise use original reverb)
     # Note: s1_reverbse and s2_reverbse may not exist if create_wham_from_scratch_reverse.py doesn't save them
     if [ -d ${rootdir}/s1_reverbse ] && [ -d ${rootdir}/s2_reverbse ]; then
-      spk1_wav_dir=${rootdir}/s1_reverbse
-      spk2_wav_dir=${rootdir}/s2_reverbse
+      spk1_wav_dir=${rootdir}/s1_reverse
+      spk2_wav_dir=${rootdir}/s2_reverse
     else
       # Fallback to original reverb (positions are reversed in the room simulation)
       spk1_wav_dir=${rootdir}/s1_reverb

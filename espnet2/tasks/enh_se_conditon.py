@@ -21,7 +21,7 @@ from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh.encoder.conv_encoder import ConvEncoder
 from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
-from espnet2.enh.espnet_model import ESPnetEnhancementModel
+from espnet2.enh.espnet_model_sp import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tf_domain import (
     FrequencyDomainAbsCoherence,
@@ -64,9 +64,11 @@ from espnet2.enh.separator.tcn_separator import TCNSeparator
 from espnet2.enh.separator.tfgridnet_separator import TFGridNet
 from espnet2.enh.separator.tfgridnetv2_separator import TFGridNetV2
 from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
-from espnet2.enh.separator.tflocoformer_separator_mc import TFLocoformerSeparatorMC
+from espnet2.enh.separator.tflocoformer_separator_sp import TFLocoformerSeparatorSP
 from espnet2.enh.separator.transformer_separator import TransformerSeparator
 from espnet2.enh.separator.uses_separator import USESSeparator
+from espnet2.enh.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
+from espnet2.enh.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
@@ -115,7 +117,7 @@ separator_choices = ClassChoices(
         tfgridnetv2=TFGridNetV2,
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
-        tflocoformer_mc=TFLocoformerSeparatorMC,
+        tflocoformer_sp=TFLocoformerSeparatorSP,
     ),
     type_check=AbsSeparator,
     default="rnn",
@@ -187,6 +189,16 @@ diffusion_choices = ClassChoices(
     default=None,
 )
 
+spatial_encoder_choices = ClassChoices(
+    name="spatial_encoder",
+    classes=dict(
+        resnet2d=ResNet2DSpatialEncoder,
+    ),
+    type_check=AbsSpatialEncoder,
+    default=None,
+    optional=True,
+)
+
 
 MAX_REFERENCE_NUM = 100
 
@@ -208,6 +220,8 @@ class EnhancementTask(AbsTask):
         preprocessor_choices,
         # --diffusion_model and --diffusion_model_conf
         diffusion_choices,
+        # --spatial_encoder and --spatial_encoder_conf
+        spatial_encoder_choices,
     ]
 
     # If you need to modify train() or eval() procedures, change Trainer class here
@@ -502,8 +516,29 @@ class EnhancementTask(AbsTask):
     def build_model(cls, args: argparse.Namespace) -> ESPnetEnhancementModel:
 
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
+        
+        # separator_confにspatial_encoder関連の設定を追加
+        separator_conf = args.separator_conf.copy()
+        if getattr(args, "spatial_encoder", None) is not None:
+            spatial_encoder_conf = getattr(args, "spatial_encoder_conf", {})
+            
+            # separator_confにspatial_embed_dimが指定されていない場合、
+            # spatial_encoder_confのembedding_dimを使用
+            if "spatial_embed_dim" not in separator_conf:
+                embedding_dim = spatial_encoder_conf.get("embedding_dim")
+                if embedding_dim is not None:
+                    separator_conf["spatial_embed_dim"] = embedding_dim
+            
+            # separator_confにspatial_encoder関連の設定を追加
+            separator_conf["use_spatial_encoder"] = True
+            separator_conf["spatial_encoder_path"] = spatial_encoder_conf.get("path")
+            separator_conf["spatial_encoder_trainable"] = spatial_encoder_conf.get("trainable", False)
+            separator_conf["num_channels_mc"] = spatial_encoder_conf.get("num_channels_mc", 2)
+        else:
+            separator_conf["use_spatial_encoder"] = False
+        
         separator = separator_choices.get_class(args.separator)(
-            encoder.output_dim, **args.separator_conf
+            encoder.output_dim, **separator_conf
         )
         decoder = decoder_choices.get_class(args.decoder)(**args.decoder_conf)
 

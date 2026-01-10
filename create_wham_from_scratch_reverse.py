@@ -80,8 +80,8 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                                                                       noise_samples_temp, 'max',
                                                                       start_samp_16k=0)  # don't pad beginning yet
 
-            # Reverse audio order to match reversed positions
-            room.add_audio(s2_temp, s1_temp)
+            # Keep audio order; only positions are reversed
+            room.add_audio(s1_temp, s2_temp)
 
             anechoic = room.generate_audio(anechoic=True, fs=SAMPLE_RATES)
             reverberant = room.generate_audio(fs=SAMPLE_RATES)
@@ -112,11 +112,9 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     s2 = quantize(s2) * scaling_npz[wham_speech_key][i_utt]
 
                     # Make relative source energy of anechoic sources same with original in mono (left channel) case
-                    # Note: positions are reversed, so indices are swapped
-                    # anechoic[sr_i][0, ...] is now at s2's original position (used for s2)
-                    # anechoic[sr_i][1, ...] is now at s1's original position (used for s1)
-                    s1_spatial_scaling = np.sqrt(np.sum(s1 ** 2) / np.sum(anechoic[sr_i][1, LEFT_CH_IND, :] ** 2))
-                    s2_spatial_scaling = np.sqrt(np.sum(s2 ** 2) / np.sum(anechoic[sr_i][0, LEFT_CH_IND, :] ** 2))
+                    # Note: positions are reversed, but indices still follow speaker identity
+                    s1_spatial_scaling = np.sqrt(np.sum(s1 ** 2) / np.sum(anechoic[sr_i][0, LEFT_CH_IND, :] ** 2))
+                    s2_spatial_scaling = np.sqrt(np.sum(s2 ** 2) / np.sum(anechoic[sr_i][1, LEFT_CH_IND, :] ** 2))
 
                     noise_samples_full = read_scaled_wav(os.path.join(noise_path, output_name),
                                                          scaling_npz[wham_noise_key][i_utt],
@@ -126,14 +124,12 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     else:
                         out_len = np.minimum(len(s1), len(s2))
 
-                    # Positions are reversed, so indices are swapped
-                    # anechoic[sr_i][0, ...] is at s2's original position (used for s2)
-                    # anechoic[sr_i][1, ...] is at s1's original position (used for s1)
-                    s1_anechoic, s2_anechoic = fix_length(anechoic[sr_i][1, ch_ind, :out_len].T * s1_spatial_scaling,
-                                                          anechoic[sr_i][0, ch_ind, :out_len].T * s2_spatial_scaling,
+                    # Positions are reversed, but indices still follow speaker identity
+                    s1_anechoic, s2_anechoic = fix_length(anechoic[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling,
+                                                          anechoic[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling,
                                                           datalen_dir)
-                    s1_reverb, s2_reverb = fix_length(reverberant[sr_i][1, ch_ind, :out_len].T * s1_spatial_scaling,
-                                                      reverberant[sr_i][0, ch_ind, :out_len].T * s2_spatial_scaling,
+                    s1_reverb, s2_reverb = fix_length(reverberant[sr_i][0, ch_ind, :out_len].T * s1_spatial_scaling,
+                                                      reverberant[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling,
                                                       datalen_dir)
 
                     sources = [(s1_anechoic, s2_anechoic), (s1_reverb, s2_reverb)]

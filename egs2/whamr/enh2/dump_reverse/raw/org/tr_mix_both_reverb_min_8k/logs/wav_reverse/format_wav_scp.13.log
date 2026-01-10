@@ -1,23 +1,0 @@
-# pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/org/tr_mix_both_reverb_min_8k/logs/wav_reverse/wav.13.scp dump_reverse/raw/org/tr_mix_both_reverb_min_8k/data/wav_reverse/format.13 
-# Started at Sun Jan  4 23:39:34 JST 2026
-#
-2026-01-04 23:39:38,074 (format_wav_scp:151) INFO: /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python3 pyscripts/audio/format_wav_scp.py --fs 8k --audio-format wav --multi-columns-input false --multi-columns-output false dump_reverse/raw/org/tr_mix_both_reverb_min_8k/logs/wav_reverse/wav.13.scp dump_reverse/raw/org/tr_mix_both_reverb_min_8k/data/wav_reverse/format.13
-0it [00:00, ?it/s]
-0it [00:00, ?it/s][A0it [00:00, ?it/s]
-0it [00:00, ?it/s]
-Traceback (most recent call last):
-  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh2/pyscripts/audio/format_wav_scp.py", line 378, in <module>
-    main()
-  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh2/pyscripts/audio/format_wav_scp.py", line 291, in main
-    for uttid, (wave, rate), wavpath, subtypes in tqdm(generator()):
-  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/site-packages/tqdm/std.py", line 1181, in __iter__
-    for obj in iterable:
-  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh2/pyscripts/audio/format_wav_scp.py", line 284, in generator
-    with soundfile.SoundFile(wavpath) as sf:
-  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/site-packages/soundfile.py", line 690, in __init__
-    self._file = self._open(file, mode_int, closefd)
-  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/site-packages/soundfile.py", line 1265, in _open
-    raise LibsndfileError(err, prefix="Error opening {0!r}: ".format(self.name))
-soundfile.LibsndfileError: Error opening '/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh2/data/whamr/2speakers/wav8k/min/tr/mix_both_reverbse/024c0213_0.69099_01xo030y_-0.69099.wav': System error.
-# Accounting: time=4 threads=1
-# Ended (code 1) at Sun Jan  4 23:39:38 JST 2026, elapsed time 4 seconds

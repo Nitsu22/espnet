@@ -12,8 +12,7 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-
-./se_reverse_train.sh \
+./se_remake.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
@@ -23,4 +22,6 @@ test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
     --enh_config ./conf/tuning/train_se_resnet2d.yaml \
     --audio_format wav \
     --stage 6 \
+    --stop_stage 6 \
+    --dumpdir dump_reverse \
     "$@"
