@@ -21,7 +21,7 @@ from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh.encoder.conv_encoder import ConvEncoder
 from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
-from espnet2.enh.espnet_model_sp import ESPnetEnhancementModel
+from espnet2.enh.espnet_model_se_condition import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tf_domain import (
     FrequencyDomainAbsCoherence,
@@ -64,11 +64,11 @@ from espnet2.enh.separator.tcn_separator import TCNSeparator
 from espnet2.enh.separator.tfgridnet_separator import TFGridNet
 from espnet2.enh.separator.tfgridnetv2_separator import TFGridNetV2
 from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
-from espnet2.enh.separator.tflocoformer_separator_sp import TFLocoformerSeparatorSP
+from espnet2.enh.separator.tflocoformer_separator_se_condition import TFLocoformerSeparatorSECondition
 from espnet2.enh.separator.transformer_separator import TransformerSeparator
 from espnet2.enh.separator.uses_separator import USESSeparator
-from espnet2.enh.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
-from espnet2.enh.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
+from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
+from espnet2.enh_se.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
@@ -117,7 +117,7 @@ separator_choices = ClassChoices(
         tfgridnetv2=TFGridNetV2,
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
-        tflocoformer_sp=TFLocoformerSeparatorSP,
+        tflocoformer_sp=TFLocoformerSeparatorSECondition,
     ),
     type_check=AbsSeparator,
     default="rnn",

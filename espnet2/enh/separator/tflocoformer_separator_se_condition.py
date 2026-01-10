@@ -16,12 +16,12 @@ from packaging.version import parse as V
 from rotary_embedding_torch import RotaryEmbedding
 
 from espnet2.enh.separator.abs_separator import AbsSeparator
-from espnet2.enh.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
+from espnet2.enh_se.spatial_encoder.resnet2d_spatial_encoder import ResNet2DSpatialEncoder
 
 is_torch_2_0_plus = V(torch.__version__) >= V("2.0.0")
 
 
-class TFLocoformerSeparatorSP(AbsSeparator):
+class TFLocoformerSeparatorSECondition(AbsSeparator):
     """TF-Locoformer model presented in [1].
 
     Reference:
