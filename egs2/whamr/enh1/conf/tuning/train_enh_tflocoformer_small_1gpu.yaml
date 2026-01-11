@@ -7,7 +7,8 @@ init: xavier_uniform
 max_epoch: 150
 use_amp: false
 batch_type: folded
-batch_size: 16  # batch size 4 on 4 RTX 2080Ti
+batch_size: 4  # per-GPU batch; effective batch 16 with accum_grad on 1 GPU
+accum_grad: 4
 num_workers: 4
 
 # preprocessor
