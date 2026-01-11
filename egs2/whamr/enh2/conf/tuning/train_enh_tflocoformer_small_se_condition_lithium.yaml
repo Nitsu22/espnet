@@ -84,7 +84,7 @@ separator_conf:
     spatial_embed_dim: &emb_dim 128
 spatial_encoder: resnet2d
 spatial_encoder_conf:
-    path: "/data/nitsu/research/tf-locoformer/espnet/egs2/whamr/se1/exp/pre_train/11epoch.pth"
+    path: "/data/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh2/spatial_encoder/11epoch.pth"
     embedding_dim: *emb_dim
     trainable: false  # false: 学習済みモデルを固定, true: 学習可能にする
     num_channels_mc: 2  # MC入力のチャネル数（デフォルト: 2）
