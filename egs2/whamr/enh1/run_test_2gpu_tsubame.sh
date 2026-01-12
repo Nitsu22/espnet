@@ -23,7 +23,7 @@ CUDA_VISIBLE_DEVICES=0,1 ./enh.sh \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_test.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_repro_2gpu_tsubame \
+    --enh_exp exp/enh_train_enh_tflocoformer_test_2gpu_tsubame \
     --use_dereverb_ref false \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
