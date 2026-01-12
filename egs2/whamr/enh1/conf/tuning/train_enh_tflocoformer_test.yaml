@@ -66,7 +66,7 @@ separator_conf:
     num_groups: 4
     tf_order: ft
     # self-attention
-    n_heads: 4
+    n_heads: 1
     flash_attention: false
     # ffn
     ffn_type:
