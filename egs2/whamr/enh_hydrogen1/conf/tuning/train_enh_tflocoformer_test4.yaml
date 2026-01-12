@@ -59,14 +59,14 @@ decoder_conf:
 separator: tflocoformer
 separator_conf:
     num_spk: *num_spk
-    n_layers: 4
+    n_layers: 1
     # general setup
     emb_dim: 96
     norm_type: rmsgroupnorm
     num_groups: 4
     tf_order: ft
     # self-attention
-    n_heads: 1
+    n_heads: 4
     flash_attention: false
     # ffn
     ffn_type:
