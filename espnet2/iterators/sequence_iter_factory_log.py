@@ -47,7 +47,7 @@ def _parse_timeout() -> float:
 
 class SequenceIterFactoryLog(SequenceIterFactory):
     @typechecked
-    def build_iter(self, epoch: int, shuffle: bool = None) -> DataLoader:
+    def build_iter(self, epoch: int, shuffle: Optional[bool] = None) -> DataLoader:
         if shuffle is None:
             shuffle = self.shuffle
 
