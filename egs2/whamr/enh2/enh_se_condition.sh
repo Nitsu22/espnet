@@ -852,7 +852,7 @@ if ! "${skip_eval}"; then
             if $is_tse_task; then
                 infer_module=espnet2.bin.enh_tse_inference
             else
-                infer_module=espnet2.bin.enh_inference
+                infer_module=espnet2.bin.enh_inference_se_condition
             fi
             # shellcheck disable=SC2046,SC2086
             ${_cmd} --gpu "${_ngpu}" JOB=1:"${_nj}" "${_logdir}"/enh_inference.JOB.log \

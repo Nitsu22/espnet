@@ -13,7 +13,7 @@ sample_rate=8k
 train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
-debug_dir=exp/enh_train_enh_tflocoformer_test4_4gpu/debug
+debug_dir=exp/enh_train_enh_tflocoformer_test4_4gpu_log/debug
 
 # Debug controls for stall investigation
 export ESPNET_LOG_ALL_RANKS=1
