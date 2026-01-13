@@ -28,6 +28,6 @@ CUDA_VISIBLE_DEVICES=0 ./enh_se_condition.sh \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --stage 6 \
+    --stage 5 \
     --stop_stage 8 \
     "$@"
