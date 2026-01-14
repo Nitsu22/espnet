@@ -62,6 +62,7 @@ separator_conf:
     n_layers: 4
     # general setup
     emb_dim: 96
+    attention_dim: 96         # ★追加：論文定義（d=D）に合わせる
     norm_type: rmsgroupnorm
     num_groups: 4
     tf_order: ft
