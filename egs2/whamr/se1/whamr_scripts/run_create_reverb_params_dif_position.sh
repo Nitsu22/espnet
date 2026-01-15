@@ -20,7 +20,7 @@ max_move_distance=0.5
 
 # スクリプトのディレクトリを取得
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-python_script="${script_dir}/create_reverb_params_dif_position.py"
+python_script="${script_dir}/tools/create_reverb_params_dif_position.py"
 
 # 引数の解析
 usage() {
