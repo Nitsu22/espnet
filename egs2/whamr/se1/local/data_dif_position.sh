@@ -46,23 +46,25 @@ if [ ! -d "${wsj_full_wav}" ]; then
 fi
 
 
-### This part is for WHAMR! reverse speaker position data
+### This part is for WHAMR! different speaker position data
 ### Assumes data.sh has already been executed, so:
 ### - Normal data already exist
 ### - whamr_scripts, wham_noise, wsj_full_wav already exist
-### Only generates and prepares reverse speaker position data (reverb_reverse)
+### - reverb_params_*_dif_position.csv already exist
+### Only generates and prepares different speaker position data (reverb_dif_position)
 ### Only mix_both and mix_clean are generated
+### wav_dif_position.scp will be added to existing {tr,cv,tt}_mix_{both,clean}_reverb_${min_or_max}_${sample_rate} datasets
 
-# Generate reverse speaker position mixtures
-log "Generating reverse speaker position mixtures"
-local/whamr_create_mixture_reverse.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+# Generate different speaker position mixtures
+log "Generating different speaker position mixtures"
+local/whamr_create_mixture_dif_position.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
     ${wham_noise:+--wham_noise $wham_noise} \
     ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
     ${whamr_wav} || exit 1;
 
-# Prepare reverse speaker position data (reverb_reverse)
-# The following datasets will be created:
-# {tr,cv,tt}_mix_{both,clean}_reverb_reverse_${min_or_max}_${sample_rate}
-log "Preparing reverse speaker position data"
-local/whamr_data_prep_reverse.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+# Prepare different speaker position data (reverb_dif_position)
+# wav_dif_position.scp will be added to existing datasets:
+# {tr,cv,tt}_mix_{both,clean}_reverb_${min_or_max}_${sample_rate}
+log "Preparing different speaker position data"
+local/whamr_data_prep_dif_position.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
     ${whamr_scripts}/whamr_scripts ${whamr_wav} ${wsj_full_wav} || exit 1;
