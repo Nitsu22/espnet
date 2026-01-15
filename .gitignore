@@ -107,3 +107,4 @@ qsub*.sh
 egs*/*/*/dump_reverse
 egs*/*/*/dump*
 *.wav
+whamr_scripts/data/
