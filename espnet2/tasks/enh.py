@@ -65,7 +65,10 @@ from espnet2.enh.separator.tfgridnet_separator import TFGridNet
 from espnet2.enh.separator.tfgridnetv2_separator import TFGridNetV2
 from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
 from espnet2.enh.separator.tflocoformer_separator_mc import TFLocoformerSeparatorMC
-from espnet2.enh.separator.fla_tflocoformer_separatory import (
+from espnet2.enh.separator.tflocoformer_separator_test import (
+    TFLocoformerSeparator as TFLocoformerSeparatorTest,
+)
+from espnet2.enh.separator.fla_tflocoformer_separator import (
     TFLocoformerSeparator as FLATFLocoformerSeparator,
 )
 from espnet2.enh.separator.transformer_separator import TransformerSeparator
@@ -119,6 +122,7 @@ separator_choices = ClassChoices(
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
         tflocoformer_mc=TFLocoformerSeparatorMC,
+        tflocoformer_test=TFLocoformerSeparatorTest,
         fla_tflocoformer=FLATFLocoformerSeparator,
     ),
     type_check=AbsSeparator,
