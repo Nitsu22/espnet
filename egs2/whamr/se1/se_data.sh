@@ -380,7 +380,7 @@ if ! "${skip_data_prep}"; then
                 _opts+="--segments data/${dset}/segments "
             fi
 
-            for spk in "wav" "wav_reverse"; do
+            for spk in "wav" "wav_dif_position"; do
                 # Skip if the source scp file doesn't exist
                 if [ ! -f "data/${dset}/${spk}.scp" ]; then
                     continue
@@ -423,9 +423,9 @@ if ! "${skip_data_prep}"; then
             # Copy data dir
             utils/copy_data_dir.sh "${data_feats}/org/${dset}" "${data_feats}/${dset}"
             cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
-            # Copy wav_reverse.scp explicitly (same as wav.scp is copied by copy_data_dir.sh)
-            if [ -f "${data_feats}/org/${dset}/wav_reverse.scp" ]; then
-                cp "${data_feats}/org/${dset}/wav_reverse.scp" "${data_feats}/${dset}/wav_reverse.scp"
+            # Copy wav_dif_position.scp explicitly (same as wav.scp is copied by copy_data_dir.sh)
+            if [ -f "${data_feats}/org/${dset}/wav_dif_position.scp" ]; then
+                cp "${data_feats}/org/${dset}/wav_dif_position.scp" "${data_feats}/${dset}/wav_dif_position.scp"
             fi
             for f in ${utt_extra_files}; do
                 if [ -f "${data_feats}/org/${dset}/${f}" ]; then
@@ -442,7 +442,7 @@ if ! "${skip_data_prep}"; then
                 awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
                     '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
                     >"${data_feats}/${dset}/utt2num_samples"
-            for spk in "wav" "wav_reverse"; do
+            for spk in "wav" "wav_dif_position"; do
                 <"${data_feats}/org/${dset}/${spk}.scp" \
                     utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
                     >"${data_feats}/${dset}/${spk}.scp"
