@@ -231,7 +231,7 @@ def main():
     # 各スプリットについて処理
     for split in args.splits:
         input_file = input_dir / f'reverb_params_{split}.csv'
-        output_file = output_dir / f'reverb_params_{split}_dif_position.csv'
+        output_file = output_dir / f'reverb_params_{split}_dif_position_0.05_0.2.csv'
         
         if not input_file.exists():
             print(f"Warning: {input_file} does not exist. Skipping...")
