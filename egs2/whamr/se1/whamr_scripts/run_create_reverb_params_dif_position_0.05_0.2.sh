@@ -15,8 +15,8 @@ output_dir=
 splits="tr cv tt"
 seed=
 min_distance_from_wall=0.01
-min_move_distance=0.05
-max_move_distance=0.2
+min_move_distance=0.02
+max_move_distance=0.1
 
 # スクリプトのディレクトリを取得
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
