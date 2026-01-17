@@ -455,3 +455,183 @@ if ! "${skip_data_prep}"; then
 else
     log "Skip the data preparation stages"
 fi
+
+if ! "${skip_train}"; then
+    if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
+        _enh_train_dir="${data_feats}/${train_set}"
+        _enh_valid_dir="${data_feats}/${valid_set}"
+        log "Stage 5: Spatial Encoder collect stats: train_set=${_enh_train_dir}, valid_set=${_enh_valid_dir}"
+
+        _opts=
+        if [ -n "${enh_config}" ]; then
+            # To generate the config file: e.g.
+            #   % python3 -m espnet2.bin.enh_train --print_config --optim adam
+            _opts+="--config ${enh_config} "
+        fi
+
+        _scp=wav.scp
+        if [[ "${audio_format}" == *ark* ]]; then
+            _type=kaldi_ark
+        else
+            # "sound" supports "wav", "flac", etc.
+            _type=sound
+        fi
+
+        # 1. Split the key file
+        _logdir="${enh_stats_dir}/logdir"
+        mkdir -p "${_logdir}"
+
+        # Get the minimum number among ${nj} and the number lines of input files
+        _nj=$(min "${nj}" "$(<${_enh_train_dir}/${_scp} wc -l)" "$(<${_enh_valid_dir}/${_scp} wc -l)")
+
+        key_file="${_enh_train_dir}/${_scp}"
+        split_scps=""
+        for n in $(seq "${_nj}"); do
+            split_scps+=" ${_logdir}/train.${n}.scp"
+        done
+        # shellcheck disable=SC2086
+        utils/split_scp.pl "${key_file}" ${split_scps}
+
+        key_file="${_enh_valid_dir}/${_scp}"
+        split_scps=""
+        for n in $(seq "${_nj}"); do
+            split_scps+=" ${_logdir}/valid.${n}.scp"
+        done
+        # shellcheck disable=SC2086
+        utils/split_scp.pl "${key_file}" ${split_scps}
+
+        # 2. Generate run.sh
+        log "Generate '${enh_stats_dir}/run.sh'. You can resume the process from stage 5 using this script"
+        mkdir -p "${enh_stats_dir}"; echo "${run_args} --stage 5 \"\$@\"; exit \$?" > "${enh_stats_dir}/run.sh"; chmod +x "${enh_stats_dir}/run.sh"
+
+        # 3. Submit jobs
+        log "Spatial Encoder collect-stats started... log: '${_logdir}/stats.*.log'"
+
+        # prepare train and valid data parameters
+        # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
+        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from wav_dif_position.scp in the same dumpdir
+        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${data_feats}/${train_set}/wav_dif_position.scp,speech_mix_reverse_mc,${_type} "
+        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats}/${valid_set}/wav_dif_position.scp,speech_mix_reverse_mc,${_type} "
+
+        # NOTE: --*_shape_file doesn't require length information if --batch_type=unsorted,
+        #       but it's used only for deciding the sample ids.
+
+        train_module=espnet2.bin.enh_se_train
+        # shellcheck disable=SC2046,SC2086
+        ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
+            ${python} -m ${train_module} \
+                --collect_stats true \
+                ${_train_data_param} \
+                ${_valid_data_param} \
+                --train_shape_file "${_logdir}/train.JOB.scp" \
+                --valid_shape_file "${_logdir}/valid.JOB.scp" \
+                --output_dir "${_logdir}/stats.JOB" \
+                ${_opts} ${enh_args} || { cat $(grep -l -i error "${_logdir}"/stats.*.log) ; exit 1; }
+
+        # 4. Aggregate shape files
+        _opts=
+        for i in $(seq "${_nj}"); do
+            _opts+="--input_dir ${_logdir}/stats.${i} "
+        done
+        # shellcheck disable=SC2086
+        ${python} -m espnet2.bin.aggregate_stats_dirs ${_opts} --skip_sum_stats --output_dir "${enh_stats_dir}"
+
+    fi
+
+
+    if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
+        _enh_train_dir="${data_feats}/${train_set}"
+        _enh_valid_dir="${data_feats}/${valid_set}"
+        log "Stage 6: Spatial Encoder Training: train_set=${_enh_train_dir}, valid_set=${_enh_valid_dir}"
+
+        _opts=
+        if [ -n "${enh_config}" ]; then
+            # To generate the config file: e.g.
+            #   % python3 -m espnet2.bin.enh_train --print_config --optim adam
+            _opts+="--config ${enh_config} "
+        fi
+
+        _scp="wav.scp"
+        # "sound" supports "wav", "flac", etc.
+        if [[ "${audio_format}" == *ark* ]]; then
+            _type=kaldi_ark
+        else
+            # "sound" supports "wav", "flac", etc.
+            _type=sound
+        fi
+        _fold_length="$((enh_speech_fold_length * 100))"
+
+        # prepare train and valid data parameters
+        # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
+        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from wav_dif_position.scp in the same dumpdir
+        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${data_feats}/${train_set}/wav_dif_position.scp,speech_mix_reverse_mc,${_type} "
+        _train_shape_param="--train_shape_file ${enh_stats_dir}/train/speech_mix_shape "
+        _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_mix_mc_shape "
+        _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_mix_reverse_mc_shape "
+        _fold_length_param="--fold_length ${_fold_length} "
+        _fold_length_param+="--fold_length ${_fold_length} "
+        _fold_length_param+="--fold_length ${_fold_length} "
+        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats}/${valid_set}/wav_dif_position.scp,speech_mix_reverse_mc,${_type} "
+        _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
+        _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_mc_shape "
+        _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_reverse_mc_shape "
+
+        # Add the category information at the end of the data path list
+        if [ -e "${_enh_train_dir}/utt2category" ] && [ -e "${_enh_valid_dir}/utt2category" ]; then
+            log "[INFO] Adding the category information for training"
+            log "[WARNING] Please make sure the category information is explicitly processed by the preprocessor defined in '${enh_config}' so that it is converted to an integer"
+
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/utt2category,category,text "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/utt2category,category,text "
+        fi
+
+        # Add the fs information at the end of the data path list
+        if [ -e "${_enh_train_dir}/utt2fs" ] && [ -e "${_enh_valid_dir}/utt2fs" ]; then
+            log "[INFO] Adding the sampling frequency information (fs) for training"
+
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/utt2fs,fs,text_int "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/utt2fs,fs,text_int "
+        fi
+
+        log "Generate '${enh_exp}/run.sh'. You can resume the process from stage 6 using this script"
+        mkdir -p "${enh_exp}"; echo "${run_args} --stage 6 \"\$@\"; exit \$?" > "${enh_exp}/run.sh"; chmod +x "${enh_exp}/run.sh"
+
+        log "Spatial Encoder training started... log: '${enh_exp}/train.log'"
+        if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &> /dev/null; then
+            # SGE can't include "/" in a job name
+            jobname="$(basename ${enh_exp})"
+        else
+            jobname="${enh_exp}/train.log"
+        fi
+        train_module=espnet2.bin.enh_se_train
+        # shellcheck disable=SC2086
+        ${python} -m espnet2.bin.launch \
+            --cmd "${cuda_cmd} --name ${jobname}" \
+            --log "${enh_exp}"/train.log \
+            --ngpu "${ngpu}" \
+            --num_nodes "${num_nodes}" \
+            --init_file_prefix "${enh_exp}"/.dist_init_ \
+            --multiprocessing_distributed true -- \
+            ${python} -m ${train_module} \
+                ${_train_data_param} \
+                ${_valid_data_param} \
+                ${_train_shape_param} \
+                ${_valid_shape_param} \
+                ${_fold_length_param} \
+                --resume true \
+                --output_dir "${enh_exp}" \
+                ${init_param:+--init_param $init_param} \
+                ${_opts} ${enh_args}
+
+    fi
+else
+    log "Skip the training stages"
+fi
