@@ -139,7 +139,7 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                     samps = [mix_clean, mix_both]
                     dirs = [CLEAN_DIR, BOTH_DIR]
                     for dir, samp in zip(dirs, samps):
-                        sf.write(os.path.join(output_path, dir+'_reverb_dif_position', output_name), samp,
+                        sf.write(os.path.join(output_path, dir+'_reverb_dif_position_005_02', output_name), samp,
                                  sr, subtype='FLOAT')
 
             if (i_utt + 1) % 500 == 0:

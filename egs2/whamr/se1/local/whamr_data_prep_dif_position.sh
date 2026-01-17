@@ -36,7 +36,7 @@ wsj_full_wav=$3
 
 # check if the wav dirs exist (dif_position data only: reverb_dif_position)
 for x in tr cv tt; do
-  for ddir in mix_both_reverb_dif_position mix_clean_reverb_dif_position; do
+  for ddir in mix_both_reverb_dif_position_005_02 mix_clean_reverb_dif_position_005_02; do
     f=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}/${ddir}
     if [ ! -d $f ]; then
       echo "Error: $f is not a directory."
@@ -63,10 +63,10 @@ for x in tr cv tt; do
   for mixtype in both clean; do
     ddir=${x}_mix_${mixtype}_reverb_${min_or_max}_${sample_rate}
     rootdir=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}
-    mixwav_dir=${rootdir}/mix_${mixtype}_reverb_dif_position
+    mixwav_dir=${rootdir}/mix_${mixtype}_reverb_dif_position_005_02
     awk -v dir="${mixwav_dir}" -F "," \
       'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_reverb", dir "/" $1 ".wav")}' \
-      ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/wav_dif_position.scp
+      ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/wav_dif_position_005_02.scp
   done
 done
 

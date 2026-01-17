@@ -106,5 +106,6 @@ tools/Miniconda3-latest-*.sh
 qsub*.sh
 egs*/*/*/dump_reverse
 egs*/*/*/dump*
+egs*/*/*/exp*
 *.wav
 whamr_scripts/data/
