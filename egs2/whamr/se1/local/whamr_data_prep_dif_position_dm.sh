@@ -48,7 +48,7 @@ for x in tr cv tt; do
   done
 done
 
-data=./data
+data=./data_dif_position
 rm -r ${data}/{tr,cv,tt}_mix_{both,clean,single}_{anechoic,reverb}_${min_or_max}_${sample_rate} 2>/dev/null || true
 
 for x in tr cv tt; do

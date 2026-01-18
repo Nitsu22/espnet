@@ -16,7 +16,7 @@ CLEAN_DIR = 'mix_clean'
 S1_DIR = 's1'
 S2_DIR = 's2'
 NOISE_DIR = 'noise'
-SUFFIXES = ['_anechoic', '_reverb']
+SUFFIXES = ['_reverb']
 
 MONO = False  # Generate mono audio, change to false for stereo audio
 SPLITS = ['tr', 'cv', 'tt']
@@ -51,7 +51,7 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                 output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
                 for sfx in SUFFIXES:
                     os.makedirs(os.path.join(output_path, CLEAN_DIR+sfx), exist_ok=True)
-                    os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)
+                    # os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)  # mix_single is not needed
                     os.makedirs(os.path.join(output_path, BOTH_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, S1_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, S2_DIR+sfx), exist_ok=True)
@@ -140,9 +140,9 @@ def create_wham(wsj_root, wham_noise_path, output_root):
 
                         mix_clean, mix_single, mix_both = create_wham_mixes(s1_samples, s2_samples, noise_samples)
 
-                        # write audio
-                        samps = [mix_clean, mix_single, mix_both, s1_samples, s2_samples]
-                        dirs = [CLEAN_DIR, SINGLE_DIR, BOTH_DIR, S1_DIR, S2_DIR]
+                        # write audio (mix_single is not needed, so it's excluded)
+                        samps = [mix_clean, mix_both, s1_samples, s2_samples]
+                        dirs = [CLEAN_DIR, BOTH_DIR, S1_DIR, S2_DIR]
                         for dir, samp in zip(dirs, samps):
                             sf.write(os.path.join(output_path, dir+sfx, output_name), samp,
                                      sr, subtype='FLOAT')

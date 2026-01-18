@@ -29,8 +29,8 @@ wham_noise=/net/midgar/work/nitsu/data/wsj/wham_noise
 whamr_wav=$PWD/data/whamr/2speakers
 whamr_scripts=$PWD/data/whamr
 
-other_text=data_dif_position/local/other_text/text
-nlsyms=data_dif_position/nlsyms.txt
+other_text=data/local/other_text/text
+nlsyms=data/nlsyms.txt
 mono=False
 min_or_max=min
 sample_rate=8k
@@ -55,7 +55,7 @@ fi
 
 ### This part is for WHAMR!
 ### Download mixture scripts and create mixtures for 2 speakers
-local/whamr_create_mixture_dif_position.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+local/whamr_create_mixture.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
     ${wham_noise:+--wham_noise $wham_noise} \
     ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
     ${whamr_wav} || exit 1;
@@ -67,7 +67,7 @@ local/whamr_create_mixture_dif_position.sh --mono ${mono} --min-or-max ${min_or_
 #   - `both`: a mixture of speech1, speech2 and noise (for speech separation)
 #   - `clean`: a mixture of speech1 and speech2 (for speech separation)
 #   - `single`: a mixture of speech1 and noise (for speech enhancement)
-local/whamr_data_prep_dif_position_dm.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+local/whamr_data_prep.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
     ${whamr_scripts}/whamr_scripts ${whamr_wav} ${wsj_full_wav} || exit 1;
 
 
@@ -77,10 +77,10 @@ log "local/wsj_data_prep.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?"
 local/wsj_data_prep.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?
 log "local/wsj_format_data.sh"
 local/wsj_format_data.sh
-log "mkdir -p data_dif_position/wsj"
-mkdir -p data_dif_position/wsj
-log "mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data_dif_position/wsj"
-mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data_dif_position/wsj
+log "mkdir -p data/wsj"
+mkdir -p data/wsj
+log "mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data/wsj"
+mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data/wsj
 
 
 log "Prepare text from lng_modl dir: ${WSJ1}/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z -> ${other_text}"
@@ -93,5 +93,5 @@ zcat ${WSJ1}/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z | \
 
 
 log "Create non linguistic symbols: ${nlsyms}"
-cut -f 2- data_dif_position/wsj/train_si284/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
+cut -f 2- data/wsj/train_si284/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
 cat ${nlsyms}
