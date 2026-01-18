@@ -10,11 +10,11 @@ sample_rate=8k
 
 
 
-train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
+train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}_5000
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-./enh.sh \
+./enh_5000.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
