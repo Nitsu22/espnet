@@ -33,7 +33,7 @@ if [ -z "$wham_noise" ]; then
 fi
 
 # Assumes data.sh has already been executed, so:
-# - whamr_scripts directory and create_wham_from_scratch_dif_position.py already exist
+# - whamr_scripts directory and create_wham_from_scratch_dif_position_dm.py already exist
 # - wham_noise already exists
 # - wsj_full_wav already exists
 
@@ -43,21 +43,21 @@ if [ -z "$(python -m pip list | grep pyroomacoustics)" ]; then
   exit 1;
 fi
 
-# Configure and run create_wham_from_scratch_dif_position.py
+# Configure and run create_wham_from_scratch_dif_position_dm.py
 cd ${dir}/whamr_scripts || exit 1
-if [ -f ${dir}/whamr_scripts/create_wham_from_scratch_dif_position.py ]; then
+if [ -f ${dir}/whamr_scripts/create_wham_from_scratch_dif_position_dm.py ]; then
   echo "Creating Mixtures with different speaker positions (reverb_dif_position)."
   sed -i -e "s#MONO = True#MONO = ${mono}#" \
          -e "s#DATA_LEN = \['max', 'min'\]#DATA_LEN = ['${min_or_max}']#" \
          -e "s#SAMPLE_RATES = \['16k', '8k'\]#SAMPLE_RATES = ['${sample_rate}']#" \
-         ${dir}/whamr_scripts/create_wham_from_scratch_dif_position.py
+         ${dir}/whamr_scripts/create_wham_from_scratch_dif_position_dm.py
   echo "Log is in ${dir}/whamr_scripts/mix_dif_position.log"
-  ${train_cmd} ${dir}/whamr_scripts/mix_dif_position.log python create_wham_from_scratch_dif_position.py \
+  ${train_cmd} ${dir}/whamr_scripts/mix_dif_position.log python create_wham_from_scratch_dif_position_dm.py \
     --wsj0-root ${wsj_full_wav} \
     --wham-noise-root ${wham_noise} \
     --output-dir ${whamr_wav}
 else
-  echo "Error: create_wham_from_scratch_dif_position.py not found in ${dir}/whamr_scripts/"
+  echo "Error: create_wham_from_scratch_dif_position_dm.py not found in ${dir}/whamr_scripts/"
   exit 1
 fi
 

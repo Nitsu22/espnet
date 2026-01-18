@@ -16,7 +16,7 @@ CLEAN_DIR = 'mix_clean'
 S1_DIR = 's1'
 S2_DIR = 's2'
 NOISE_DIR = 'noise'
-SUFFIXES = ['_reverb']
+SUFFIXES = ['_anechoic', '_reverb']
 
 MONO = False  # Generate mono audio, change to false for stereo audio
 SPLITS = ['tr', 'cv', 'tt']
@@ -31,7 +31,7 @@ def create_wham(wsj_root, wham_noise_path, output_root):
         ch_ind = [0, 1]
 
     scaling_npz_stub = os.path.join(wham_noise_path, 'metadata', 'scaling_{}.npz')
-    reverb_param_stub = os.path.join('data', 'reverb_params_{}_dif_position_00.5_0.2.csv')
+    reverb_param_stub = os.path.join('data', 'reverb_params_{}.csv')
 
     for splt in SPLITS:
 
@@ -50,8 +50,12 @@ def create_wham(wsj_root, wham_noise_path, output_root):
             for datalen_dir in DATA_LEN:
                 output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
                 for sfx in SUFFIXES:
-                    os.makedirs(os.path.join(output_path, CLEAN_DIR+sfx+'_dif_position'), exist_ok=True)
-                    os.makedirs(os.path.join(output_path, BOTH_DIR+sfx+'_dif_position'), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, CLEAN_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, SINGLE_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, BOTH_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, S1_DIR+sfx), exist_ok=True)
+                    os.makedirs(os.path.join(output_path, S2_DIR+sfx), exist_ok=True)
+                os.makedirs(os.path.join(output_path, NOISE_DIR), exist_ok=True)
 
         utt_ids = scaling_npz['utterance_id']
         start_samp_16k = scaling_npz['speech_start_sample_16k']
@@ -128,19 +132,24 @@ def create_wham(wsj_root, wham_noise_path, output_root):
                                                       reverberant[sr_i][1, ch_ind, :out_len].T * s2_spatial_scaling,
                                                       datalen_dir)
 
-                    # Only process reverb (dif_position)
-                    s1_samples, s2_samples, noise_samples = append_or_truncate(s1_reverb, s2_reverb,
-                                                                               noise_samples_full, datalen_dir,
-                                                                               start_samp_16k[i_utt], downsample)
+                    sources = [(s1_anechoic, s2_anechoic), (s1_reverb, s2_reverb)]
+                    for i_sfx, (sfx, source_pair) in enumerate(zip(SUFFIXES, sources)):
+                        s1_samples, s2_samples, noise_samples = append_or_truncate(source_pair[0], source_pair[1],
+                                                                                   noise_samples_full, datalen_dir,
+                                                                                   start_samp_16k[i_utt], downsample)
 
-                    mix_clean, mix_single, mix_both = create_wham_mixes(s1_samples, s2_samples, noise_samples)
+                        mix_clean, mix_single, mix_both = create_wham_mixes(s1_samples, s2_samples, noise_samples)
 
-                    # write audio (only both and clean, exclude single, s1, s2, and noise to save space)
-                    samps = [mix_clean, mix_both]
-                    dirs = [CLEAN_DIR, BOTH_DIR]
-                    for dir, samp in zip(dirs, samps):
-                        sf.write(os.path.join(output_path, dir+'_reverb_dif_position_005_02', output_name), samp,
-                                 sr, subtype='FLOAT')
+                        # write audio
+                        samps = [mix_clean, mix_single, mix_both, s1_samples, s2_samples]
+                        dirs = [CLEAN_DIR, SINGLE_DIR, BOTH_DIR, S1_DIR, S2_DIR]
+                        for dir, samp in zip(dirs, samps):
+                            sf.write(os.path.join(output_path, dir+sfx, output_name), samp,
+                                     sr, subtype='FLOAT')
+
+                        if i_sfx == 0: # only write noise once as it doesn't change between anechoic and reverberant
+                            sf.write(os.path.join(output_path, NOISE_DIR, output_name), noise_samples,
+                                     sr, subtype='FLOAT')
 
             if (i_utt + 1) % 500 == 0:
                 print('Completed {} of {} utterances'.format(i_utt + 1, len(wsjmix_df)))
