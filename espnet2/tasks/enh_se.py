@@ -20,6 +20,9 @@ from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
 from espnet2.enh_se.spatial_encoder.resnet2d_spatial_encoder import (
     ResNet2DSpatialEncoder,
 )
+from espnet2.enh_se.spatial_encoder.resnet2d_div_spatial_encoder import (
+    ResNet2DDivSpatialEncoder,
+)
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
@@ -45,7 +48,10 @@ encoder_choices = ClassChoices(
 
 spatial_encoder_choices = ClassChoices(
     name="spatial_encoder",
-    classes=dict(resnet2d=ResNet2DSpatialEncoder),
+    classes=dict(
+        resnet2d=ResNet2DSpatialEncoder,
+        resnet2d_div=ResNet2DDivSpatialEncoder,
+    ),
     type_check=AbsSpatialEncoder,
     default="resnet2d",
 )
