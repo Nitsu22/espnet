@@ -31,7 +31,7 @@ def create_wham(wsj_root, wham_noise_path, output_root):
         ch_ind = [0, 1]
 
     scaling_npz_stub = os.path.join(wham_noise_path, 'metadata', 'scaling_{}.npz')
-    reverb_param_stub = os.path.join('data', 'reverb_params_{}.csv')
+    reverb_param_stub = os.path.join('data', 'reverb_params_{}_dif_position.csv')
 
     for splt in SPLITS:
 
