@@ -29,7 +29,7 @@ wham_noise=/net/midgar/work/nitsu/data/wsj/wham_noise
 whamr_wav=$PWD/data/whamr/2speakers
 whamr_scripts=$PWD
 
-other_text=data_dif_position/local/other_text/text
+other_text=data_dif_position/wsj/local/other_text/text
 nlsyms=data_dif_position/nlsyms.txt
 mono=False
 min_or_max=min
@@ -73,14 +73,10 @@ local/whamr_data_prep_dif_position_dm.sh --min-or-max ${min_or_max} --sample-rat
 
 ### Also need wsj corpus to prepare language information
 ### This is from Kaldi WSJ recipe
-log "local/wsj_data_prep.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?"
-local/wsj_data_prep.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?
-log "local/wsj_format_data.sh"
-local/wsj_format_data.sh
-log "mkdir -p data_dif_position/wsj"
-mkdir -p data_dif_position/wsj
-log "mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data_dif_position/wsj"
-mv data/{dev_dt_*,local,test_dev*,test_eval*,train_si284} data_dif_position/wsj
+log "local/wsj_data_prep_dm.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?"
+local/wsj_data_prep_dm.sh ${WSJ0}/??-{?,??}.? ${WSJ1}/??-{?,??}.?
+log "local/wsj_format_data_dm.sh"
+local/wsj_format_data_dm.sh
 
 
 log "Prepare text from lng_modl dir: ${WSJ1}/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z -> ${other_text}"
