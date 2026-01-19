@@ -33,7 +33,7 @@ skip_upload_hf=true     # Skip uploading to huggingface stage.
 ngpu=1                  # The number of gpus ("0" uses cpu, otherwise use gpu).
 num_nodes=1             # The number of nodes
 nj=32                   # The number of parallel jobs.
-dumpdir=dump_dif_position            # Directory to dump features.
+dumpdir=dump_dif_position_dm            # Directory to dump features.
 inference_nj=32         # The number of parallel jobs in inference.
 gpu_inference=false     # Whether to perform gpu inference.
 expdir=exp              # Directory to save experiments.
@@ -224,6 +224,9 @@ fi
 # Extra files for enhancement process
 utt_extra_files=""
 
+# Data directory (data_dif_position for DM version)
+data_dir=data_dif_position
+
 data_feats=${dumpdir}/raw
 
 if $is_tse_task; then
@@ -303,8 +306,8 @@ if ${variable_num_refs}; then
         log "[ERROR] --dereverb_ref_num must be 1 if --variable_num_refs is true, but got ${dereverb_ref_num}"
         exit 1
     fi
-    if [ ! -e "data/${train_set}/utt2category" ] || [ ! -e "data/${valid_set}/utt2category" ]; then
-        log "[ERROR] utt2category must be prepared in data/${train_set} and data/${valid_set} if --variable_num_refs is true."
+        if [ ! -e "${data_dir}/${train_set}/utt2category" ] || [ ! -e "${data_dir}/${valid_set}/utt2category" ]; then
+        log "[ERROR] utt2category must be prepared in ${data_dir}/${train_set} and ${data_dir}/${valid_set} if --variable_num_refs is true."
         exit 1
     else
         log "[WARNING] Variable speaker number is enabled. Please ensure the utt2category file assigns the same category ID to samples with the same number of speakers."
@@ -320,27 +323,27 @@ fi
 
 if ! "${skip_data_prep}"; then
     if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-        log "Stage 1: Data preparation for data/${train_set}, data/${valid_set}, etc."
+        log "Stage 1: Data preparation for ${data_dir}/${train_set}, ${data_dir}/${valid_set}, etc."
         # [Task dependent] Need to create data.sh for new corpus
         local/data_dif_position_dm.sh ${local_data_opts}
     fi
 
     if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
         if ! $use_dereverb_ref && [ -n "${speed_perturb_factors}" ]; then
-           log "Stage 2: Speed perturbation: data/${train_set} -> data/${train_set}_sp"
+           log "Stage 2: Speed perturbation: ${data_dir}/${train_set} -> ${data_dir}/${train_set}_sp"
 
             _scp_list="wav.scp "
 
            for factor in ${speed_perturb_factors}; do
                if python3 -c "assert ${factor} != 1.0" 2>/dev/null; then
-                   scripts/utils/perturb_enh_data_dir_speed.sh --utt_extra_files "${utt_extra_files}" "${factor}" "data/${train_set}" "data/${train_set}_sp${factor}" "${_scp_list}"
-                   _dirs+="data/${train_set}_sp${factor} "
+                   scripts/utils/perturb_enh_data_dir_speed.sh --utt_extra_files "${utt_extra_files}" "${factor}" "${data_dir}/${train_set}" "${data_dir}/${train_set}_sp${factor}" "${_scp_list}"
+                   _dirs+="${data_dir}/${train_set}_sp${factor} "
                else
                    # If speed factor is 1, same as the original
-                   _dirs+="data/${train_set} "
+                   _dirs+="${data_dir}/${train_set} "
                fi
            done
-           utils/combine_data.sh --extra-files "${_scp_list}" "data/${train_set}_sp" ${_dirs}
+           utils/combine_data.sh --extra-files "${_scp_list}" "${data_dir}/${train_set}_sp" ${_dirs}
         else
            log "Skip stage 2: Speed perturbation"
         fi
@@ -352,7 +355,7 @@ if ! "${skip_data_prep}"; then
 
     if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 
-        log "Stage 3: Format wav.scp: data/ -> ${data_feats}"
+        log "Stage 3: Format wav.scp: ${data_dir}/ -> ${data_feats}"
 
         # ====== Recreating "wav.scp" ======
         # Kaldi-wav.scp, which can describe the file path with unix-pipe, like "cat /some/path |",
@@ -368,38 +371,38 @@ if ! "${skip_data_prep}"; then
             else
                 _suf=""
             fi
-            utils/copy_data_dir.sh data/"${dset}" "${data_feats}${_suf}/${dset}"
+            utils/copy_data_dir.sh ${data_dir}/"${dset}" "${data_feats}${_suf}/${dset}"
             rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,reco2file_and_channel}
             _opts=
-            if [ -e data/"${dset}"/segments ]; then
+            if [ -e ${data_dir}/"${dset}"/segments ]; then
                 # "segments" is used for splitting wav files which are written in "wav".scp
                 # into utterances. The file format of segments:
                 #   <segment_id> <record_id> <start_time> <end_time>
                 #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
                 # Where the time is written in seconds.
-                _opts+="--segments data/${dset}/segments "
+                _opts+="--segments ${data_dir}/${dset}/segments "
             fi
 
             for spk in "wav" "wav_dif_position"; do
                 # Skip if the source scp file doesn't exist
-                if [ ! -f "data/${dset}/${spk}.scp" ]; then
+                if [ ! -f "${data_dir}/${dset}/${spk}.scp" ]; then
                     continue
                 fi
                 # shellcheck disable=SC2086
                 scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
                     --out-filename "${spk}.scp" \
                     --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                    "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
+                    "${data_dir}/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
                     "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
             done
 
             for f in $extra_wav_list; do
-                if [ -e "data/${dset}/$f" ]; then
+                if [ -e "${data_dir}/${dset}/$f" ]; then
                     # shellcheck disable=SC2086
                     scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
                         --out-filename "$f" \
                         --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                        "data/${dset}/$f" "${data_feats}/${dset}" \
+                        "${data_dir}/${dset}/$f" "${data_feats}/${dset}" \
                         "${data_feats}/${dset}/logs/${f%.*}" "${data_feats}/${dset}/data/${f%.*}"
                 fi
             done
@@ -407,7 +410,7 @@ if ! "${skip_data_prep}"; then
             echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
 
             for f in ${utt_extra_files}; do
-                [ -f data/${dset}/${f} ] && cp data/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
+                [ -f ${data_dir}/${dset}/${f} ] && cp ${data_dir}/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
             done
 
         done
