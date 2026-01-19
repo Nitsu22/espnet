@@ -55,10 +55,10 @@ fi
 
 ### This part is for WHAMR!
 ### Download mixture scripts and create mixtures for 2 speakers
-# local/whamr_create_mixture_dif_position_dm.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
-#     ${wham_noise:+--wham_noise $wham_noise} \
-#     ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
-#     ${whamr_wav} || exit 1;
+local/whamr_create_mixture_dif_position_dm.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+    ${wham_noise:+--wham_noise $wham_noise} \
+    ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
+    ${whamr_wav} || exit 1;
 
 # The following datasets will be created:
 # {tr,cv,tt}_mix_{both,clean}_{anechoic,reverb}_${min_or_max}_${sample_rate}

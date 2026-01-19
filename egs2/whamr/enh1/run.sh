@@ -27,5 +27,5 @@ test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --stop_stage 5 \
+    --stop_stage 1 \
     "$@"
