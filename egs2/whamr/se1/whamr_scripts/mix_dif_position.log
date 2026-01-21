@@ -1,5 +1,5 @@
-# python create_wham_from_scratch_dif_position.py --wsj0-root /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se1/data/wsj0/wsj0_wav --wham-noise-root /net/midgar/work/nitsu/data/wsj/wham_noise --output-dir /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se1/data/whamr/2speakers 
-# Started at Thu Jan 15 19:12:09 JST 2026
+# python create_wham_from_scratch_dif_position_dm.py --wsj0-root /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se1/data_dif_position/wsj0/wsj0_wav --wham-noise-root /net/midgar/work/nitsu/data/wsj/wham_noise --output-dir /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se1/data_dif_position/whamr/2speakers 
+# Started at Mon Jan 19 17:49:41 JST 2026
 #
 Completed 500 of 20000 utterances
 Completed 1000 of 20000 utterances
@@ -57,5 +57,5 @@ Completed 1500 of 3000 utterances
 Completed 2000 of 3000 utterances
 Completed 2500 of 3000 utterances
 Completed 3000 of 3000 utterances
-# Accounting: time=13964 threads=1
-# Ended (code 0) at Thu Jan 15 23:04:53 JST 2026, elapsed time 13964 seconds
+# Accounting: time=8545 threads=1
+# Ended (code 0) at Mon Jan 19 20:12:06 JST 2026, elapsed time 8545 seconds
