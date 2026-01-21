@@ -108,4 +108,5 @@ egs*/*/*/dump_reverse
 egs*/*/*/dump*
 egs*/*/*/exp*
 *.wav
+runtest*.sh
 whamr_scripts/data/
