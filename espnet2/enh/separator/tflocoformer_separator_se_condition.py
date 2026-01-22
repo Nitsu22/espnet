@@ -179,6 +179,11 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                 for param in self.spatial_encoder.parameters():
                     param.requires_grad = True
                 self.spatial_encoder.train()
+
+            # SCのみ使用するため、MC枝のパラメータを凍結してDDPの未使用パラメータを回避
+            if hasattr(self.spatial_encoder, "model") and hasattr(self.spatial_encoder.model, "proj_mc"):
+                for param in self.spatial_encoder.model.proj_mc.parameters():
+                    param.requires_grad = False
             
             self.film = FiLM(
                 embed_dim=spatial_embed_dim,
