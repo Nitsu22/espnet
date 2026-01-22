@@ -84,7 +84,7 @@ separator_conf:
     spatial_embed_dim: &emb_dim 128
 spatial_encoder: resnet2d_div
 spatial_encoder_conf:
-    path: "spatial_encoder/dif_div/valid.loss.best.pth"
+    path: "spatial_encoder/dif_div/95epoch.pth"
     embedding_dim: *emb_dim
     trainable: true  # false: 学習済みモデルを固定, true: 学習可能にする
     num_channels_mc: 2  # MC入力のチャネル数（デフォルト: 2）

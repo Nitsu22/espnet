@@ -110,3 +110,4 @@ egs*/*/*/exp*
 *.wav
 runtest*.sh
 whamr_scripts/data/
+whamr_scripts/*.log
