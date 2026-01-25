@@ -1,0 +1,61 @@
+# python /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se2_data/whamr_scripts/create_wham_from_scratch_rand_dif_tmp.dBOD0n.py --wsj0-root /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se2_data/data/wsj0/wsj0_wav --wham-noise-root /net/midgar/work/nitsu/data/wsj/wham_noise --output-dir /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se2_data/data/whamr/2speakers 
+# Started at Sun Jan 25 01:12:22 JST 2026
+#
+Completed 500 of 20000 utterances
+Completed 1000 of 20000 utterances
+Completed 1500 of 20000 utterances
+Completed 2000 of 20000 utterances
+Completed 2500 of 20000 utterances
+Completed 3000 of 20000 utterances
+Completed 3500 of 20000 utterances
+Completed 4000 of 20000 utterances
+Completed 4500 of 20000 utterances
+Completed 5000 of 20000 utterances
+Completed 5500 of 20000 utterances
+Completed 6000 of 20000 utterances
+Completed 6500 of 20000 utterances
+Completed 7000 of 20000 utterances
+Completed 7500 of 20000 utterances
+Completed 8000 of 20000 utterances
+Completed 8500 of 20000 utterances
+Completed 9000 of 20000 utterances
+Completed 9500 of 20000 utterances
+Completed 10000 of 20000 utterances
+Completed 10500 of 20000 utterances
+Completed 11000 of 20000 utterances
+Completed 11500 of 20000 utterances
+Completed 12000 of 20000 utterances
+Completed 12500 of 20000 utterances
+Completed 13000 of 20000 utterances
+Completed 13500 of 20000 utterances
+Completed 14000 of 20000 utterances
+Completed 14500 of 20000 utterances
+Completed 15000 of 20000 utterances
+Completed 15500 of 20000 utterances
+Completed 16000 of 20000 utterances
+Completed 16500 of 20000 utterances
+Completed 17000 of 20000 utterances
+Completed 17500 of 20000 utterances
+Completed 18000 of 20000 utterances
+Completed 18500 of 20000 utterances
+Completed 19000 of 20000 utterances
+Completed 19500 of 20000 utterances
+Completed 20000 of 20000 utterances
+Completed 500 of 5000 utterances
+Completed 1000 of 5000 utterances
+Completed 1500 of 5000 utterances
+Completed 2000 of 5000 utterances
+Completed 2500 of 5000 utterances
+Completed 3000 of 5000 utterances
+Completed 3500 of 5000 utterances
+Completed 4000 of 5000 utterances
+Completed 4500 of 5000 utterances
+Completed 5000 of 5000 utterances
+Completed 500 of 3000 utterances
+Completed 1000 of 3000 utterances
+Completed 1500 of 3000 utterances
+Completed 2000 of 3000 utterances
+Completed 2500 of 3000 utterances
+Completed 3000 of 3000 utterances
+# Accounting: time=13039 threads=1
+# Ended (code 0) at Sun Jan 25 04:49:41 JST 2026, elapsed time 13039 seconds

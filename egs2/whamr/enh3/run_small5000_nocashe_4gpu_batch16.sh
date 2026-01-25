@@ -22,8 +22,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --ngpu 4 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_tflocoformer_small.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_5000_4gpu \
+    --enh_config ./conf/tuning/train_enh_tflocoformer_small_nocashe.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_small_5000_nocashe_4gpu \
     --use_dereverb_ref false \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
