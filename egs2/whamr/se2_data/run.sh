@@ -13,11 +13,17 @@ sample_rate=8k
 train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
+train_rand_set=tr_mix_both_rand_reverb_${min_or_max}_${sample_rate}
+valid_rand_set=cv_mix_both_rand_reverb_${min_or_max}_${sample_rate}
+test_rand_sets="tt_mix_both_rand_reverb_${min_or_max}_${sample_rate}"
 
 ./enh2.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
+    --train_rand_set "${train_rand_set}" \
+    --valid_rand_set "${valid_rand_set}" \
+    --test_rand_sets "${test_rand_sets}" \
     --fs ${sample_rate} \
     --ngpu 2 \
     --ref_num 2 \

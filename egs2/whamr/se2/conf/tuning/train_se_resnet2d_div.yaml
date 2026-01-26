@@ -1,0 +1,67 @@
+# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Initialization
+init: xavier_uniform
+
+# Training configuration
+max_epoch: 200
+use_amp: false
+batch_type: folded
+batch_size: 8
+num_workers: 12
+
+# Preprocessor configuration
+preprocessor: se
+preprocessor_conf:
+    speech_volume_normalize: null
+    sample_rate: 8000
+    force_single_channel: true
+    categories: null
+    speech_segment: 32000
+    avoid_allzero_segment: true
+
+# Spatial Encoder model configuration
+encoder: &encoder stft
+encoder_conf:
+    n_fft: &n_fft 256
+    hop_length: &hop_length 64
+spatial_encoder: resnet2d_div
+spatial_encoder_conf:
+    embedding_dim: 128
+    num_channels_mc: 2
+
+# ESPnet model configuration
+model_conf: {}
+
+# Optimizer configuration
+optim: adam
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 0
+
+# Scheduler configuration (fixed LR, no scheduler)
+# scheduler: null  # Not specified = fixed LR
+
+# Validation and model saving
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+
+# Loss configuration
+criterions:
+  - name: pairwise_negative
+    conf:
+        temperature: 0.07
+        eps: 1.0e-8
+    wrapper: contrastive
+    wrapper_conf:
+        weight: 1.0

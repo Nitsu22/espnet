@@ -18,7 +18,7 @@ S2_DIR = 's2'
 NOISE_DIR = 'noise'
 SUFFIXES = ['_anechoic', '_reverb']
 RAND_DB = 2.0
-WRITE_ORIGINAL = False
+WRITE_ORIGINAL = True
 
 CLEAN_DIR_RAND = CLEAN_DIR + '_rand'
 SINGLE_DIR_RAND = SINGLE_DIR + '_rand'

@@ -33,7 +33,7 @@ skip_upload_hf=true     # Skip uploading to huggingface stage.
 ngpu=1                  # The number of gpus ("0" uses cpu, otherwise use gpu).
 num_nodes=1             # The number of nodes
 nj=32                   # The number of parallel jobs.
-dumpdir=dump_dif_rand   # Directory to dump features.
+dumpdir=dump            # Directory to dump features.
 inference_nj=32         # The number of parallel jobs in inference.
 gpu_inference=false     # Whether to perform gpu inference.
 expdir=exp              # Directory to save experiments.
@@ -322,7 +322,7 @@ if ! "${skip_data_prep}"; then
     if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
         log "Stage 1: Data preparation for data/${train_set}, data/${valid_set}, etc."
         # [Task dependent] Need to create data.sh for new corpus
-        local/data_rand_dif.sh ${local_data_opts}
+        local/data.sh ${local_data_opts}
     fi
 
     if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
@@ -773,7 +773,7 @@ if ! "${skip_train}"; then
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
         else
-            train_module=espnet2.bin.enh_train
+            train_module=espnet2.bin.enh_train_se_condition_mc
         fi
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \

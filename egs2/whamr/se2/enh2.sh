@@ -33,7 +33,7 @@ skip_upload_hf=true     # Skip uploading to huggingface stage.
 ngpu=1                  # The number of gpus ("0" uses cpu, otherwise use gpu).
 num_nodes=1             # The number of nodes
 nj=32                   # The number of parallel jobs.
-dumpdir=dump            # Directory to dump features.
+dumpdir=dump_dif_rand   # Directory to dump features.
 inference_nj=32         # The number of parallel jobs in inference.
 gpu_inference=false     # Whether to perform gpu inference.
 expdir=exp              # Directory to save experiments.
@@ -102,6 +102,9 @@ inference_asr_args=   # Arguments for ASR decoding, e.g., "--lm_weight 0.1".
 train_set=       # Name of training set.
 valid_set=       # Name of development set.
 test_sets=       # Names of evaluation sets. Multiple items can be specified.
+train_rand_set=  # Name of training set for rand-reverb.
+valid_rand_set=  # Name of development set for rand-reverb.
+test_rand_sets=  # Names of evaluation sets for rand-reverb. Multiple items can be specified.
 enh_speech_fold_length=800 # fold_length for speech data during enhancement training
 lang=noinfo      # The language type of corpus
 
@@ -196,6 +199,9 @@ Options:
     --train_set     # Name of training set (required).
     --valid_set       # Name of development set (required).
     --test_sets     # Names of evaluation sets (required).
+    --train_rand_set # Name of training set for rand-reverb (required for Stage 3).
+    --valid_rand_set # Name of development set for rand-reverb (required for Stage 3).
+    --test_rand_sets # Names of evaluation sets for rand-reverb (required for Stage 3).
     --enh_speech_fold_length # fold_length for speech data during enhancement training  (default="${enh_speech_fold_length}").
     --lang         # The language type of corpus (default="${lang}")
 EOF
@@ -220,6 +226,14 @@ fi
 [ -z "${train_set}" ] && { log "${help_message}"; log "Error: --train_set is required"; exit 2; };
 [ -z "${valid_set}" ] &&   { log "${help_message}"; log "Error: --valid_set is required"  ; exit 2; };
 [ -z "${test_sets}" ] && { log "${help_message}"; log "Error: --test_sets is required"; exit 2; };
+
+test_sets_array=(${test_sets})
+test_rand_sets_array=(${test_rand_sets})
+if [ "${#test_sets_array[@]}" -ne "${#test_rand_sets_array[@]}" ] && [ -n "${test_rand_sets}" ]; then
+    log "${help_message}"
+    log "Error: --test_sets and --test_rand_sets must have the same number of items"
+    exit 2
+fi
 
 # Extra files for enhancement process
 utt_extra_files="utt2category"
@@ -355,6 +369,10 @@ if ! "${skip_data_prep}"; then
 
     if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 
+        [ -z "${train_rand_set}" ] && { log "${help_message}"; log "Error: --train_rand_set is required for Stage 3"; exit 2; };
+        [ -z "${valid_rand_set}" ] && { log "${help_message}"; log "Error: --valid_rand_set is required for Stage 3"; exit 2; };
+        [ -z "${test_rand_sets}" ] && { log "${help_message}"; log "Error: --test_rand_sets is required for Stage 3"; exit 2; };
+
         log "Stage 3: Format wav.scp: data/ -> ${data_feats}"
 
         # ====== Recreating "wav.scp" ======
@@ -365,84 +383,79 @@ if ! "${skip_data_prep}"; then
         # If nothing is need, then format_wav_scp.sh does nothing:
         # i.e. the input file format and rate is same as the output.
 
+        data_reverb_dir=../enh1/data
+        data_rand_dir=./data
+        data_dif_rand_dir=../se2_data/data
+
         for dset in "${train_set}" "${valid_set}" ${test_sets}; do
             if [ "${dset}" = "${train_set}" ] || [ "${dset}" = "${valid_set}" ]; then
                 _suf="/org"
             else
                 _suf=""
             fi
-            utils/copy_data_dir.sh data/"${dset}" "${data_feats}${_suf}/${dset}"
-            rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,reco2file_and_channel}
+            if [ "${dset}" = "${train_set}" ]; then
+                rand_dset="${train_rand_set}"
+            elif [ "${dset}" = "${valid_set}" ]; then
+                rand_dset="${valid_rand_set}"
+            else
+                rand_dset=""
+                for i in "${!test_sets_array[@]}"; do
+                    if [ "${dset}" = "${test_sets_array[$i]}" ]; then
+                        rand_dset="${test_rand_sets_array[$i]}"
+                        break
+                    fi
+                done
+                if [ -z "${rand_dset}" ]; then
+                    log "Error: Failed to map ${dset} to --test_rand_sets"
+                    exit 2
+                fi
+            fi
+
+            utils/copy_data_dir.sh "${data_reverb_dir}/${dset}" "${data_feats}${_suf}/${dset}"
+            rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,wav_rand.scp,wav_dif_rand.scp,reco2file_and_channel}
             _opts=
-            if [ -e data/"${dset}"/segments ]; then
+            _opts_rand=
+            _opts_dif_rand=
+            if [ -e "${data_reverb_dir}/${dset}"/segments ]; then
                 # "segments" is used for splitting wav files which are written in "wav".scp
                 # into utterances. The file format of segments:
                 #   <segment_id> <record_id> <start_time> <end_time>
                 #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
                 # Where the time is written in seconds.
-                _opts+="--segments data/${dset}/segments "
+                _opts+="--segments ${data_reverb_dir}/${dset}/segments "
+            fi
+            if [ -e "${data_rand_dir}/${rand_dset}"/segments ]; then
+                _opts_rand+="--segments ${data_rand_dir}/${rand_dset}/segments "
+            fi
+            if [ -e "${data_dif_rand_dir}/${rand_dset}"/segments ]; then
+                _opts_dif_rand+="--segments ${data_dif_rand_dir}/${rand_dset}/segments "
             fi
 
+            # shellcheck disable=SC2086
+            scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
+                --out-filename "wav.scp" \
+                --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
+                "${data_reverb_dir}/${dset}/wav.scp" "${data_feats}${_suf}/${dset}" \
+                "${data_feats}${_suf}/${dset}/logs/wav" "${data_feats}${_suf}/${dset}/data/wav"
 
-            _spk_list=" "
-            for i in $(seq ${ref_num}); do
-                _spk_list+="spk${i} "
-                if $is_tse_task; then
-                    _spk_list+="enroll_spk${i} "
-                fi
-            done
-            if $use_noise_ref && [ -n "${_suf}" ]; then
-                # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
-                _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
-            fi
-            if $use_dereverb_ref && [ -n "${_suf}" ]; then
-                # references for dereverberation
-                _spk_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n "; done)
-            fi
+            # shellcheck disable=SC2086
+            scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
+                --out-filename "wav_rand.scp" \
+                --audio-format "${audio_format}" --fs "${fs}" ${_opts_rand} \
+                "${data_rand_dir}/${rand_dset}/wav.scp" "${data_feats}${_suf}/${dset}" \
+                "${data_feats}${_suf}/${dset}/logs/wav_rand" "${data_feats}${_suf}/${dset}/data/wav_rand"
 
-            for spk in "wav" ${_spk_list}; do
-                if ${is_tse_task} && [[ "${spk}" == enroll_spk* ]]; then
-                    audio_path=$(head -n 1 "data/${dset}/${spk}.scp" | awk '{print $2}')
-                    if [[ ("${dset}" == "${train_set}" && "${audio_path:0:1}" == "*") || "${audio_path: -4}" == ".npy" ]]; then
-                        # In case of
-                        # 1. a special format in `enroll_spk?.scp`:
-                        # MIXTURE_UID *UID SPEAKER_ID
-                        # 2. speaker embeddings instead of enrollment audios in `enroll_spk?.scp`
-                        utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
-                        continue
-                    fi
-                fi
-                if ${variable_num_refs}; then
-                    if [[ "${spk}" == spk* ]] || [[ "${spk}" == dereverb* ]] || [[ "${spk}" == enroll_spk* ]]; then
-                        # skip formatting for multi-audio-column scp files
-                        utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
-                        continue
-                    fi
-                fi
-                # shellcheck disable=SC2086
-                scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                    --out-filename "${spk}.scp" \
-                    --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                    "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
-                    "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
-
-            done
-
-            for f in $extra_wav_list; do
-                if [ -e "data/${dset}/$f" ]; then
-                    # shellcheck disable=SC2086
-                    scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                        --out-filename "$f" \
-                        --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                        "data/${dset}/$f" "${data_feats}/${dset}" \
-                        "${data_feats}/${dset}/logs/${f%.*}" "${data_feats}/${dset}/data/${f%.*}"
-                fi
-            done
+            # shellcheck disable=SC2086
+            scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
+                --out-filename "wav_dif_rand.scp" \
+                --audio-format "${audio_format}" --fs "${fs}" ${_opts_dif_rand} \
+                "${data_dif_rand_dir}/${rand_dset}/wav.scp" "${data_feats}${_suf}/${dset}" \
+                "${data_feats}${_suf}/${dset}/logs/wav_dif_rand" "${data_feats}${_suf}/${dset}/data/wav_dif_rand"
 
             echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
 
             for f in ${utt_extra_files}; do
-                [ -f data/${dset}/${f} ] && cp data/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
+                [ -f "${data_reverb_dir}/${dset}/${f}" ] && cp "${data_reverb_dir}/${dset}/${f}" "${data_feats}${_suf}/${dset}/${f}"
             done
 
         done
@@ -455,32 +468,14 @@ if ! "${skip_data_prep}"; then
         for dset in "${train_set}" "${valid_set}"; do
         # NOTE: Not applying to test_sets to keep original data
 
-            _spk_list=" "
-            _scp_list=" "
-            for i in $(seq ${ref_num}); do
-                _spk_list+="spk${i} "
-                _scp_list+="spk${i}.scp "
-                if $is_tse_task; then
-                    _spk_list+="enroll_spk${i} "
-                    _scp_list+="enroll_spk${i}.scp "
-                fi
-            done
-            if $use_noise_ref; then
-                # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
-                _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
-                _scp_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n.scp "; done)
-            fi
-            if $use_dereverb_ref; then
-                # references for dereverberation
-                _spk_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n "; done)
-                _scp_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n.scp "; done)
-            fi
+            _wav_list="wav wav_rand wav_dif_rand"
+            _scp_list="wav_rand.scp wav_dif_rand.scp"
 
             # Copy data dir
             utils/copy_data_dir.sh "${data_feats}/org/${dset}" "${data_feats}/${dset}"
             cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
-            for spk in ${_spk_list};do
-                cp "${data_feats}/org/${dset}/${spk}.scp" "${data_feats}/${dset}/${spk}.scp"
+            for wav_name in ${_wav_list}; do
+                cp "${data_feats}/org/${dset}/${wav_name}.scp" "${data_feats}/${dset}/${wav_name}.scp"
             done
             for f in ${utt_extra_files}; do
                 if [ -f "${data_feats}/org/${dset}/${f}" ]; then
@@ -497,10 +492,10 @@ if ! "${skip_data_prep}"; then
                 awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
                     '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
                     >"${data_feats}/${dset}/utt2num_samples"
-            for spk in ${_spk_list} "wav"; do
-                <"${data_feats}/org/${dset}/${spk}.scp" \
+            for wav_name in ${_wav_list}; do
+                <"${data_feats}/org/${dset}/${wav_name}.scp" \
                     utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
-                    >"${data_feats}/${dset}/${spk}.scp"
+                    >"${data_feats}/${dset}/${wav_name}.scp"
             done
 
             # fix_data_dir.sh leaves only utts which exist in all files
