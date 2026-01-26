@@ -21,7 +21,7 @@ from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh.encoder.conv_encoder import ConvEncoder
 from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
-from espnet2.enh.espnet_model_se_condition import ESPnetEnhancementModel
+from espnet2.enh.espnet_model_se_condition_mc import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tf_domain import (
     FrequencyDomainAbsCoherence,

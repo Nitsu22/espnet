@@ -5,9 +5,10 @@ import re
 from typing import Dict, List, Optional, Union
 
 import numpy as np
+import scipy.signal
 from typeguard import typechecked
 
-from espnet2.train.preprocessor import CommonPreprocessor
+from espnet2.train.preprocessor import CommonPreprocessor, detect_non_silence, any_allzero
 
 
 class SePreprocessor(CommonPreprocessor):
