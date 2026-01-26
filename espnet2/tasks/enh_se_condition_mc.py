@@ -71,6 +71,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_se_condition import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_se_condition_mc import (
     TFLocoformerSeparatorSECondition as TFLocoformerSeparatorSEConditionMC,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_se_condition_mc_aeafusion import (
+    TFLocoformerSeparatorSECondition as TFLocoformerSeparatorSEConditionMCAEAFusion,
+)
 from espnet2.enh.separator.transformer_separator import TransformerSeparator
 from espnet2.enh.separator.uses_separator import USESSeparator
 from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
@@ -128,6 +131,7 @@ separator_choices = ClassChoices(
         tflocoformer_sp=TFLocoformerSeparatorSECondition,
         tflocoformer_sp_nocache=TFLocoformerSeparatorSEConditionNocache,
         tflocoformer_sp_nocache_mc=TFLocoformerSeparatorSEConditionMC,
+        tflocoformer_sp_nocache_mc_aeafusion=TFLocoformerSeparatorSEConditionMCAEAFusion,
     ),
     type_check=AbsSeparator,
     default="rnn",
