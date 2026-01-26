@@ -155,19 +155,11 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                 num_channels_mc=num_channels_mc,
             )
             self.num_channels_mc = num_channels_mc
-            
-            # 学習済みパラメータの読み込み
             if spatial_encoder_path is not None and spatial_encoder_path != "":
-                checkpoint = torch.load(spatial_encoder_path, map_location='cpu')
-                # ESPnetのチェックポイントは通常、model.state_dict()がそのまま保存されている
-                # キーは "spatial_encoder.xxx" の形式なので、プレフィックスを除去
-                spatial_encoder_state = {
-                    k.replace("spatial_encoder.", ""): v
-                    for k, v in checkpoint.items()
-                    if k.startswith("spatial_encoder.")
-                }
-                if spatial_encoder_state:
-                    self.spatial_encoder.load_state_dict(spatial_encoder_state, strict=False)
+                raise ValueError(
+                    "spatial_encoder_path is not supported; "
+                    "spatial encoder is trained from scratch."
+                )
             
             # trainableフラグを保存
             self.spatial_encoder_trainable = spatial_encoder_trainable
@@ -234,6 +226,11 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                     "use_spatial_encoder is True."
                 )
             feature_mix_mc = additional["feature_mix_mc"]
+            if feature_mix_mc.ndim != 4 or feature_mix_mc.shape[2] != self.num_channels_mc:
+                raise ValueError(
+                    "feature_mix_mc must be [B, T, C, F] with "
+                    f"C={self.num_channels_mc}, but got {tuple(feature_mix_mc.shape)}"
+                )
             # trainableがFalseの場合は勾配計算を無効化
             if not self.spatial_encoder_trainable:
                 with torch.no_grad():
@@ -244,6 +241,11 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                 spatial_emb = self.spatial_encoder(
                     feature_mix_mc, ilens, num_channels=self.num_channels_mc
                 )  # [B, embed_dim]
+            if spatial_emb.ndim != 2 or spatial_emb.shape[0] != batch.shape[0]:
+                raise ValueError(
+                    "spatial encoder output must be [B, D] with "
+                    f"B={batch.shape[0]}, but got {tuple(spatial_emb.shape)}"
+                )
             batch = self.film(spatial_emb, batch)  # [B, emb_dim, T, F]
 
         # separation
