@@ -46,6 +46,7 @@ scheduler_conf:
     mode: min
     factor: 0.5
     patience: 3
+unused_parameters: True
 
 # model configuration
 encoder: &encoder stft
