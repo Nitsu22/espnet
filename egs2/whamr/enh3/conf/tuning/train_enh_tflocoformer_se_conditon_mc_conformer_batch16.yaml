@@ -55,6 +55,10 @@ encoder: &encoder stft
 encoder_conf:
     n_fft: &n_fft 256
     hop_length: &hop_length 64
+spatial_encoder_encoder: stft
+spatial_encoder_encoder_conf:
+    n_fft: *n_fft
+    hop_length: *hop_length
 decoder: *encoder
 decoder_conf:
     n_fft: *n_fft

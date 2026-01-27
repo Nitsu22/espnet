@@ -112,3 +112,4 @@ runtest*.sh
 whamr_scripts/data/
 whamr_scripts/*.log
 trun_*.sh
+ttrain_*.yaml
