@@ -1,0 +1,112 @@
+# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# tflocoformer_sp_nocache_mc_conformer + mc_conformer spatial encoder
+# spatial_encoder が spatial_embedding を生成し、separator で FiLM に使用する
+
+init: xavier_uniform
+max_epoch: 150
+use_amp: false
+batch_type: folded
+batch_size: 4  # batch size 4 on 4 RTX 2080Ti
+num_workers: 4
+
+# preprocessor
+preprocessor: enh_plus
+num_spk: &num_spk 2
+iterator_type: sequence
+speech_segment: 32000
+shuffle_within_batch: true
+force_single_channel: true
+
+# espnet model configuration
+model_conf:
+    normalize_variance: true
+
+# optimizer and scheduler
+optim: adamw
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 1.0e-02
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - si_snr
+    - max
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+    warmup_steps: 4000
+    mode: min
+    factor: 0.5
+    patience: 3
+unused_parameters: true
+
+# model configuration
+encoder: &encoder stft
+encoder_conf:
+    n_fft: &n_fft 256
+    hop_length: &hop_length 64
+decoder: *encoder
+decoder_conf:
+    n_fft: *n_fft
+    hop_length: *hop_length
+
+# tflocoformer_sp_nocache_mc_conformer は additional["spatial_embedding"] を要求。
+# spatial_embed_dim は mc_conformer の embed_dim と一致させる。
+separator: tflocoformer_sp_nocache_mc_conformer
+separator_conf:
+    num_spk: *num_spk
+    n_layers: 4
+    emb_dim: 96
+    norm_type: rmsgroupnorm
+    num_groups: 4
+    tf_order: ft
+    # self-attention
+    n_heads: 4
+    flash_attention: false
+    # ffn
+    ffn_type:
+        - swiglu_conv1d
+        - swiglu_conv1d
+    ffn_hidden_dim:
+        - 128
+        - 128 # list order must be the same as ffn_type
+    conv1d_kernel: 8
+    conv1d_shift: 1
+    dropout: 0.0
+    # others
+    eps: 1.0e-5
+    # spatial_embedding の次元（mc_conformer の embed_dim と同一にすること）
+    spatial_embed_dim: &spatial_emb 256
+
+# mc_conformer: 入力 [B,T,C,F] 複素スペクトル、freq_bins は encoder の n_fft に合わせる
+# n_fft=256, onesided → F = 129
+spatial_encoder: mc_conformer
+spatial_encoder_conf:
+    embed_dim: *spatial_emb
+    num_channels_mc: 2
+    freq_bins: 129   # n_fft 256, onesided → 256//2+1
+    attention_heads: 4
+    num_blocks: 3
+    ffn_expansion: 4
+    conv_kernel_size: 31
+    dropout_rate: 0.1
+    eps: 1.0e-8
+
+criterions:
+  - name: si_snr
+    conf:
+        eps: 1.0e-7
+    wrapper: pit
+    wrapper_conf:
+        weight: 1.0
+        independent_perm: true
