@@ -39,6 +39,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         loss_wrappers: Optional[List[AbsLossWrapper]],
         spatial_encoder: Optional[AbsSpatialEncoder] = None,
         spatial_encoder_encoder: Optional[AbsEncoder] = None,
+        spatial_encoder_pooling: bool = True,
         stft_consistency: bool = False,
         loss_type: str = "mask_mse",
         mask_type: Optional[str] = None,
@@ -66,6 +67,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
                 to extract spatial embeddings (e.g., MCConformerSpatialEncoder)
             spatial_encoder_encoder: encoder used to compute spatial encoder inputs
                 from multi-channel waveforms (e.g., STFTEncoder)
+            spatial_encoder_pooling: whether to pool spatial embeddings over time
             ------------------------------------------------------------------
             stft_consistency: (deprecated, kept for compatibility) whether to compute
                 the TF-domain loss while enforcing STFT consistency
@@ -106,6 +108,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         self.mask_module = mask_module
         self.spatial_encoder = spatial_encoder
         self.spatial_encoder_encoder = spatial_encoder_encoder
+        self.spatial_encoder_pooling = spatial_encoder_pooling
         # set num_spk to -1 if None for compatibility with `espnet2.enh.diffusion_enh`
         self.num_spk = separator.num_spk if separator is not None else -1
         # If True, self.num_spk is regarded as the MAXIMUM possible number of speakers
@@ -363,7 +366,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
             )
             # num_channelsはNoneにすると、spatial_encoderのconfigから自動的に取得される
             spatial_embedding = self.spatial_encoder(
-                feature_mix_mc, flens_mc, None, pooling=True
+                feature_mix_mc, flens_mc, None, pooling=self.spatial_encoder_pooling
             )  # [B, embed_dim]
             additional["spatial_embedding"] = spatial_embedding
         

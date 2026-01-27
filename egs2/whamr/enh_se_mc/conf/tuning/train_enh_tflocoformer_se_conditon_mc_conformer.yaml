@@ -89,6 +89,7 @@ separator_conf:
     dropout: 0.0
     # others
     eps: 1.0e-5
+    spatial_film_mode: global
     # spatial_embedding の次元（mc_conformer の embed_dim と同一にすること）
     spatial_embed_dim: &spatial_emb 256
 
@@ -99,6 +100,7 @@ spatial_encoder_conf:
     embed_dim: *spatial_emb
     num_channels_mc: 2
     freq_bins: 129   # n_fft 256, onesided → 256//2+1
+    pooling: true
     attention_heads: 4
     num_blocks: 3
     ffn_expansion: 4

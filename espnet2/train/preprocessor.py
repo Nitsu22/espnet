@@ -2,10 +2,15 @@ import json
 import logging
 import random
 import re
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Collection, Dict, Iterable, List, Optional, Tuple, Union
 
+# librosa/util/files.py の pkg_resources 非推奨 UserWarning を抑制
+warnings.filterwarnings(
+    "ignore", message="pkg_resources is deprecated", category=UserWarning
+)
 import librosa
 import numpy as np
 import scipy.signal
@@ -1199,11 +1204,11 @@ class EnhPreprocessor(CommonPreprocessor):
         ]
         length = speech_refs[0].shape[0]
         if length <= tgt_length:
-            if length < tgt_length:
-                logging.warning(
-                    f"The sample ({uid}) is not cropped due to its short length "
-                    f"({length} < {tgt_length})."
-                )
+            # if length < tgt_length:
+            #     logging.warning(
+            #         f"The sample ({uid}) is not cropped due to its short length "
+            #         f"({length} < {tgt_length})."
+            #     )
             return 0, length
 
         start = np.random.randint(0, length - tgt_length)

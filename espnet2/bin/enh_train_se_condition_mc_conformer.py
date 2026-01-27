@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+import warnings
+
+warnings.filterwarnings(
+    "ignore", message="pkg_resources is deprecated", category=UserWarning
+)
+
 from espnet2.tasks.enh_se_condition_mc_conformer import EnhancementTask
 
 

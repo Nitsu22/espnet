@@ -554,6 +554,7 @@ class EnhancementTask(AbsTask):
         # 次元は spatial_embed_dim で合わせる。
         spatial_encoder = None
         spatial_encoder_encoder = None
+        spatial_encoder_pooling = True
         separator_conf = args.separator_conf.copy()
         if getattr(args, "spatial_encoder_encoder", None) is not None:
             spatial_encoder_encoder_conf = getattr(
@@ -567,7 +568,12 @@ class EnhancementTask(AbsTask):
                 raise ValueError(
                     "spatial_encoder_encoder must be specified when spatial_encoder is used."
                 )
-            spatial_encoder_conf = getattr(args, "spatial_encoder_conf", {})
+            spatial_encoder_conf = getattr(args, "spatial_encoder_conf", {}).copy()
+            spatial_encoder_pooling = spatial_encoder_conf.pop("pooling", True)
+            if not spatial_encoder_pooling and args.spatial_encoder != "mc_conformer":
+                raise ValueError(
+                    "temporal FiLM requires spatial_encoder=mc_conformer."
+                )
             spatial_encoder = spatial_encoder_choices.get_class(args.spatial_encoder)(
                 **spatial_encoder_conf
             )
@@ -581,6 +587,15 @@ class EnhancementTask(AbsTask):
                 )
             if emb is not None and "spatial_embed_dim" not in separator_conf:
                 separator_conf["spatial_embed_dim"] = emb
+            desired_mode = "global" if spatial_encoder_pooling else "temporal"
+            if "spatial_film_mode" in separator_conf:
+                if separator_conf["spatial_film_mode"] != desired_mode:
+                    raise ValueError(
+                        "spatial_film_mode must match spatial_encoder_conf.pooling: "
+                        f"{separator_conf['spatial_film_mode']} vs {desired_mode}"
+                    )
+            else:
+                separator_conf["spatial_film_mode"] = desired_mode
 
         separator = separator_choices.get_class(args.separator)(
             encoder.output_dim, **separator_conf
@@ -630,6 +645,7 @@ class EnhancementTask(AbsTask):
                 mask_module=mask_module,
                 spatial_encoder=spatial_encoder,
                 spatial_encoder_encoder=spatial_encoder_encoder,
+                spatial_encoder_pooling=spatial_encoder_pooling,
                 **args.model_conf,
             )
 

@@ -124,11 +124,11 @@ class SePreprocessor(CommonPreprocessor):
         length = speech_mix.shape[0]
         
         if length <= tgt_length:
-            if length < tgt_length:
-                logging.warning(
-                    f"The sample ({uid}) is not cropped due to its short length "
-                    f"({length} < {tgt_length})."
-                )
+            # if length < tgt_length:
+            #     logging.warning(
+            #         f"The sample ({uid}) is not cropped due to its short length "
+            #         f"({length} < {tgt_length})."
+            #     )
             return 0, length
 
         start = np.random.randint(0, length - tgt_length)
@@ -486,11 +486,11 @@ class EnhPreprocessorPlus(CommonPreprocessor):
         ]
         length = speech_refs[0].shape[0]
         if length <= tgt_length:
-            if length < tgt_length:
-                logging.warning(
-                    f"The sample ({uid}) is not cropped due to its short length "
-                    f"({length} < {tgt_length})."
-                )
+            # if length < tgt_length:
+            #     logging.warning(
+            #         f"The sample ({uid}) is not cropped due to its short length "
+            #         f"({length} < {tgt_length})."
+            #     )
             return 0, length
 
         start = np.random.randint(0, length - tgt_length)
