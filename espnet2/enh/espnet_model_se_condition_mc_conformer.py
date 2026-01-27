@@ -351,7 +351,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         if self.spatial_encoder is not None:
             # num_channelsはNoneにすると、spatial_encoderのconfigから自動的に取得される
             spatial_embedding = self.spatial_encoder(
-                speech_mix_mc, flens_mc, None, pooling=True
+                speech_mix_mc, speech_lengths, None, pooling=True
             )  # [B, embed_dim]
             additional["spatial_embedding"] = spatial_embedding
         
