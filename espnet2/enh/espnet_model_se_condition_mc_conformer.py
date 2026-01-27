@@ -38,6 +38,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         mask_module: Optional[AbsMask],
         loss_wrappers: Optional[List[AbsLossWrapper]],
         spatial_encoder: Optional[AbsSpatialEncoder] = None,
+        spatial_encoder_encoder: Optional[AbsEncoder] = None,
         stft_consistency: bool = False,
         loss_type: str = "mask_mse",
         mask_type: Optional[str] = None,
@@ -63,6 +64,8 @@ class ESPnetEnhancementModel(AbsESPnetModel):
                 The losses will be calculated in the order of the list and summed up.
             spatial_encoder: spatial encoder module that processes multi-channel features
                 to extract spatial embeddings (e.g., MCConformerSpatialEncoder)
+            spatial_encoder_encoder: encoder used to compute spatial encoder inputs
+                from multi-channel waveforms (e.g., STFTEncoder)
             ------------------------------------------------------------------
             stft_consistency: (deprecated, kept for compatibility) whether to compute
                 the TF-domain loss while enforcing STFT consistency
@@ -102,6 +105,7 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         self.decoder = decoder
         self.mask_module = mask_module
         self.spatial_encoder = spatial_encoder
+        self.spatial_encoder_encoder = spatial_encoder_encoder
         # set num_spk to -1 if None for compatibility with `espnet2.enh.diffusion_enh`
         self.num_spk = separator.num_spk if separator is not None else -1
         # If True, self.num_spk is regarded as the MAXIMUM possible number of speakers
@@ -347,11 +351,19 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         
         feature_mix, flens = self.encoder(speech_mix, speech_lengths, fs=fs)
         
-        # spatial_encoderが存在する場合、spatial embeddingを計算してadditionalに追加
+        # spatial_encoderが存在する場合、spatial_encoder_encoderで
+        # feature_mix_mc [B,T,C,F] を計算して spatial embedding を追加
         if self.spatial_encoder is not None:
+            if self.spatial_encoder_encoder is None:
+                raise ValueError(
+                    "spatial_encoder_encoder must be provided when spatial_encoder is set."
+                )
+            feature_mix_mc, flens_mc = self.spatial_encoder_encoder(
+                speech_mix_mc, speech_lengths, fs=fs
+            )
             # num_channelsはNoneにすると、spatial_encoderのconfigから自動的に取得される
             spatial_embedding = self.spatial_encoder(
-                speech_mix_mc, speech_lengths, None, pooling=True
+                feature_mix_mc, flens_mc, None, pooling=True
             )  # [B, embed_dim]
             additional["spatial_embedding"] = spatial_embedding
         

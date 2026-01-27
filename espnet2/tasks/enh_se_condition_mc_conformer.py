@@ -221,6 +221,14 @@ spatial_encoder_choices = ClassChoices(
     optional=True,
 )
 
+spatial_encoder_encoder_choices = ClassChoices(
+    name="spatial_encoder_encoder",
+    classes=dict(stft=STFTEncoder, conv=ConvEncoder, same=NullEncoder),
+    type_check=AbsEncoder,
+    default=None,
+    optional=True,
+)
+
 
 MAX_REFERENCE_NUM = 100
 
@@ -244,6 +252,8 @@ class EnhancementTask(AbsTask):
         diffusion_choices,
         # --spatial_encoder and --spatial_encoder_conf
         spatial_encoder_choices,
+        # --spatial_encoder_encoder and --spatial_encoder_encoder_conf
+        spatial_encoder_encoder_choices,
     ]
 
     # If you need to modify train() or eval() procedures, change Trainer class here
@@ -539,12 +549,24 @@ class EnhancementTask(AbsTask):
 
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
 
-        # spatial_encoder（mc_conformer 等）をモデル用に構築。
+        # spatial_encoder（mc_conformer 等）と spatial_encoder_encoder をモデル用に構築。
         # tflocoformer_sp_nocache_mc_conformer は additional["spatial_embedding"] を要求し、
         # 次元は spatial_embed_dim で合わせる。
         spatial_encoder = None
+        spatial_encoder_encoder = None
         separator_conf = args.separator_conf.copy()
+        if getattr(args, "spatial_encoder_encoder", None) is not None:
+            spatial_encoder_encoder_conf = getattr(
+                args, "spatial_encoder_encoder_conf", {}
+            )
+            spatial_encoder_encoder = spatial_encoder_encoder_choices.get_class(
+                args.spatial_encoder_encoder
+            )(**spatial_encoder_encoder_conf)
         if getattr(args, "spatial_encoder", None) is not None:
+            if spatial_encoder_encoder is None:
+                raise ValueError(
+                    "spatial_encoder_encoder must be specified when spatial_encoder is used."
+                )
             spatial_encoder_conf = getattr(args, "spatial_encoder_conf", {})
             spatial_encoder = spatial_encoder_choices.get_class(args.spatial_encoder)(
                 **spatial_encoder_conf
@@ -607,6 +629,7 @@ class EnhancementTask(AbsTask):
                 loss_wrappers=loss_wrappers,
                 mask_module=mask_module,
                 spatial_encoder=spatial_encoder,
+                spatial_encoder_encoder=spatial_encoder_encoder,
                 **args.model_conf,
             )
 
