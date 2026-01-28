@@ -252,6 +252,34 @@ class SeparateSpeech:
             else:
                 additional["mode"] = "no_dereverb"
 
+        # Resolve speech_mix_mc and spatial_embedding for models with spatial_encoder
+        # (e.g. tflocoformer_sp_nocache_mc_conformer with FiLM conditioning)
+        _has_spatial = (
+            getattr(self.enh_model, "spatial_encoder", None) is not None
+            and getattr(self.enh_model, "spatial_encoder_encoder", None) is not None
+        )
+        speech_mix_mc = None
+        if _has_spatial:
+            speech_mix_mc = kwargs.get("speech_mix_mc", None)
+            if speech_mix_mc is None and speech_mix.dim() == 3 and speech_mix.shape[-1] >= 2:
+                # Use speech_mix as speech_mix_mc when it is [B, T, C] (multi-channel)
+                speech_mix_mc = speech_mix
+                speech_mix = speech_mix[:, :, self.ref_channel]
+            elif speech_mix.dim() == 3 and speech_mix.shape[-1] >= 2:
+                # speech_mix is [B,T,C]; use 1ch for main encoder (speech_mix_mc already set or will be)
+                speech_mix = speech_mix[:, :, self.ref_channel]
+            if speech_mix_mc is None:
+                raise ValueError(
+                    "This model requires 'spatial_embedding' for FiLM conditioning, "
+                    "which is computed from multi-channel input 'speech_mix_mc'. "
+                    "Provide 'speech_mix_mc' via --data_path_and_name_and_type "
+                    ".../wav_mc.scp,speech_mix_mc,sound. "
+                    "If wav.scp contains multi-channel files and the loader yields "
+                    "speech_mix with shape [B,T,C], speech_mix_mc is inferred from it."
+                )
+            speech_mix_mc = to_device(speech_mix_mc, device=self.device)
+            speech_mix_mc = speech_mix_mc[:, : lengths.max().item(), :]
+
         if self.segmenting and lengths[0] > self.segment_size * fs:
             # Segment-wise speech enhancement/separation
             overlap_length = int(np.round(fs * (self.segment_size - self.hop_size)))
@@ -278,6 +306,26 @@ class SeparateSpeech:
                 lengths_seg = speech_mix.new_full(
                     [batch_size], dtype=torch.long, fill_value=T
                 )
+                # spatial_embedding for this segment (when model has spatial_encoder)
+                if _has_spatial:
+                    if en >= lengths[0]:
+                        pad_shape_mc = (batch_size, T, speech_mix_mc.shape[2])
+                        speech_mix_mc_seg = speech_mix_mc.new_zeros(pad_shape_mc)
+                        speech_mix_mc_seg[:, :t, :] = speech_mix_mc[:, st:en, :]
+                    else:
+                        speech_mix_mc_seg = speech_mix_mc[:, st:en, :]
+                    _fm_mc, _fl_mc = self.enh_model.spatial_encoder_encoder(
+                        speech_mix_mc_seg, lengths_seg, fs=fs
+                    )
+                    _emb = self.enh_model.spatial_encoder(
+                        _fm_mc,
+                        _fl_mc,
+                        num_channels=None,
+                        pooling=getattr(
+                            self.enh_model, "spatial_encoder_pooling", True
+                        ),
+                    )
+                    additional["spatial_embedding"] = _emb
                 # b. Enhancement/Separation Forward
                 feats, f_lens = self.enh_model.encoder(speech_seg, lengths_seg)
                 if isinstance(self.enh_model, ESPnetDiffusionModel):
@@ -338,6 +386,19 @@ class SeparateSpeech:
             assert waves.size(2) == speech_mix.size(1), (waves.shape, speech_mix.shape)
             waves = torch.unbind(waves, dim=0)
         else:
+            # spatial_embedding for direct path (when model has spatial_encoder)
+            if _has_spatial:
+                _fm_mc, _fl_mc = self.enh_model.spatial_encoder_encoder(
+                    speech_mix_mc, lengths, fs=fs
+                )
+                additional["spatial_embedding"] = self.enh_model.spatial_encoder(
+                    _fm_mc,
+                    _fl_mc,
+                    num_channels=None,
+                    pooling=getattr(
+                        self.enh_model, "spatial_encoder_pooling", True
+                    ),
+                )
             # b. Enhancement/Separation Forward
             feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
             if isinstance(self.enh_model, ESPnetDiffusionModel):

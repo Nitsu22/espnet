@@ -3,8 +3,10 @@
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
+import torch.nn.functional as F
 from typeguard import typechecked
 
+from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
 
@@ -28,6 +30,9 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         encoder: "AbsEncoder",
         spatial_encoder: "AbsSpatialEncoder",
         loss_wrappers: Optional[List] = None,
+        teacher_spatial_encoder: Optional["AbsSpatialEncoder"] = None,
+        teacher_spatial_encoder_encoder: Optional["AbsEncoder"] = None,
+        l2_norm_eps: float = 1e-8,
     ):
         """Initialize Spatial Encoder model.
 
@@ -40,6 +45,9 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         
         self.encoder = encoder
         self.spatial_encoder = spatial_encoder
+        self.teacher_spatial_encoder = teacher_spatial_encoder
+        self.teacher_spatial_encoder_encoder = teacher_spatial_encoder_encoder
+        self.l2_norm_eps = l2_norm_eps
         
         self.loss_wrappers = loss_wrappers
         if self.loss_wrappers is not None:
@@ -48,6 +56,30 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
                 raise ValueError(
                     "Duplicated loss names are not allowed: {}".format(names)
                 )
+
+        if self.teacher_spatial_encoder is not None:
+            for p in self.teacher_spatial_encoder.parameters():
+                p.requires_grad = False
+        if self.teacher_spatial_encoder_encoder is not None:
+            for p in self.teacher_spatial_encoder_encoder.parameters():
+                p.requires_grad = False
+
+        self._set_teacher_eval()
+
+    def _set_teacher_eval(self):
+        if self.teacher_spatial_encoder is not None:
+            self.teacher_spatial_encoder.eval()
+        if self.teacher_spatial_encoder_encoder is not None:
+            self.teacher_spatial_encoder_encoder.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        # Keep teacher in eval mode (cold teacher)
+        self._set_teacher_eval()
+        return self
+
+    def _l2_normalize(self, x: torch.Tensor) -> torch.Tensor:
+        return F.normalize(x, p=2, dim=-1, eps=self.l2_norm_eps)
 
     def forward(
         self,
@@ -130,6 +162,7 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         if "embedding_anchor" in kwargs:
             # Use provided anchor embedding
             embedding_anchor = kwargs["embedding_anchor"]
+            flens = kwargs.get("frame_lengths", None)
         else:
             # Compute anchor from SC (mix)
             # speech_mix should be SC at this point
@@ -140,32 +173,98 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
                 )
             # Encode waveform to spectrum
             feature_mix, flens = self.encoder(speech_mix, speech_lengths, fs=fs)  # [B, T, F] (complex)
+            # MCConformer expects [B, T, C, F]; add channel dim for SC
+            if feature_mix.ndim == 3:
+                feature_mix = feature_mix.unsqueeze(2)  # [B, T, 1, F]
             # Explicitly specify num_channels=1 for SC
-            embedding_anchor = self.spatial_encoder(feature_mix, flens, num_channels=1)  # [B, embed_dim]
+            embedding_anchor = self.spatial_encoder(
+                feature_mix, flens, num_channels=1
+            )  # [B, T, embed_dim] or [B, embed_dim]
         
         # Positive: MC (mix)
         if "embedding_pos" in kwargs:
             embedding_pos = kwargs["embedding_pos"]
+            flens_pos = kwargs.get("frame_lengths", flens)
+        elif self.teacher_spatial_encoder is not None:
+            if "speech_mix_mc" not in kwargs:
+                raise ValueError(
+                    "speech_mix_mc is required for teacher positive embedding."
+                )
+            if self.teacher_spatial_encoder_encoder is None:
+                raise ValueError(
+                    "teacher_spatial_encoder_encoder must be provided when "
+                    "teacher_spatial_encoder is set."
+                )
+            with torch.no_grad():
+                self._set_teacher_eval()
+                speech_mix_mc = kwargs["speech_mix_mc"]  # [B, T, C]
+                feature_mc, flens_pos = self.teacher_spatial_encoder_encoder(
+                    speech_mix_mc, speech_lengths, fs=fs
+                )  # [B, T, C, F]
+                embedding_pos = self.teacher_spatial_encoder(
+                    feature_mc, flens_pos, num_channels=None
+                )
         elif "speech_mix_mc" in kwargs:
             speech_mix_mc = kwargs["speech_mix_mc"]  # [B, T, C]
             # Encode waveform to spectrum
             feature_mc, flens_mc = self.encoder(speech_mix_mc, speech_lengths, fs=fs)  # [B, T, C, F] (complex)
             # Explicitly specify num_channels=num_channels_mc for MC
             embedding_pos = self.spatial_encoder(feature_mc, flens_mc, num_channels=num_channels_mc)  # [B, embed_dim]
+            flens_pos = flens_mc
         else:
             embedding_pos = None
+            flens_pos = flens
         
         # Negative: MC (reverse)
         if "embedding_neg" in kwargs:
             embedding_neg = kwargs["embedding_neg"]
+            flens_neg = kwargs.get("frame_lengths", flens)
+        elif self.teacher_spatial_encoder is not None:
+            if "speech_mix_reverse_mc" not in kwargs:
+                raise ValueError(
+                    "speech_mix_reverse_mc is required for teacher negative embedding."
+                )
+            if self.teacher_spatial_encoder_encoder is None:
+                raise ValueError(
+                    "teacher_spatial_encoder_encoder must be provided when "
+                    "teacher_spatial_encoder is set."
+                )
+            with torch.no_grad():
+                self._set_teacher_eval()
+                speech_mix_reverse_mc = kwargs["speech_mix_reverse_mc"]  # [B, T, C]
+                feature_reverse_mc, flens_neg = self.teacher_spatial_encoder_encoder(
+                    speech_mix_reverse_mc, speech_lengths, fs=fs
+                )  # [B, T, C, F]
+                embedding_neg = self.teacher_spatial_encoder(
+                    feature_reverse_mc, flens_neg, num_channels=None
+                )
         elif "speech_mix_reverse_mc" in kwargs:
             speech_mix_reverse_mc = kwargs["speech_mix_reverse_mc"]  # [B, T, C]
             # Encode waveform to spectrum
             feature_reverse_mc, flens_reverse_mc = self.encoder(speech_mix_reverse_mc, speech_lengths, fs=fs)  # [B, T, C, F] (complex)
             # Explicitly specify num_channels=num_channels_mc for MC
             embedding_neg = self.spatial_encoder(feature_reverse_mc, flens_reverse_mc, num_channels=num_channels_mc)  # [B, embed_dim]
+            flens_neg = flens_reverse_mc
         else:
             embedding_neg = None
+            flens_neg = flens
+
+        # Frame length consistency checks (for dense loss)
+        frame_lengths = flens
+        if flens_pos is not None:
+            if frame_lengths is None:
+                frame_lengths = flens_pos
+            elif not torch.equal(frame_lengths, flens_pos):
+                raise ValueError(
+                    "Frame lengths mismatch between anchor and positive embeddings."
+                )
+        if flens_neg is not None:
+            if frame_lengths is None:
+                frame_lengths = flens_neg
+            elif not torch.equal(frame_lengths, flens_neg):
+                raise ValueError(
+                    "Frame lengths mismatch between anchor and negative embeddings."
+                )
         
         # Loss computation
         loss, stats, weight = self.forward_loss(
@@ -173,6 +272,7 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
             embedding_pos,
             embedding_neg,
             speech_lengths,
+            frame_lengths=frame_lengths,
             **kwargs,
         )
         
@@ -184,6 +284,7 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         embedding_pos: Optional[torch.Tensor],
         embedding_neg: Optional[torch.Tensor],
         speech_lengths: torch.Tensor,
+        frame_lengths: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
         """Compute loss.
@@ -217,23 +318,88 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
                 "Both embedding_pos and embedding_neg are required for contrastive learning. "
                 "Please provide them via kwargs or speech_mix_mc/speech_mix_reverse_mc."
             )
-        
-        for loss_wrapper in self.loss_wrappers:
-            criterion = loss_wrapper.criterion
-            only_for_test = getattr(criterion, "only_for_test", False)
-            if only_for_test and self.training:
-                continue
-            
-            # Compute loss using the wrapper
-            l, s, o = loss_wrapper(
-                embedding_anchor,
-                embedding_pos,
-                embedding_neg,
-                speech_lengths,
+
+        # Dense contrastive learning for frame-level embeddings
+        if embedding_anchor.dim() == 3 or embedding_pos.dim() == 3 or embedding_neg.dim() == 3:
+            if embedding_anchor.dim() != 3 or embedding_pos.dim() != 3 or embedding_neg.dim() != 3:
+                raise ValueError(
+                    "For dense contrastive learning, all embeddings must be 3D [B, T, E]."
+                )
+            if (
+                embedding_anchor.shape != embedding_pos.shape
+                or embedding_anchor.shape != embedding_neg.shape
+            ):
+                raise ValueError(
+                    "Embedding shapes must match for dense contrastive learning: "
+                    f"anchor={embedding_anchor.shape}, pos={embedding_pos.shape}, "
+                    f"neg={embedding_neg.shape}."
+                )
+            # L2 normalize per frame
+            embedding_anchor = self._l2_normalize(embedding_anchor)
+            embedding_pos = self._l2_normalize(embedding_pos)
+            embedding_neg = self._l2_normalize(embedding_neg)
+
+            if frame_lengths is None:
+                frame_lengths = embedding_anchor.new_full(
+                    (embedding_anchor.shape[0],),
+                    embedding_anchor.shape[1],
+                    dtype=torch.long,
+                )
+            frame_lengths = frame_lengths.to(embedding_anchor.device).long()
+            if torch.any(frame_lengths > embedding_anchor.shape[1]):
+                raise ValueError(
+                    "frame_lengths has values larger than embedding length."
+                )
+
+            mask = make_non_pad_mask(frame_lengths)  # [B, T]
+            mask = mask.to(embedding_anchor.device)
+            anchor_flat = embedding_anchor[mask]
+            pos_flat = embedding_pos[mask]
+            neg_flat = embedding_neg[mask]
+            if anchor_flat.numel() == 0:
+                raise ValueError("No valid frames for dense contrastive learning.")
+
+            frame_lengths_flat = anchor_flat.new_full(
+                (anchor_flat.shape[0],), 1, dtype=torch.long
             )
-            
-            loss += l * loss_wrapper.weight
-            stats.update(s)
+
+            for loss_wrapper in self.loss_wrappers:
+                criterion = loss_wrapper.criterion
+                only_for_test = getattr(criterion, "only_for_test", False)
+                if only_for_test and self.training:
+                    continue
+
+                l, s, o = loss_wrapper(
+                    anchor_flat,
+                    pos_flat,
+                    neg_flat,
+                    frame_lengths_flat,
+                )
+                loss += l * loss_wrapper.weight
+                stats.update(s)
+
+        else:
+            # L2 normalize for global embeddings
+            embedding_anchor = self._l2_normalize(embedding_anchor)
+            embedding_pos = self._l2_normalize(embedding_pos)
+            embedding_neg = self._l2_normalize(embedding_neg)
+        
+            for loss_wrapper in self.loss_wrappers:
+                criterion = loss_wrapper.criterion
+                only_for_test = getattr(criterion, "only_for_test", False)
+                if only_for_test and self.training:
+                    continue
+                
+                # Compute loss using the wrapper
+                l, s, o = loss_wrapper(
+                    embedding_anchor,
+                    embedding_pos,
+                    embedding_neg,
+                    speech_lengths,
+                )
+                
+                loss += l * loss_wrapper.weight
+                stats.update(s)
         
         if self.training and not loss.requires_grad:
             raise AttributeError(

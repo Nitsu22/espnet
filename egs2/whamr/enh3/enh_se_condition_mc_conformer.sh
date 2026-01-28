@@ -832,6 +832,9 @@ if ! "${skip_eval}"; then
 
             # for target-speaker extraction
             _data_param="--data_path_and_name_and_type ${_data}/${_scp},speech_mix,${_type} "
+            # For mc_conformer (tflocoformer_sp_nocache_mc_conformer): spatial_embedding needs speech_mix_mc.
+            # Use the same wav (typically 2ch) as speech_mix_mc when using enh_inference_se_condition_mc_conformer.
+            _data_param+="--data_path_and_name_and_type ${_data}/${_scp},speech_mix_mc,${_type} "
             if $is_tse_task; then
                 for spk in $(seq "${ref_num}"); do
                     _data_param+="--data_path_and_name_and_type ${_data}/enroll_spk${spk}.scp,enroll_ref${spk},text "
@@ -852,7 +855,9 @@ if ! "${skip_eval}"; then
             if $is_tse_task; then
                 infer_module=espnet2.bin.enh_tse_inference
             else
-                infer_module=espnet2.bin.enh_inference
+                # mc_conformer (tflocoformer_sp_nocache_mc_conformer) requires
+                # enh_inference_se_condition_mc_conformer for spatial_embedding/FiLM.
+                infer_module=espnet2.bin.enh_inference_se_condition_mc_conformer
             fi
             # shellcheck disable=SC2046,SC2086
             ${_cmd} --gpu "${_ngpu}" JOB=1:"${_nj}" "${_logdir}"/enh_inference.JOB.log \
