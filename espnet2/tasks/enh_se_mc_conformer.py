@@ -9,7 +9,7 @@ from typeguard import typechecked
 
 from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh_se.encoder.stft_encoder import STFTEncoder
-from espnet2.enh_se.espnet_model import ESPnetSpatialEncoderModel
+from espnet2.enh_se.espnet_model_mc_conformer import ESPnetSpatialEncoderModel
 from espnet2.enh_se.loss.criterions.abs_loss import AbsSELoss
 from espnet2.enh_se.loss.criterions.contrastive_loss import PairwiseNegativeLoss
 from espnet2.enh_se.loss.wrappers.abs_wrapper import AbsLossWrapper
@@ -17,6 +17,7 @@ from espnet2.enh_se.loss.wrappers.contrastive_loss_wrapper import (
     ContrastiveLossWrapper,
 )
 from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
+from espnet2.enh_se.spatial_encoder.mc_conformer import MCConformerSpatialEncoder
 from espnet2.enh_se.spatial_encoder.resnet2d_spatial_encoder import (
     ResNet2DSpatialEncoder,
 )
@@ -49,11 +50,30 @@ encoder_choices = ClassChoices(
 spatial_encoder_choices = ClassChoices(
     name="spatial_encoder",
     classes=dict(
+        mc_conformer=MCConformerSpatialEncoder,
         resnet2d=ResNet2DSpatialEncoder,
         resnet2d_div=ResNet2DDivSpatialEncoder,
     ),
     type_check=AbsSpatialEncoder,
-    default="resnet2d",
+    default="mc_conformer",
+)
+
+teacher_spatial_encoder_choices = ClassChoices(
+    name="teacher_spatial_encoder",
+    classes=dict(
+        mc_conformer=MCConformerSpatialEncoder,
+    ),
+    type_check=AbsSpatialEncoder,
+    default=None,
+    optional=True,
+)
+
+teacher_spatial_encoder_encoder_choices = ClassChoices(
+    name="teacher_spatial_encoder_encoder",
+    classes=dict(stft=STFTEncoder),
+    type_check=AbsEncoder,
+    default=None,
+    optional=True,
 )
 
 loss_wrapper_choices = ClassChoices(
@@ -87,6 +107,10 @@ class SpatialEncoderTask(AbsTask):
         encoder_choices,
         # --spatial_encoder and --spatial_encoder_conf
         spatial_encoder_choices,
+        # --teacher_spatial_encoder and --teacher_spatial_encoder_conf
+        teacher_spatial_encoder_choices,
+        # --teacher_spatial_encoder_encoder and --teacher_spatial_encoder_encoder_conf
+        teacher_spatial_encoder_encoder_choices,
         # --preprocessor and --preprocessor_conf
         preprocessor_choices,
     ]
@@ -313,6 +337,37 @@ class SpatialEncoderTask(AbsTask):
             **args.spatial_encoder_conf
         )
 
+        teacher_spatial_encoder = None
+        teacher_spatial_encoder_encoder = None
+        if getattr(args, "teacher_spatial_encoder", None) is not None:
+            if getattr(args, "teacher_spatial_encoder_encoder", None) is None:
+                raise ValueError(
+                    "teacher_spatial_encoder_encoder must be set when "
+                    "teacher_spatial_encoder is provided."
+                )
+
+            teacher_spatial_encoder = teacher_spatial_encoder_choices.get_class(
+                args.teacher_spatial_encoder
+            )(**args.teacher_spatial_encoder_conf)
+
+            # If teacher encoder conf is default, align it to student encoder conf
+            default_teacher_conf = get_default_kwargs(STFTEncoder)
+            teacher_encoder_conf = copy.deepcopy(args.teacher_spatial_encoder_encoder_conf)
+            if teacher_encoder_conf == default_teacher_conf:
+                teacher_encoder_conf = copy.deepcopy(args.encoder_conf)
+
+            if teacher_encoder_conf != args.encoder_conf:
+                raise ValueError(
+                    "encoder_conf and teacher_spatial_encoder_encoder_conf must match "
+                    "for dense contrastive learning."
+                )
+
+            teacher_spatial_encoder_encoder = (
+                teacher_spatial_encoder_encoder_choices.get_class(
+                    args.teacher_spatial_encoder_encoder
+                )(**teacher_encoder_conf)
+            )
+
         loss_wrappers = []
 
         if getattr(args, "criterions", None) is not None:
@@ -330,6 +385,8 @@ class SpatialEncoderTask(AbsTask):
         model = ESPnetSpatialEncoderModel(
             encoder=encoder,
             spatial_encoder=spatial_encoder,
+            teacher_spatial_encoder=teacher_spatial_encoder,
+            teacher_spatial_encoder_encoder=teacher_spatial_encoder_encoder,
             loss_wrappers=loss_wrappers,
             **args.model_conf,
         )

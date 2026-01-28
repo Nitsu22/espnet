@@ -314,8 +314,11 @@ class SeparateSpeech:
                         speech_mix_mc_seg[:, :t, :] = speech_mix_mc[:, st:en, :]
                     else:
                         speech_mix_mc_seg = speech_mix_mc[:, st:en, :]
+                    # Do not pass fs: STFTEncoder._reconfig_for_fs would change n_fft
+                    # and thus F, breaking spatial_encoder (e.g. MCConformer) which
+                    # expects fixed freq_bins (e.g. 129 for n_fft=256).
                     _fm_mc, _fl_mc = self.enh_model.spatial_encoder_encoder(
-                        speech_mix_mc_seg, lengths_seg, fs=fs
+                        speech_mix_mc_seg, lengths_seg, fs=None
                     )
                     _emb = self.enh_model.spatial_encoder(
                         _fm_mc,
@@ -388,8 +391,11 @@ class SeparateSpeech:
         else:
             # spatial_embedding for direct path (when model has spatial_encoder)
             if _has_spatial:
+                # Do not pass fs: STFTEncoder._reconfig_for_fs would change n_fft
+                # and thus F, breaking spatial_encoder (e.g. MCConformer) which
+                # expects fixed freq_bins (e.g. 129 for n_fft=256).
                 _fm_mc, _fl_mc = self.enh_model.spatial_encoder_encoder(
-                    speech_mix_mc, lengths, fs=fs
+                    speech_mix_mc, lengths, fs=None
                 )
                 additional["spatial_embedding"] = self.enh_model.spatial_encoder(
                     _fm_mc,
