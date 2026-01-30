@@ -556,6 +556,8 @@ class EnhancementTask(AbsTask):
         spatial_encoder_encoder = None
         spatial_encoder_pooling = True
         separator_conf = args.separator_conf.copy()
+        legacy_film_mode = separator_conf.pop("spatial_film_mode", None)
+        spatial_conditioning = separator_conf.get("spatial_conditioning", None)
         if getattr(args, "spatial_encoder_encoder", None) is not None:
             spatial_encoder_encoder_conf = getattr(
                 args, "spatial_encoder_encoder_conf", {}
@@ -572,7 +574,7 @@ class EnhancementTask(AbsTask):
             spatial_encoder_pooling = spatial_encoder_conf.pop("pooling", True)
             if not spatial_encoder_pooling and args.spatial_encoder != "mc_conformer":
                 raise ValueError(
-                    "temporal FiLM requires spatial_encoder=mc_conformer."
+                    "temporal conditioning requires spatial_encoder=mc_conformer."
                 )
             spatial_encoder = spatial_encoder_choices.get_class(args.spatial_encoder)(
                 **spatial_encoder_conf
@@ -587,15 +589,40 @@ class EnhancementTask(AbsTask):
                 )
             if emb is not None and "spatial_embed_dim" not in separator_conf:
                 separator_conf["spatial_embed_dim"] = emb
-            desired_mode = "global" if spatial_encoder_pooling else "temporal"
-            if "spatial_film_mode" in separator_conf:
-                if separator_conf["spatial_film_mode"] != desired_mode:
+            if legacy_film_mode is not None:
+                if legacy_film_mode not in ("global", "temporal"):
                     raise ValueError(
-                        "spatial_film_mode must match spatial_encoder_conf.pooling: "
-                        f"{separator_conf['spatial_film_mode']} vs {desired_mode}"
+                        "spatial_film_mode must be 'global' or 'temporal', "
+                        f"but got {legacy_film_mode}"
+                    )
+                mapped = (
+                    "global_film" if legacy_film_mode == "global" else "temporal_film"
+                )
+                if spatial_conditioning is None:
+                    spatial_conditioning = mapped
+                elif spatial_conditioning != mapped:
+                    raise ValueError(
+                        "spatial_conditioning and spatial_film_mode are both set but "
+                        f"mismatch: {spatial_conditioning} vs {legacy_film_mode}"
+                    )
+            if spatial_conditioning is None:
+                spatial_conditioning = (
+                    "global_film" if spatial_encoder_pooling else "temporal_film"
+                )
+            if spatial_encoder_pooling:
+                if spatial_conditioning != "global_film":
+                    raise ValueError(
+                        "spatial_conditioning must be global_film when "
+                        "spatial_encoder_conf.pooling is true: "
+                        f"{spatial_conditioning}"
                     )
             else:
-                separator_conf["spatial_film_mode"] = desired_mode
+                if spatial_conditioning == "global_film":
+                    raise ValueError(
+                        "spatial_conditioning must be temporal_film or concat when "
+                        "spatial_encoder_conf.pooling is false."
+                    )
+            separator_conf["spatial_conditioning"] = spatial_conditioning
 
         separator = separator_choices.get_class(args.separator)(
             encoder.output_dim, **separator_conf

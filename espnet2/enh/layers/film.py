@@ -105,3 +105,46 @@ class TemporalFiLM(nn.Module):
         beta = beta.permute(0, 2, 1).unsqueeze(-1)  # [B, C, T, 1]
 
         return feature * gamma + beta
+
+
+class ConcatConditioner(nn.Module):
+    """Concatenate temporal embedding and project with 1x1 conv.
+
+    This expects temporal embeddings and broadcasts across frequency.
+    """
+
+    def __init__(self, embed_dim: int, feature_dim: int):
+        super().__init__()
+        self.proj = nn.Conv2d(feature_dim + embed_dim, feature_dim, kernel_size=1)
+
+    def forward(self, embedding: torch.Tensor, feature: torch.Tensor):
+        """
+        Args:
+            embedding: [B, T, E] - temporal spatial embedding
+            feature: [B, C, T, F] - feature to condition
+        Returns:
+            conditioned_feature: [B, C, T, F]
+        """
+        if embedding.ndim != 3:
+            raise ValueError(
+                f"embedding must be 3D [B, T, E], but got {embedding.shape}"
+            )
+        if feature.ndim != 4:
+            raise ValueError(
+                f"feature must be 4D [B, C, T, F], but got {feature.shape}"
+            )
+        if embedding.shape[0] != feature.shape[0]:
+            raise ValueError(
+                "Batch size mismatch: "
+                f"{embedding.shape[0]} vs {feature.shape[0]}"
+            )
+        if embedding.shape[1] != feature.shape[2]:
+            raise ValueError(
+                "Time dimension mismatch: "
+                f"{embedding.shape[1]} vs {feature.shape[2]}"
+            )
+
+        spatial = embedding.permute(0, 2, 1).unsqueeze(-1)  # [B, E, T, 1]
+        spatial = spatial.expand(-1, -1, -1, feature.shape[-1])  # [B, E, T, F]
+        concat = torch.cat([feature, spatial], dim=1)  # [B, C+E, T, F]
+        return self.proj(concat)

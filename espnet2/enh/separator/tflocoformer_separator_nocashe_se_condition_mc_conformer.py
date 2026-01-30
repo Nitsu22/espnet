@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from espnet2.enh.layers.complex_utils import new_complex_like
-from espnet2.enh.layers.film import FiLM, TemporalFiLM
+from espnet2.enh.layers.film import ConcatConditioner, FiLM, TemporalFiLM
 from packaging.version import parse as V
 from rotary_embedding_torch import RotaryEmbedding
 
@@ -64,8 +64,9 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
             Small constant for normalization layer.
         spatial_embed_dim: int
             Dimension of spatial embedding provided via additional.
-        spatial_film_mode: str
-            "global" for [B, E] FiLM, "temporal" for [B, T, E] FiLM.
+        spatial_conditioning: str
+            "global_film" for [B, E] FiLM, "temporal_film" for [B, T, E] FiLM,
+            "concat" for concatenation + 1x1 conv.
     """
 
     def __init__(
@@ -93,7 +94,8 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
         eps: float = 1.0e-5,
         # spatial embedding related
         spatial_embed_dim: int = 128,
-        spatial_film_mode: str = "global",
+        spatial_conditioning: str = None,
+        spatial_film_mode: str = None,
         film_init_identity: bool = True,
     ):
         super().__init__()
@@ -147,26 +149,46 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
 
         self.deconv = nn.ConvTranspose2d(emb_dim, num_spk * 2, ks, padding=padding)
 
-        # Spatial embedding FiLM
+        # Spatial conditioning
+        # Spatial conditioning
+        if spatial_film_mode is not None:
+            legacy_mode = "global_film" if spatial_film_mode == "global" else "temporal_film"
+            if spatial_conditioning is None:
+                spatial_conditioning = legacy_mode
+            elif spatial_conditioning != legacy_mode:
+                raise ValueError(
+                    "spatial_conditioning and spatial_film_mode are both set but "
+                    f"mismatch: {spatial_conditioning} vs {spatial_film_mode}"
+                )
+        if spatial_conditioning is None:
+            spatial_conditioning = "global_film"
+
         self.spatial_embed_dim = spatial_embed_dim
-        self.spatial_film_mode = spatial_film_mode
-        if spatial_film_mode == "global":
-            self.film = FiLM(
+        self.spatial_conditioning = spatial_conditioning
+        if spatial_conditioning == "global_film":
+            self.conditioner = FiLM(
                 embed_dim=spatial_embed_dim,
                 feature_dim=emb_dim,
             )
-        elif spatial_film_mode == "temporal":
-            self.film = TemporalFiLM(
+            if film_init_identity:
+                self.conditioner.init_identity()
+        elif spatial_conditioning == "temporal_film":
+            self.conditioner = TemporalFiLM(
+                embed_dim=spatial_embed_dim,
+                feature_dim=emb_dim,
+            )
+            if film_init_identity:
+                self.conditioner.init_identity()
+        elif spatial_conditioning == "concat":
+            self.conditioner = ConcatConditioner(
                 embed_dim=spatial_embed_dim,
                 feature_dim=emb_dim,
             )
         else:
             raise ValueError(
-                f"Unsupported spatial_film_mode: {spatial_film_mode}. "
-                "Choose from 'global' or 'temporal'."
+                f"Unsupported spatial_conditioning: {spatial_conditioning}. "
+                "Choose from 'global_film', 'temporal_film', or 'concat'."
             )
-        if film_init_identity:
-            self.film.init_identity()
 
     def forward(
         self,
@@ -204,10 +226,10 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
 
         if additional is None or "spatial_embedding" not in additional:
             raise ValueError(
-                "spatial_embedding is required in additional for FiLM conditioning."
+                "spatial_embedding is required in additional for spatial conditioning."
             )
         spatial_emb = additional["spatial_embedding"]
-        if self.spatial_film_mode == "global":
+        if self.spatial_conditioning == "global_film":
             if spatial_emb.ndim != 2 or spatial_emb.shape[0] != batch.shape[0]:
                 raise ValueError(
                     "spatial_embedding must be [B, D] with "
@@ -218,8 +240,8 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                     "spatial_embedding feature dimension must be "
                     f"{self.spatial_embed_dim}, but got {spatial_emb.shape[1]}"
                 )
-            batch = self.film(spatial_emb, batch)  # [B, emb_dim, T, F]
-        else:
+            batch = self.conditioner(spatial_emb, batch)  # [B, emb_dim, T, F]
+        elif self.spatial_conditioning == "temporal_film":
             if spatial_emb.ndim != 3 or spatial_emb.shape[0] != batch.shape[0]:
                 raise ValueError(
                     "spatial_embedding must be [B, T, D] with "
@@ -235,7 +257,24 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                     "spatial_embedding feature dimension must be "
                     f"{self.spatial_embed_dim}, but got {spatial_emb.shape[2]}"
                 )
-            batch = self.film(spatial_emb, batch, ilens)  # [B, emb_dim, T, F]
+            batch = self.conditioner(spatial_emb, batch, ilens)  # [B, emb_dim, T, F]
+        else:  # concat
+            if spatial_emb.ndim != 3 or spatial_emb.shape[0] != batch.shape[0]:
+                raise ValueError(
+                    "spatial_embedding must be [B, T, D] with "
+                    f"B={batch.shape[0]}, but got {tuple(spatial_emb.shape)}"
+                )
+            if spatial_emb.shape[1] != batch.shape[2]:
+                raise ValueError(
+                    "spatial_embedding time dimension must match feature T: "
+                    f"{spatial_emb.shape[1]} vs {batch.shape[2]}"
+                )
+            if spatial_emb.shape[2] != self.spatial_embed_dim:
+                raise ValueError(
+                    "spatial_embedding feature dimension must be "
+                    f"{self.spatial_embed_dim}, but got {spatial_emb.shape[2]}"
+                )
+            batch = self.conditioner(spatial_emb, batch)  # [B, emb_dim, T, F]
 
         # separation
         for ii in range(self.n_layers):
