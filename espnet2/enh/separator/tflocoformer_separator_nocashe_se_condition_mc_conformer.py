@@ -94,6 +94,7 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
         # spatial embedding related
         spatial_embed_dim: int = 128,
         spatial_film_mode: str = "global",
+        film_init_identity: bool = True,
     ):
         super().__init__()
         assert is_torch_2_0_plus, "Support only pytorch >= 2.0.0"
@@ -164,6 +165,8 @@ class TFLocoformerSeparatorSECondition(AbsSeparator):
                 f"Unsupported spatial_film_mode: {spatial_film_mode}. "
                 "Choose from 'global' or 'temporal'."
             )
+        if film_init_identity:
+            self.film.init_identity()
 
     def forward(
         self,

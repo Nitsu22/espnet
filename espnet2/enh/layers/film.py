@@ -11,6 +11,13 @@ class FiLM(nn.Module):
         super().__init__()
         self.gamma_proj = nn.Linear(embed_dim, feature_dim)
         self.beta_proj = nn.Linear(embed_dim, feature_dim)
+
+    def init_identity(self):
+        """Initialize FiLM to pass-through (gamma=1, beta=0)."""
+        nn.init.zeros_(self.gamma_proj.weight)
+        nn.init.ones_(self.gamma_proj.bias)
+        nn.init.zeros_(self.beta_proj.weight)
+        nn.init.zeros_(self.beta_proj.bias)
     
     def forward(self, embedding: torch.Tensor, feature: torch.Tensor):
         """
@@ -41,6 +48,13 @@ class TemporalFiLM(nn.Module):
         super().__init__()
         self.gamma_proj = nn.Linear(embed_dim, feature_dim)
         self.beta_proj = nn.Linear(embed_dim, feature_dim)
+
+    def init_identity(self):
+        """Initialize FiLM to pass-through (gamma=1, beta=0)."""
+        nn.init.zeros_(self.gamma_proj.weight)
+        nn.init.ones_(self.gamma_proj.bias)
+        nn.init.zeros_(self.beta_proj.weight)
+        nn.init.zeros_(self.beta_proj.bias)
 
     def forward(
         self,
