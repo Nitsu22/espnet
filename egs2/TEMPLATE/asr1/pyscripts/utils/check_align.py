@@ -24,7 +24,7 @@ def load_customed_dic(file):
     return customed_dic
 
 
-def compare(key, score, label, silence=["<AP>", "<SP>"]):
+def compare(key, score, label):
     customed_dic = load_customed_dic(args.customed_dic)
     tokenizer = build_tokenizer(
         token_type="phn",
@@ -38,8 +38,6 @@ def compare(key, score, label, silence=["<AP>", "<SP>"]):
     for i in range(len(score)):
         syb = score[i][2]
         # multi note in one syllable
-        if syb in silence:
-            continue
         if syb == "—":
             if index < len(label):
                 if label[index][2] == pre_phn:

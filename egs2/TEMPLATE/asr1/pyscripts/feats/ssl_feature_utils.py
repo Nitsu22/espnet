@@ -5,7 +5,6 @@ import re
 import sys
 from typing import List, Optional, Tuple, Union
 
-import librosa
 import numpy as np
 import soundfile as sf
 import torch
@@ -13,10 +12,10 @@ import torchaudio
 
 from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.iterators.sequence_iter_factory import SequenceIterFactory
-from espnet2.legacy.utils.cli_writers import file_writer_helper
 from espnet2.samplers.num_elements_batch_sampler import NumElementsBatchSampler
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.dataset import ESPnetDataset
+from espnet.utils.cli_writers import file_writer_helper
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -98,15 +97,7 @@ class BaseFeatureReader(object):
 
     def load_audio(self, path: str, ref_len: Optional[int] = None):
         wav, sr = sf.read(path)
-        # assert sr == self.sample_rate, sr
-        if sr != self.sample_rate:
-            logging.warning(
-                "sampling rate mismatch between "
-                "the requirements of feature extractor {} "
-                "and source wav {},"
-                "conduct resampling".format(self.sample_rate, sr)
-            )
-            wav = librosa.resample(wav, sr, self.sample_rate, scale=True)
+        assert sr == self.sample_rate, sr
         if wav.ndim == 2:
             wav = wav.mean(-1)
         if ref_len is not None and abs(ref_len - len(wav)) > 160:
@@ -143,18 +134,9 @@ class MfccFeatureReader(BaseFeatureReader):
     def __init__(
         self,
         sample_rate: int = 16000,
-        audio_sample_rate: int = 16000,
         **kwargs,  # placeholder for unused arguments
     ):
         self.sample_rate = sample_rate
-        self.audio_sample_rate = audio_sample_rate
-        if self.sample_rate != self.audio_sample_rate:
-            logging.warning("The audio sample rate is different from feat extractor")
-            self.resample = torchaudio.transforms.Resample(
-                orig_freq=audio_sample_rate, new_freq=sample_rate
-            )
-        else:
-            self.resample = None
         self.frame_length = 25 * sample_rate / 1000
         self.frame_shift = 10 * sample_rate / 1000
 
@@ -167,9 +149,6 @@ class MfccFeatureReader(BaseFeatureReader):
         feats, feats_lens = [], []
         with torch.no_grad():
             x, x_lens = self.preprocess_data(data, data_lens)
-            if self.resample is not None:
-                x = self.resample(x)
-                x_lens = x_lens * self.sample_rate // self.audio_sample_rate
             batch_size = x.shape[0]
             for i in range(batch_size):
                 mfcc = torchaudio.compliance.kaldi.mfcc(
@@ -198,19 +177,10 @@ class HubertFeatureReader(BaseFeatureReader):
         hubert_dir_path,
         layer,
         sample_rate=16000,
-        audio_sample_rate=16000,
         max_chunk=1600000,
         use_gpu=True,
     ):
-        self.sample_rate = int(sample_rate)
-        self.audio_sample_rate = audio_sample_rate
-        if self.sample_rate != self.audio_sample_rate:
-            logging.warning("The audio sample rate is different from feat extractor")
-            self.resample = torchaudio.transforms.Resample(
-                orig_freq=audio_sample_rate, new_freq=self.sample_rate
-            )
-        else:
-            self.resample = None
+        self.sample_rate = sample_rate
 
         self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         from espnet2.asr.encoder.hubert_encoder import FairseqHubertEncoder
@@ -230,9 +200,6 @@ class HubertFeatureReader(BaseFeatureReader):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
             x, x_lens = self.preprocess_data(data, data_lens)
-            if self.resample is not None:
-                x = self.resample(x)
-                x_lens = x_lens * self.sample_rate // self.audio_sample_rate
             x = x.to(self.device)
             mask = x.zeros_like(x, dtype=torch.long)
             for i in range(x.shape[0]):
@@ -262,19 +229,10 @@ class ESPnetHubertFeatureReader(BaseFeatureReader):
         hubert_model_path,
         layer,
         sample_rate=16000,
-        audio_sample_rate=16000,
         max_chunk=1600000,
         use_gpu=True,
     ):
-        self.sample_rate = int(sample_rate)  # str->int
-        self.audio_sample_rate = audio_sample_rate
-        if self.sample_rate != self.audio_sample_rate:
-            logging.warning("The audio sample rate is different from feat extractor")
-            self.resample = torchaudio.transforms.Resample(
-                orig_freq=audio_sample_rate, new_freq=self.sample_rate
-            )
-        else:
-            self.resample = None
+        self.sample_rate = sample_rate
 
         self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         from espnet2.tasks.hubert import HubertTask
@@ -298,9 +256,6 @@ class ESPnetHubertFeatureReader(BaseFeatureReader):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.inference_mode():
             x, x_lens = self.preprocess_data(data, data_lens)
-            if self.resample is not None:
-                x = self.resample(x)
-                x_lens = x_lens * self.sample_rate // self.audio_sample_rate
             x = x.to(self.device)
             x_lens = x_lens.to(self.device)
 
@@ -317,7 +272,6 @@ class S3PRLFeatureReader(BaseFeatureReader):
     def __init__(
         self,
         fs: Union[int, str] = 16000,
-        audio_sample_rate: int = 16000,
         s3prl_conf: Optional[dict] = None,
         download_dir: str = None,
         multilayer_feature: bool = False,
@@ -331,59 +285,6 @@ class S3PRLFeatureReader(BaseFeatureReader):
             multilayer_feature=multilayer_feature,
             layer=layer,
         )
-        self.sample_rate = fs
-        self.audio_sample_rate = audio_sample_rate
-        if self.sample_rate != self.audio_sample_rate:
-            logging.warning("The audio sample rate is different from feat extractor")
-            self.resample = torchaudio.transforms.Resample(
-                orig_freq=audio_sample_rate, new_freq=fs
-            )
-        else:
-            self.resample = None
-
-        self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
-        self.model = self.model.to(self.device)
-
-    def get_feats(
-        self,
-        data: torch.Tensor,
-        data_lens: torch.Tensor,
-        ref_len: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        with torch.no_grad():
-            x, x_lens = self.preprocess_data(data, data_lens)
-            if self.resample is not None:
-                x = self.resample(x)
-                x_lens = x_lens * self.sample_rate // self.audio_sample_rate
-            x = x.to(self.device)
-
-            feats, feats_lens = self.model(x, x_lens)
-        feats = feats.cpu()
-        feats_lens = feats_lens.cpu()
-        return feats, feats_lens
-
-
-class MERTFeatureReader(BaseFeatureReader):
-    def __init__(
-        self,
-        fs: Union[int, str] = 24000,
-        mert_conf: Optional[dict] = None,
-        download_path: str = None,
-        save_dir: str = None,
-        multilayer_feature: bool = False,
-        layer: int = -1,
-        use_gpu: bool = True,
-    ):
-        from espnet2.svs.discrete.frontend import MERTFrontend
-
-        self.model = MERTFrontend(
-            fs=fs,
-            frontend_conf=mert_conf,
-            download_path=download_path,
-            save_dir=save_dir,
-            multilayer_feature=multilayer_feature,
-            layer=layer,
-        )
         self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         self.model = self.model.to(self.device)
 
@@ -396,47 +297,7 @@ class MERTFeatureReader(BaseFeatureReader):
         with torch.no_grad():
             x, x_lens = self.preprocess_data(data, data_lens)
             x = x.to(self.device)
-            x_lens = x_lens.to(self.device)
-            feats, feats_lens = self.model(x, x_lens)
-        feats = feats.cpu()
-        feats_lens = feats_lens.cpu()
-        return feats, feats_lens
 
-
-class EnCodecFeatureReader(BaseFeatureReader):
-    def __init__(
-        self,
-        fs: Union[int, str] = 48000,
-        bandwidth: Union[int, str] = 12,
-        encodec_conf: Optional[dict] = None,
-        download_path: str = None,
-        multilayer_feature: bool = False,
-        layer: int = -1,
-        use_gpu: bool = True,
-    ):
-        from espnet2.svs.discrete.frontend import EnCodecFrontend
-
-        self.model = EnCodecFrontend(
-            fs=fs,
-            bandwidth=bandwidth,
-            frontend_conf=encodec_conf,
-            download_path=download_path,
-            multilayer_feature=multilayer_feature,
-            layer=layer,
-        )
-        self.device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
-        self.model = self.model.to(self.device)
-
-    def get_feats(
-        self,
-        data: torch.Tensor,
-        data_lens: torch.Tensor,
-        ref_len: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        with torch.no_grad():
-            x, x_lens = self.preprocess_data(data, data_lens)
-            x = x.to(self.device)
-            x_lens = x_lens.to(self.device)
             feats, feats_lens = self.model(x, x_lens)
         feats = feats.cpu()
         feats_lens = feats_lens.cpu()

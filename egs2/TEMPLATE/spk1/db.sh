@@ -9,4 +9,3 @@ VOXBLINK=downloads
 VOXCELEB=downloads
 MUSAN=downloads
 RIR=downloads
-CNCELEB=downloads

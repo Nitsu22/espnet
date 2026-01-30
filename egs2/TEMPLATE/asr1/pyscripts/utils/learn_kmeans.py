@@ -16,7 +16,7 @@ import joblib
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 
-from espnet2.legacy.utils.cli_readers import file_reader_helper
+from espnet.utils.cli_readers import file_reader_helper
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -43,12 +43,6 @@ def get_parser():
     parser.add_argument("--n_init", default=20, type=int)
     parser.add_argument("--reassignment_ratio", default=0.0, type=float)
 
-    parser.add_argument(
-        "--RVQ_layers",
-        type=int,
-        default=1,
-        help="Number of RVQ layers.",
-    )
     parser.add_argument(
         "--in_filetype",
         type=str,
@@ -135,7 +129,6 @@ def learn_kmeans(
     in_filetype,
     km_path,
     n_clusters,
-    RVQ_layers,
     seed,
     percent,
     init,
@@ -148,32 +141,22 @@ def learn_kmeans(
 ):
     np.random.seed(seed)
     feat = load_feature(rspecifier, in_filetype, percent)
-    for i in range(RVQ_layers):
-        km_model = get_km_model(
-            n_clusters,
-            init,
-            max_iter,
-            batch_size,
-            tol,
-            max_no_improvement,
-            n_init,
-            reassignment_ratio,
-            seed,
-        )
-        km_model.fit(feat)
-        km_path_ = (
-            km_path.replace(".mdl", f"_RVQ_{i}.mdl") if RVQ_layers > 1 else km_path
-        )
-        joblib.dump(km_model, km_path_)
+    km_model = get_km_model(
+        n_clusters,
+        init,
+        max_iter,
+        batch_size,
+        tol,
+        max_no_improvement,
+        n_init,
+        reassignment_ratio,
+        seed,
+    )
+    km_model.fit(feat)
+    joblib.dump(km_model, km_path)
 
-        inertia = -km_model.score(feat) / len(feat)
-        logger.info(
-            "{}total intertia: %.5f".format(f"RVQ_{i} " if RVQ_layers > 1 else ""),
-            inertia,
-        )
-        c = km_model.predict(feat)
-        r = km_model.cluster_centers_[c]
-        feat = feat - km_model.cluster_centers_[km_model.predict(feat)]
+    inertia = -km_model.score(feat) / len(feat)
+    logger.info("total intertia: %.5f", inertia)
     logger.info("finished successfully")
 
 
