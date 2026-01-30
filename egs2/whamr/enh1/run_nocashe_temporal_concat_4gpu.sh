@@ -12,7 +12,7 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
+CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh_se_condition_mc_conformer.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
