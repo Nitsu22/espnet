@@ -1,1 +1,0 @@
-../../asr1/local/prepare_wsjcam0.sh

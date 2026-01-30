@@ -1,1 +1,0 @@
-../../TEMPLATE/lm1/path.sh

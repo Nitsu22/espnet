@@ -1,4 +1,0 @@
-# This is a debug config for CI
-beam_size: 2
-transducer_conf:
-    search_type: mbg

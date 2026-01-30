@@ -1,1 +1,0 @@
-../../TEMPLATE/enh_diar1/enh_diar.sh

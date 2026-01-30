@@ -1,1 +1,0 @@
-../../../owsm_v1/s2t1/local/data.sh

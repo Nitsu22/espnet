@@ -1,1 +1,0 @@
-../../../../egs2/gigaspeech/asr1/local/data.sh

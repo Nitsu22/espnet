@@ -1,1 +1,0 @@
-../../TEMPLATE/tts2/tts2.sh

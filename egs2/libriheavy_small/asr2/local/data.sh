@@ -1,1 +1,0 @@
-../../../libriheavy_medium/asr2/local/data.sh

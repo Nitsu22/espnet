@@ -1,1 +1,0 @@
-../../enh_diar1/local/generate_librimix_sd.sh

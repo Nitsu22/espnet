@@ -1,1 +1,0 @@
-../../asr1/local/download_data.sh
