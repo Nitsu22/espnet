@@ -68,6 +68,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocashe,
 )
 from espnet2.enh.separator.tflocoformer_separator_mc import TFLocoformerSeparatorMC
+from espnet2.enh.separator.tflocoformer_separator_nocashe_mc import (
+    TFLocoformerSeparatorMC as TFLocoformerSeparatorNocasheMC,
+)
 from espnet2.enh.separator.tflocoformer_separator_test import (
     TFLocoformerSeparator as TFLocoformerSeparatorTest,
 )
@@ -125,6 +128,7 @@ separator_choices = ClassChoices(
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
         tflocoformer_nocashe=TFLocoformerSeparatorNocashe,
+        tflocoformer_nocashe_mc=TFLocoformerSeparatorNocasheMC,
         tflocoformer_mc=TFLocoformerSeparatorMC,
         tflocoformer_test=TFLocoformerSeparatorTest,
         fla_tflocoformer=FLATFLocoformerSeparator,
