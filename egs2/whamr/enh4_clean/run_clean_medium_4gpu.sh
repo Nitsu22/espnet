@@ -8,26 +8,25 @@ set -o pipefail
 min_or_max=min # "min" or "max". This is to determine how the mixtures are generated in local/data.sh.
 sample_rate=8k
 
+train_set=tr_mix_both_clean_${min_or_max}_${sample_rate}
+valid_set=cv_mix_both_clean_${min_or_max}_${sample_rate}
+test_sets="tt_mix_both_clean_${min_or_max}_${sample_rate}"
 
-
-train_set=tr_mix_clean_reverb_${min_or_max}_${sample_rate}
-valid_set=cv_mix_clean_reverb_${min_or_max}_${sample_rate}
-test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
-
-./enh.sh \
+CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
     --fs ${sample_rate} \
-    --ngpu 2 \
+    --ngpu 4 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_beamformer_mvdr.yaml \
+    --enh_config ./conf/tuning/train_enh_tflocoformer_nocashe.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_clean_medium_4gpu \
     --use_dereverb_ref false \
-    --use_noise_ref false \
+    --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --dumpdir dump_clean \
-    --stage 3 \
-    --stop_stage 4 \
+    --stage 6 \
+    --stop_stage 8 \
     "$@"
+

@@ -51,7 +51,7 @@ done
 
 # check if the base npy dirs exist.
 for x in tr cv tt; do
-  for ddir in s1_base_npz s2_base_npz; do
+  for ddir in s1_base_npz s2_base_npz s1_temp_npz s2_temp_npz noise_base_npz rir_npz room_param_npz; do
     f=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/${ddir}
     if [ ! -d $f ]; then
       echo "Error: $f is not a directory."
@@ -139,6 +139,27 @@ for x in tr cv tt; do
       awk -v dir="${s2_base_npz_dir}" -v suffix="${cond}" -F "," \
         'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
         ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/spk2_base_npz.scp
+
+      s1_temp_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/s1_temp_npz
+      s2_temp_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/s2_temp_npz
+      noise_base_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/noise_base_npz
+      rir_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/rir_npz
+      room_param_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/room_param_npz
+      awk -v dir="${s1_temp_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/spk1_temp_npz.scp
+      awk -v dir="${s2_temp_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/spk2_temp_npz.scp
+      awk -v dir="${noise_base_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/noise_base_npz.scp
+      awk -v dir="${rir_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npz")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/rir_npz.scp
+      awk -v dir="${room_param_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npz")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/room_param_npz.scp
     done
   done
 done
