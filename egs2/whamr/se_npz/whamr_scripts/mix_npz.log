@@ -1,0 +1,18 @@
+# python create_wham_from_scratch_npz.py --wsj0-root /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/wsj0/wsj0_wav --wham-noise-root /net/midgar/work/nitsu/data/wsj/wham_noise --output-dir /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers --skip-audio 
+# Started at Sun Feb  1 17:29:25 JST 2026
+#
+Traceback (most recent call last):
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/whamr_scripts/create_wham_from_scratch_npz.py", line 249, in <module>
+    create_wham(args.wsj0_root, args.wham_noise_root, args.output_dir,
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/whamr_scripts/create_wham_from_scratch_npz.py", line 98, in create_wham
+    rir_anechoic = _stack_rir(room.rir_anechoic).astype(np.float64)
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/whamr_scripts/create_wham_from_scratch_npz.py", line 28, in _stack_rir
+    return np.stack([np.stack(mic_rirs, axis=0) for mic_rirs in rir_list], axis=1)
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/whamr_scripts/create_wham_from_scratch_npz.py", line 28, in <listcomp>
+    return np.stack([np.stack(mic_rirs, axis=0) for mic_rirs in rir_list], axis=1)
+  File "<__array_function__ internals>", line 180, in stack
+  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/site-packages/numpy/core/shape_base.py", line 426, in stack
+    raise ValueError('all input arrays must have the same shape')
+ValueError: all input arrays must have the same shape
+# Accounting: time=7 threads=1
+# Ended (code 1) at Sun Feb  1 17:29:32 JST 2026, elapsed time 7 seconds

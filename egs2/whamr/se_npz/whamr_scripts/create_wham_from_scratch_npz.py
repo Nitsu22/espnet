@@ -30,7 +30,12 @@ def _stack_rir(rir_list):
 
 def _npz_path(npz_root, wav_dir, datalen_dir, split, utt_id):
     utt_base = os.path.splitext(str(utt_id))[0]
-    return os.path.join(npz_root, wav_dir, datalen_dir, split, utt_base + ".npz")
+    return os.path.join(npz_root, wav_dir, datalen_dir, split, "npz", utt_base + ".npz")
+
+
+def _base_path(npz_root, wav_dir, datalen_dir, split, subdir, utt_id):
+    utt_base = os.path.splitext(str(utt_id))[0]
+    return os.path.join(npz_root, wav_dir, datalen_dir, split, subdir, utt_base + ".npy")
 
 
 def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_audio=True):
@@ -41,7 +46,7 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
         ch_ind = [0, 1]
 
     if npz_root is None:
-        npz_root = os.path.join(output_root, "npz")
+        npz_root = output_root
 
     scaling_npz_stub = os.path.join(wham_noise_path, 'metadata', 'scaling_{}.npz')
     reverb_param_stub = os.path.join('data', 'reverb_params_{}.csv')
@@ -70,8 +75,12 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
                         os.makedirs(os.path.join(output_path, S1_DIR+sfx), exist_ok=True)
                         os.makedirs(os.path.join(output_path, S2_DIR+sfx), exist_ok=True)
                     os.makedirs(os.path.join(output_path, NOISE_DIR), exist_ok=True)
-                npz_split_dir = os.path.join(npz_root, wav_dir, datalen_dir, splt)
+                npz_split_dir = os.path.join(npz_root, wav_dir, datalen_dir, splt, "npz")
+                s1_base_dir = os.path.join(npz_root, wav_dir, datalen_dir, splt, "s1_base_npz")
+                s2_base_dir = os.path.join(npz_root, wav_dir, datalen_dir, splt, "s2_base_npz")
                 os.makedirs(npz_split_dir, exist_ok=True)
+                os.makedirs(s1_base_dir, exist_ok=True)
+                os.makedirs(s2_base_dir, exist_ok=True)
 
         utt_ids = scaling_npz['utterance_id']
         start_samp_16k = scaling_npz['speech_start_sample_16k']
@@ -151,6 +160,11 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
                                                  downsample_8K=downsample, mono=MONO)
                     noise_samples_full = noise_base * scaling_npz[wham_noise_key][i_utt]
 
+                    s1_base_path = _base_path(npz_root, wav_dir, datalen_dir, splt, "s1_base_npz", output_name)
+                    s2_base_path = _base_path(npz_root, wav_dir, datalen_dir, splt, "s2_base_npz", output_name)
+                    np.save(s1_base_path, np.asarray(s1_base, dtype=np.float64))
+                    np.save(s2_base_path, np.asarray(s2_base, dtype=np.float64))
+
                     npz_path = _npz_path(npz_root, wav_dir, datalen_dir, splt, output_name)
                     np.savez(
                         npz_path,
@@ -164,8 +178,6 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
                         wsjmix_scale=np.array(scaling_npz[wsjmix_key][i_utt], dtype=np.float64),
                         wham_speech_scale=np.array(scaling_npz[wham_speech_key][i_utt], dtype=np.float64),
                         wham_noise_scale=np.array(scaling_npz[wham_noise_key][i_utt], dtype=np.float64),
-                        s1_base=np.asarray(s1_base, dtype=np.float64),
-                        s2_base=np.asarray(s2_base, dtype=np.float64),
                         noise_base=np.asarray(noise_base, dtype=np.float64),
                         s1_spatial_scaling=np.array(s1_spatial_scaling, dtype=np.float64),
                         s2_spatial_scaling=np.array(s2_spatial_scaling, dtype=np.float64),
@@ -230,7 +242,7 @@ if __name__ == '__main__':
     parser.add_argument('--wham-noise-root', type=str, required=True,
                         help='Path to the downloaded and unzipped wham folder containing metadata/')
     parser.add_argument('--npz-dir', type=str, default=None,
-                        help='Output directory for npz metadata (default: <output-dir>/npz).')
+                        help='Base directory for npz metadata (default: <output-dir>).')
     parser.add_argument('--skip-audio', action='store_true',
                         help='Skip writing wav outputs and only save npz.')
     args = parser.parse_args()

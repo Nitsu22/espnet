@@ -111,6 +111,7 @@ for x in tr cv tt; do
         sed -e "s#${mixwav_dir}#${anechoic_mixwav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/dereverb1.scp
       fi
+
     done
   done
 done

@@ -24,9 +24,10 @@ test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_beamformer_mvdr.yaml \
     --use_dereverb_ref false \
-    --use_noise_ref true \
+    --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --stage 1 \
-    --stop_stage 5 \
+    --dumpdir dump_clean \
+    --stage 3 \
+    --stop_stage 4 \
     "$@"

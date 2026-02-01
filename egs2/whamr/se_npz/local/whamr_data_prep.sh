@@ -35,12 +35,24 @@ normalize_transcript=$KALDI_ROOT/egs/wsj/s5/local/normalize_transcript.pl
 whamr_script_dir=$1
 whamr_wav_dir=$2
 wsj_full_wav=$3
+script_dir=$(cd "$(dirname "$0")" && pwd)
+recipe_dir=$(cd "${script_dir}/.." && pwd)
+npz_root=${recipe_dir}/data/whamr/2speakers
 
 
-# check if the wav dirs exist.
+# check if the npz dirs exist.
 for x in tr cv tt; do
-  for ddir in mix_both_anechoic mix_clean_anechoic mix_single_anechoic noise s1_reverb s2_reverb mix_both_reverb mix_clean_reverb mix_single_reverb s1_anechoic s2_anechoic; do
-    f=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}/${ddir}
+  f=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}/npz
+  if [ ! -d $f ]; then
+    echo "Error: $f is not a directory."
+    exit 1;
+  fi
+done
+
+# check if the base npy dirs exist.
+for x in tr cv tt; do
+  for ddir in s1_base_npz s2_base_npz; do
+    f=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/${ddir}
     if [ ! -d $f ]; then
       echo "Error: $f is not a directory."
       exit 1;
@@ -56,28 +68,24 @@ for x in tr cv tt; do
     for cond in anechoic reverb; do
       ddir=${x}_mix_${mixtype}_${cond}_${min_or_max}_${sample_rate}
       mkdir -p ${data}/${ddir}
-      rootdir=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}
-      mixwav_dir=${rootdir}/mix_${mixtype}_${cond}
+      rootdir=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}/npz
+      mixwav_dir=${rootdir}
       awk -v dir="${mixwav_dir}" -v suffix="${cond}" -F "," \
-        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".wav")}' \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npz")}' \
         ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/wav.scp
 
-      # npz.scp (same keys as wav.scp; only when npz dir exists from create_wham_from_scratch_npz.py)
-      npz_root=${whamr_wav_dir}/npz/wav${sample_rate}/${min_or_max}/${x}
-      if [ -d "${whamr_wav_dir}/npz" ]; then
-        awk -v npz_dir="${npz_root}" '{
-          key=$1; path=$2;
-          sub(/.*\//, "", path); sub(/\.wav$/, "", path);
-          print key, npz_dir "/" path ".npz"
-        }' ${data}/${ddir}/wav.scp | sort > ${data}/${ddir}/npz.scp
-      fi
+      # npz.scp (same keys as wav.scp; base npz path under se_npz data dir)
+      npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/npz
+      awk -v dir="${npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npz")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/npz.scp
 
       awk '{split($1, lst, "_"); spk=lst[1]"_"lst[2]; print($1, spk)}' ${data}/${ddir}/wav.scp | \
         sort > ${data}/${ddir}/utt2spk
       utt2spk_to_spk2utt.pl ${data}/${ddir}/utt2spk > ${data}/${ddir}/spk2utt
 
       if [[ "$mixtype" != "clean" ]]; then
-        noise_wav_dir=${rootdir}/noise
+        noise_wav_dir=${rootdir}
         sed -e "s#${mixwav_dir}#${noise_wav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/noise1.scp
       fi
@@ -86,41 +94,51 @@ for x in tr cv tt; do
       # NOTE: modified to do dereverberation and separation
       if [[ "$cond" = "reverb" ]]; then
         # make anechoic spk scp files
-        spk1_wav_dir=${rootdir}/s1_anechoic
+        spk1_wav_dir=${rootdir}
         sed -e "s#${mixwav_dir}#${spk1_wav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/spk1.scp
         if [[ "$mixtype" != "single" ]]; then
-          spk2_wav_dir=${rootdir}/s2_anechoic
+          spk2_wav_dir=${rootdir}
           sed -e "s#${mixwav_dir}#${spk2_wav_dir}#g" ${data}/${ddir}/wav.scp \
             > ${data}/${ddir}/spk2.scp
         fi
 
         # reverb scps
-        spk1_wav_dir=${rootdir}/s1_${cond}
+        spk1_wav_dir=${rootdir}
         sed -e "s#${mixwav_dir}#${spk1_wav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/spk1_reverb.scp
         if [[ "$mixtype" != "single" ]]; then
-          spk2_wav_dir=${rootdir}/s2_${cond}
+          spk2_wav_dir=${rootdir}
           sed -e "s#${mixwav_dir}#${spk2_wav_dir}#g" ${data}/${ddir}/wav.scp \
             > ${data}/${ddir}/spk2_reverb.scp
         fi
       else
         # original code
-        spk1_wav_dir=${rootdir}/s1_${cond}
+        spk1_wav_dir=${rootdir}
         sed -e "s#${mixwav_dir}#${spk1_wav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/spk1.scp
         if [[ "$mixtype" != "single" ]]; then
-          spk2_wav_dir=${rootdir}/s2_${cond}
+          spk2_wav_dir=${rootdir}
           sed -e "s#${mixwav_dir}#${spk2_wav_dir}#g" ${data}/${ddir}/wav.scp \
             > ${data}/${ddir}/spk2.scp
         fi
       fi
 
       if [[ "$cond" = "reverb" ]]; then
-        anechoic_mixwav_dir=${rootdir}/mix_${mixtype}_anechoic
+        anechoic_mixwav_dir=${rootdir}
         sed -e "s#${mixwav_dir}#${anechoic_mixwav_dir}#g" ${data}/${ddir}/wav.scp \
           > ${data}/${ddir}/dereverb1.scp
       fi
+
+      # base npy scps (always generated)
+      s1_base_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/s1_base_npz
+      s2_base_npz_dir=${npz_root}/wav${sample_rate}/${min_or_max}/${x}/s2_base_npz
+      awk -v dir="${s1_base_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/spk1_base_npz.scp
+      awk -v dir="${s2_base_npz_dir}" -v suffix="${cond}" -F "," \
+        'NR>1 {sub(/\.wav$/, "", $1); split($1, lst, "_"); spk=substr(lst[1],1,3)"_"substr(lst[3],1,3); print(spk "_" $1 "_" suffix, dir "/" $1 ".npy")}' \
+        ${whamr_script_dir}/data/mix_2_spk_filenames_${x}.csv | sort > ${data}/${ddir}/spk2_base_npz.scp
     done
   done
 done

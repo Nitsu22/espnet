@@ -65,9 +65,13 @@ sed -i -e "s#^MONO = .*#MONO = ${mono}#" \
        ${dir}/whamr_scripts/create_wham_from_scratch_npz.py
 
 echo "WSJ0 wav file."
-local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
+if [ -d "${wsj_full_wav}/wsj0/si_tr_s" ]; then
+  echo "Found ${wsj_full_wav}/wsj0/si_tr_s. Skipping WSJ0 wav conversion."
+else
+  local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
+fi
 
-echo "Creating Mixtures (wav + npz)."
+echo "Creating Mixtures (npz only)."
 if [ -z "$(python -m pip list | grep pyroomacoustics)" ]; then
   echo -e "Please install pyroomacoustics first:\n pip install pyroomacoustics==0.2.0"
   exit 1;
@@ -80,11 +84,12 @@ echo "Log is in ${dir}/whamr_scripts/mix_npz.log"
 ${train_cmd} ${dir}/whamr_scripts/mix_npz.log python create_wham_from_scratch_npz.py \
   --wsj0-root ${wsj_full_wav} \
   --wham-noise-root ${wham_noise} \
-  --output-dir ${whamr_wav}
+  --output-dir ${whamr_wav} \
+  --skip-audio
 
 # In the default configuration, the script will write about 444 GB of data:
 #  - min_8k: 52 GB (mono=True) / 102 GB (mono=False)
 #  - min_16k: ? GB
 #  - max_8k: ? GB
 #  - max_16k: ? GB
-# Plus npz metadata under <whamr-wav>/npz
+# Plus npz metadata under <whamr-wav>/wav*/{min,max}/{tr,cv,tt}/npz
