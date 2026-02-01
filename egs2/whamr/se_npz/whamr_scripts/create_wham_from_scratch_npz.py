@@ -35,12 +35,6 @@ def _path_in_split(npz_root, wav_dir, datalen_dir, split, subdir, utt_id, ext):
 
 
 def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_audio=True):
-    LEFT_CH_IND = 0
-    if MONO:
-        ch_ind = LEFT_CH_IND
-    else:
-        ch_ind = [0, 1]
-
     if npz_root is None:
         npz_root = output_root
 
@@ -110,9 +104,9 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
             s2_temp = quantize(read_scaled_wav(s2_path, 1))
             s1_temp, s2_temp = fix_length(s1_temp, s2_temp, 'max')
             noise_samples_temp = read_scaled_wav(os.path.join(noise_path, output_name), 1)
-            s1_temp, s2_temp, noise_samples_temp = append_or_truncate(s1_temp, s2_temp,
-                                                                      noise_samples_temp, 'max',
-                                                                      start_samp_16k=0)  # don't pad beginning yet
+            s1_temp, s2_temp, _ = append_or_truncate(s1_temp, s2_temp,
+                                                     noise_samples_temp, 'max',
+                                                     start_samp_16k=0)  # don't pad beginning yet
 
             for sr_i, sr_dir in enumerate(SAMPLE_RATES):
                 wav_dir = 'wav' + sr_dir
@@ -124,8 +118,6 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
                     downsample = False
 
                 for datalen_dir in DATA_LEN:
-                    output_path = os.path.join(output_root, wav_dir, datalen_dir, splt)
-
                     wsjmix_key = 'scaling_wsjmix_{}_{}'.format(sr_dir, datalen_dir)
                     wham_speech_key = 'scaling_wham_speech_{}_{}'.format(sr_dir, datalen_dir)
                     wham_noise_key = 'scaling_wham_noise_{}_{}'.format(sr_dir, datalen_dir)
@@ -215,7 +207,7 @@ def create_wham(wsj_root, wham_noise_path, output_root, npz_root=None, write_aud
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-dir', type=str, required=True,
-                        help='Output directory for writing wsj0-2mix 8 k Hz and 16 kHz datasets.')
+                        help='Output directory for writing WHAMR npz metadata.')
     parser.add_argument('--wsj0-root', type=str, required=True,
                         help='Path to the folder containing wsj0/')
     parser.add_argument('--wham-noise-root', type=str, required=True,

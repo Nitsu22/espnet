@@ -26,6 +26,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
+    --dumpdir dump_clean \
     --stage 6 \
     --stop_stage 8 \
     "$@"
