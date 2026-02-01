@@ -33,7 +33,7 @@ skip_upload_hf=true     # Skip uploading to huggingface stage.
 ngpu=1                  # The number of gpus ("0" uses cpu, otherwise use gpu).
 num_nodes=1             # The number of nodes
 nj=32                   # The number of parallel jobs.
-dumpdir=dump_dif_position            # Directory to dump features.
+dumpdir=dump_dif_rand            # Directory to dump features.
 inference_nj=32         # The number of parallel jobs in inference.
 gpu_inference=false     # Whether to perform gpu inference.
 expdir=exp              # Directory to save experiments.
@@ -318,144 +318,6 @@ fi
 
 # ========================== Main stages start from here. ==========================
 
-if ! "${skip_data_prep}"; then
-    if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-        log "Stage 1: Data preparation for data/${train_set}, data/${valid_set}, etc."
-        # [Task dependent] Need to create data.sh for new corpus
-        local/data_dif_position.sh ${local_data_opts}
-    fi
-
-    if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
-        if ! $use_dereverb_ref && [ -n "${speed_perturb_factors}" ]; then
-           log "Stage 2: Speed perturbation: data/${train_set} -> data/${train_set}_sp"
-
-            _scp_list="wav.scp "
-
-           for factor in ${speed_perturb_factors}; do
-               if python3 -c "assert ${factor} != 1.0" 2>/dev/null; then
-                   scripts/utils/perturb_enh_data_dir_speed.sh --utt_extra_files "${utt_extra_files}" "${factor}" "data/${train_set}" "data/${train_set}_sp${factor}" "${_scp_list}"
-                   _dirs+="data/${train_set}_sp${factor} "
-               else
-                   # If speed factor is 1, same as the original
-                   _dirs+="data/${train_set} "
-               fi
-           done
-           utils/combine_data.sh --extra-files "${_scp_list}" "data/${train_set}_sp" ${_dirs}
-        else
-           log "Skip stage 2: Speed perturbation"
-        fi
-    fi
-
-    if [ -n "${speed_perturb_factors}" ]; then
-        train_set="${train_set}_sp"
-    fi
-
-    if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-
-        log "Stage 3: Format wav.scp: data/ -> ${data_feats}"
-
-        # ====== Recreating "wav.scp" ======
-        # Kaldi-wav.scp, which can describe the file path with unix-pipe, like "cat /some/path |",
-        # shouldn't be used in training process.
-        # "format_wav_scp.sh" dumps such pipe-style-wav to real audio file
-        # and also it can also change the audio-format and sampling rate.
-        # If nothing is need, then format_wav_scp.sh does nothing:
-        # i.e. the input file format and rate is same as the output.
-
-        for dset in "${train_set}" "${valid_set}" ${test_sets}; do
-            if [ "${dset}" = "${train_set}" ] || [ "${dset}" = "${valid_set}" ]; then
-                _suf="/org"
-            else
-                _suf=""
-            fi
-            utils/copy_data_dir.sh data/"${dset}" "${data_feats}${_suf}/${dset}"
-            rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,reco2file_and_channel}
-            _opts=
-            if [ -e data/"${dset}"/segments ]; then
-                # "segments" is used for splitting wav files which are written in "wav".scp
-                # into utterances. The file format of segments:
-                #   <segment_id> <record_id> <start_time> <end_time>
-                #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
-                # Where the time is written in seconds.
-                _opts+="--segments data/${dset}/segments "
-            fi
-
-            for spk in "wav" "wav_reverse"; do
-                # Skip if the source scp file doesn't exist
-                if [ ! -f "data/${dset}/${spk}.scp" ]; then
-                    continue
-                fi
-                # shellcheck disable=SC2086
-                scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                    --out-filename "${spk}.scp" \
-                    --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                    "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
-                    "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
-            done
-
-            for f in $extra_wav_list; do
-                if [ -e "data/${dset}/$f" ]; then
-                    # shellcheck disable=SC2086
-                    scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                        --out-filename "$f" \
-                        --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                        "data/${dset}/$f" "${data_feats}/${dset}" \
-                        "${data_feats}/${dset}/logs/${f%.*}" "${data_feats}/${dset}/data/${f%.*}"
-                fi
-            done
-
-            echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
-
-            for f in ${utt_extra_files}; do
-                [ -f data/${dset}/${f} ] && cp data/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
-            done
-
-        done
-    fi
-
-
-    if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
-        log "Stage 4: Remove short data: ${data_feats}/org -> ${data_feats}"
-
-        for dset in "${train_set}" "${valid_set}"; do
-        # NOTE: Not applying to test_sets to keep original data
-
-            # Copy data dir
-            utils/copy_data_dir.sh "${data_feats}/org/${dset}" "${data_feats}/${dset}"
-            cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
-            # Copy wav_reverse.scp explicitly (same as wav.scp is copied by copy_data_dir.sh)
-            if [ -f "${data_feats}/org/${dset}/wav_reverse.scp" ]; then
-                cp "${data_feats}/org/${dset}/wav_reverse.scp" "${data_feats}/${dset}/wav_reverse.scp"
-            fi
-            for f in ${utt_extra_files}; do
-                if [ -f "${data_feats}/org/${dset}/${f}" ]; then
-                    cp "${data_feats}/org/${dset}/${f}" "${data_feats}/${dset}/${f}"
-                fi
-            done
-
-            _fs=$(python3 -c "import humanfriendly as h;print(h.parse_size('${fs}'))")
-            _min_length=$(python3 -c "print(int(${min_wav_duration} * ${_fs}))")
-            _max_length=$(python3 -c "print(int(${max_wav_duration} * ${_fs}))")
-
-            # utt2num_samples is created by format_wav_scp.sh
-            <"${data_feats}/org/${dset}/utt2num_samples" \
-                awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
-                    '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
-                    >"${data_feats}/${dset}/utt2num_samples"
-            for spk in "wav" "wav_reverse"; do
-                <"${data_feats}/org/${dset}/${spk}.scp" \
-                    utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
-                    >"${data_feats}/${dset}/${spk}.scp"
-            done
-
-            # fix_data_dir.sh leaves only utts which exist in all files
-            utils/fix_data_dir.sh --utt_extra_files "${utt_extra_files}" "${data_feats}/${dset}"
-        done
-    fi
-else
-    log "Skip the data preparation stages"
-fi
-
 if ! "${skip_train}"; then
     if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
         _enh_train_dir="${data_feats}/${train_set}"
@@ -509,13 +371,13 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
-        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from wav_reverse.scp in the same dumpdir
+        # speech_mix comes from wav.scp, speech_mix_mc comes from wav.scp, speech_mix_reverse_mc comes from wav_reverse.scp
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
         _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix_mc,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${data_feats}/${train_set}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
         _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats}/${valid_set}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
 
         # NOTE: --*_shape_file doesn't require length information if --batch_type=unsorted,
         #       but it's used only for deciding the sample ids.
@@ -567,10 +429,10 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         # For Spatial Encoder: speech_mix (SC), speech_mix_mc (MC mix), speech_mix_reverse_mc (MC reverse)
-        # speech_mix and speech_mix_mc come from dumpdir (both use wav.scp), speech_mix_reverse_mc comes from wav_reverse.scp in the same dumpdir
+        # speech_mix comes from wav.scp, speech_mix_mc comes from wav.scp, speech_mix_reverse_mc comes from wav_reverse.scp
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix_mc,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${data_feats}/${train_set}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix_mc,${_type} "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
         _train_shape_param="--train_shape_file ${enh_stats_dir}/train/speech_mix_shape "
         _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_mix_mc_shape "
         _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_mix_reverse_mc_shape "
@@ -579,7 +441,7 @@ if ! "${skip_train}"; then
         _fold_length_param+="--fold_length ${_fold_length} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
         _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix_mc,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${data_feats}/${valid_set}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav_reverse.scp,speech_mix_reverse_mc,${_type} "
         _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
         _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_mc_shape "
         _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_reverse_mc_shape "

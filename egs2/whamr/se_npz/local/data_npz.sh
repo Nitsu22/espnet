@@ -53,9 +53,9 @@ if [ ! -e "${WSJ1}" ]; then
 fi
 
 
-### This part is for WHAMR!
+### This part is for WHAMR! (npz variant: wav + npz via create_wham_from_scratch_npz.py)
 ### Download mixture scripts and create mixtures for 2 speakers
-local/whamr_create_mixture.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+local/whamr_create_mixture_npz.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
     ${wham_noise:+--wham_noise $wham_noise} \
     ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
     ${whamr_wav} || exit 1;
