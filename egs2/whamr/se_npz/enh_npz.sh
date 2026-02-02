@@ -315,211 +315,13 @@ if ${variable_num_refs}; then
     log "[INFO] Variable speaker number is enabled. Please make sure the argument 'flexible_numspk' is True in the preprocessor in the model config."
 fi
 
-
-# ========================== Main stages start from here. ==========================
-
-if ! "${skip_data_prep}"; then
-    if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-        log "Stage 1: Data preparation for data/${train_set}, data/${valid_set}, etc."
-        # [Task dependent] Need to create data.sh for new corpus
-        local/data_npz.sh ${local_data_opts}
-    fi
-
-    if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
-        if ! $use_dereverb_ref && [ -n "${speed_perturb_factors}" ]; then
-           log "Stage 2: Speed perturbation: data/${train_set} -> data/${train_set}_sp"
-
-            _scp_list="wav.scp "
-            for i in $(seq ${ref_num}); do
-                _scp_list+="spk${i}.scp "
-            done
-
-           for factor in ${speed_perturb_factors}; do
-               if python3 -c "assert ${factor} != 1.0" 2>/dev/null; then
-                   scripts/utils/perturb_enh_data_dir_speed.sh --utt_extra_files "${utt_extra_files}" "${factor}" "data/${train_set}" "data/${train_set}_sp${factor}" "${_scp_list}"
-                   _dirs+="data/${train_set}_sp${factor} "
-               else
-                   # If speed factor is 1, same as the original
-                   _dirs+="data/${train_set} "
-               fi
-           done
-           utils/combine_data.sh --extra-files "${_scp_list}" "data/${train_set}_sp" ${_dirs}
-        else
-           log "Skip stage 2: Speed perturbation"
-        fi
-    fi
-
-    if [ -n "${speed_perturb_factors}" ]; then
-        train_set="${train_set}_sp"
-    fi
-
-    if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-
-        log "Stage 3: Format wav.scp: data/ -> ${data_feats}"
-
-        # ====== Recreating "wav.scp" ======
-        # Kaldi-wav.scp, which can describe the file path with unix-pipe, like "cat /some/path |",
-        # shouldn't be used in training process.
-        # "format_wav_scp.sh" dumps such pipe-style-wav to real audio file
-        # and also it can also change the audio-format and sampling rate.
-        # If nothing is need, then format_wav_scp.sh does nothing:
-        # i.e. the input file format and rate is same as the output.
-
-        for dset in "${train_set}" "${valid_set}" ${test_sets}; do
-            if [ "${dset}" = "${train_set}" ] || [ "${dset}" = "${valid_set}" ]; then
-                _suf="/org"
-            else
-                _suf=""
-            fi
-            utils/copy_data_dir.sh data/"${dset}" "${data_feats}${_suf}/${dset}"
-            rm -f ${data_feats}${_suf}/${dset}/{segments,wav.scp,reco2file_and_channel}
-            _opts=
-            if [ -e data/"${dset}"/segments ]; then
-                # "segments" is used for splitting wav files which are written in "wav".scp
-                # into utterances. The file format of segments:
-                #   <segment_id> <record_id> <start_time> <end_time>
-                #   "e.g. call-861225-A-0050-0065 call-861225-A 5.0 6.5"
-                # Where the time is written in seconds.
-                _opts+="--segments data/${dset}/segments "
-            fi
-
-
-            _spk_list=" "
-            for i in $(seq ${ref_num}); do
-                _spk_list+="spk${i} "
-                if $is_tse_task; then
-                    _spk_list+="enroll_spk${i} "
-                fi
-            done
-            if $use_noise_ref && [ -n "${_suf}" ]; then
-                # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
-                _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
-            fi
-            if $use_dereverb_ref && [ -n "${_suf}" ]; then
-                # references for dereverberation
-                _spk_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n "; done)
-            fi
-
-            for spk in "wav" ${_spk_list}; do
-                if ${is_tse_task} && [[ "${spk}" == enroll_spk* ]]; then
-                    audio_path=$(head -n 1 "data/${dset}/${spk}.scp" | awk '{print $2}')
-                    if [[ ("${dset}" == "${train_set}" && "${audio_path:0:1}" == "*") || "${audio_path: -4}" == ".npy" ]]; then
-                        # In case of
-                        # 1. a special format in `enroll_spk?.scp`:
-                        # MIXTURE_UID *UID SPEAKER_ID
-                        # 2. speaker embeddings instead of enrollment audios in `enroll_spk?.scp`
-                        utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
-                        continue
-                    fi
-                fi
-                if ${variable_num_refs}; then
-                    if [[ "${spk}" == spk* ]] || [[ "${spk}" == dereverb* ]] || [[ "${spk}" == enroll_spk* ]]; then
-                        # skip formatting for multi-audio-column scp files
-                        utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
-                        continue
-                    fi
-                fi
-                # shellcheck disable=SC2086
-                scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                    --out-filename "${spk}.scp" \
-                    --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                    "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
-                    "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
-
-            done
-
-            for f in $extra_wav_list; do
-                if [ -e "data/${dset}/$f" ]; then
-                    # shellcheck disable=SC2086
-                    scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
-                        --out-filename "$f" \
-                        --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
-                        "data/${dset}/$f" "${data_feats}/${dset}" \
-                        "${data_feats}/${dset}/logs/${f%.*}" "${data_feats}/${dset}/data/${f%.*}"
-                fi
-            done
-
-            echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
-
-            for f in ${utt_extra_files}; do
-                [ -f data/${dset}/${f} ] && cp data/${dset}/${f} ${data_feats}${_suf}/${dset}/${f}
-            done
-
-        done
-    fi
-
-
-    if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
-        log "Stage 4: Remove short data: ${data_feats}/org -> ${data_feats}"
-
-        for dset in "${train_set}" "${valid_set}"; do
-        # NOTE: Not applying to test_sets to keep original data
-
-            _spk_list=" "
-            _scp_list=" "
-            for i in $(seq ${ref_num}); do
-                _spk_list+="spk${i} "
-                _scp_list+="spk${i}.scp "
-                if $is_tse_task; then
-                    _spk_list+="enroll_spk${i} "
-                    _scp_list+="enroll_spk${i}.scp "
-                fi
-            done
-            if $use_noise_ref; then
-                # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
-                _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
-                _scp_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n.scp "; done)
-            fi
-            if $use_dereverb_ref; then
-                # references for dereverberation
-                _spk_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n "; done)
-                _scp_list+=$(for n in $(seq $dereverb_ref_num); do echo -n "dereverb$n.scp "; done)
-            fi
-
-            # Copy data dir
-            utils/copy_data_dir.sh "${data_feats}/org/${dset}" "${data_feats}/${dset}"
-            cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
-            for spk in ${_spk_list};do
-                cp "${data_feats}/org/${dset}/${spk}.scp" "${data_feats}/${dset}/${spk}.scp"
-            done
-            for f in ${utt_extra_files}; do
-                if [ -f "${data_feats}/org/${dset}/${f}" ]; then
-                    cp "${data_feats}/org/${dset}/${f}" "${data_feats}/${dset}/${f}"
-                fi
-            done
-
-            _fs=$(python3 -c "import humanfriendly as h;print(h.parse_size('${fs}'))")
-            _min_length=$(python3 -c "print(int(${min_wav_duration} * ${_fs}))")
-            _max_length=$(python3 -c "print(int(${max_wav_duration} * ${_fs}))")
-
-            # utt2num_samples is created by format_wav_scp.sh
-            <"${data_feats}/org/${dset}/utt2num_samples" \
-                awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
-                    '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
-                    >"${data_feats}/${dset}/utt2num_samples"
-            for spk in ${_spk_list} "wav"; do
-                <"${data_feats}/org/${dset}/${spk}.scp" \
-                    utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
-                    >"${data_feats}/${dset}/${spk}.scp"
-            done
-
-            # fix_data_dir.sh leaves only utts which exist in all files
-            utils/fix_data_dir.sh --utt_extra_files "${_scp_list} ${utt_extra_files}" "${data_feats}/${dset}"
-        done
-    fi
-else
-    log "Skip the data preparation stages"
-fi
-
-
 # ========================== Data preparation is done here. ==========================
-
 
 
 if ! "${skip_train}"; then
     if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
-        _enh_train_dir="${data_feats}/${train_set}"
-        _enh_valid_dir="${data_feats}/${valid_set}"
+        _enh_train_dir="data/${train_set}"
+        _enh_valid_dir="data/${valid_set}"
         log "Stage 5: Enhancement collect stats: train_set=${_enh_train_dir}, valid_set=${_enh_valid_dir}"
 
         _opts=
@@ -529,19 +331,7 @@ if ! "${skip_train}"; then
             _opts+="--config ${enh_config} "
         fi
 
-        _scp=wav.scp
-        if [[ "${audio_format}" == *ark* ]]; then
-            _type=kaldi_ark
-            _type_ref=kaldi_ark
-        else
-            # "sound" supports "wav", "flac", etc.
-            _type=sound
-            if ${variable_num_refs}; then
-                _type_ref="variable_columns_sound"
-            else
-                _type_ref="sound"
-            fi
-        fi
+        _scp=npz.scp
 
         # 1. Split the key file
         _logdir="${enh_stats_dir}/logdir"
@@ -574,43 +364,33 @@ if ! "${skip_train}"; then
         log "Enhancement collect-stats started... log: '${_logdir}/stats.*.log'"
 
         # prepare train and valid data parameters
-        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
-        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        for spk in $(seq "${ref_num}"); do
-            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
-            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
+        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/npz.scp,npz_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk1_base_npz.scp,s1_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk2_base_npz.scp,s2_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk1_temp_npz.scp,s1_temp,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk2_temp_npz.scp,s2_temp,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/noise_base_npz.scp,noise_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir_npz.scp,rir_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/room_param_npz.scp,room_param_path,text "
 
-            # for target-speaker extraction
-            if $is_tse_task; then
-                _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
-                _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
-            fi
-        done
-
-        if $use_dereverb_ref; then
-            # references for dereverberation
-            _train_data_param+=$(for n in $(seq $dereverb_ref_num); do echo -n \
-                "--train_data_path_and_name_and_type ${_enh_train_dir}/dereverb${n}.scp,dereverb_ref${n},${_type_ref} "; done)
-            _valid_data_param+=$(for n in $(seq $dereverb_ref_num); do echo -n \
-                "--valid_data_path_and_name_and_type ${_enh_valid_dir}/dereverb${n}.scp,dereverb_ref${n},${_type_ref} "; done)
-        fi
-
-        if $use_noise_ref; then
-            # references for denoising
-            _train_data_param+=$(for n in $(seq $noise_type_num); do echo -n \
-                "--train_data_path_and_name_and_type ${_enh_train_dir}/noise${n}.scp,noise_ref${n},${_type} "; done)
-            _valid_data_param+=$(for n in $(seq $noise_type_num); do echo -n \
-                "--valid_data_path_and_name_and_type ${_enh_valid_dir}/noise${n}.scp,noise_ref${n},${_type} "; done)
-        fi
+        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/npz.scp,npz_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk1_base_npz.scp,s1_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk2_base_npz.scp,s2_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk1_temp_npz.scp,s1_temp,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk2_temp_npz.scp,s2_temp,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/noise_base_npz.scp,noise_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir_npz.scp,rir_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/room_param_npz.scp,room_param_path,text "
 
         # NOTE: --*_shape_file doesn't require length information if --batch_type=unsorted,
         #       but it's used only for deciding the sample ids.
 
-        if $is_tse_task; then
-            train_module=espnet2.bin.enh_tse_train
-        else
-            train_module=espnet2.bin.enh_train
-        fi
+        train_module=espnet2.bin.enh_se_npz_train
+
+        _opts+="--preprocessor_conf contrastive_pool_rir_scp.tr=${_enh_train_dir}/rir_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_rir_scp.cv=${_enh_valid_dir}/rir_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_room_param_scp.tr=${_enh_train_dir}/room_param_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_room_param_scp.cv=${_enh_valid_dir}/room_param_npz.scp "
         # shellcheck disable=SC2046,SC2086
         ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
             ${python} -m ${train_module} \
@@ -663,8 +443,8 @@ if ! "${skip_train}"; then
 
 
     if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
-        _enh_train_dir="${data_feats}/${train_set}"
-        _enh_valid_dir="${data_feats}/${valid_set}"
+        _enh_train_dir="data/${train_set}"
+        _enh_valid_dir="data/${valid_set}"
         log "Stage 6: Enhancemnt Frontend Training: train_set=${_enh_train_dir}, valid_set=${_enh_valid_dir}"
 
         _opts=
@@ -674,74 +454,35 @@ if ! "${skip_train}"; then
             _opts+="--config ${enh_config} "
         fi
 
-        _scp="wav.scp"
-        # "sound" supports "wav", "flac", etc.
-        if [[ "${audio_format}" == *ark* ]]; then
-            _type=kaldi_ark
-            _type_ref=kaldi_ark
-        else
-            # "sound" supports "wav", "flac", etc.
-            _type=sound
-            if ${variable_num_refs}; then
-                _type_ref="variable_columns_sound"
-            else
-                _type_ref="sound"
-            fi
-        fi
+        _scp="npz.scp"
         _fold_length="$((enh_speech_fold_length * 100))"
 
         # prepare train and valid data parameters
-        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/${_scp},speech_mix,${_type} "
-        _train_shape_param="--train_shape_file ${enh_stats_dir}/train/speech_mix_shape "
+        _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/npz.scp,npz_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk1_base_npz.scp,s1_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk2_base_npz.scp,s2_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk1_temp_npz.scp,s1_temp,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk2_temp_npz.scp,s2_temp,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/noise_base_npz.scp,noise_base,npy "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir_npz.scp,rir_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/room_param_npz.scp,room_param_path,text "
+
+        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/npz.scp,npz_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk1_base_npz.scp,s1_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk2_base_npz.scp,s2_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk1_temp_npz.scp,s1_temp,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk2_temp_npz.scp,s2_temp,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/noise_base_npz.scp,noise_base,npy "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir_npz.scp,rir_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/room_param_npz.scp,room_param_path,text "
+
+        _train_shape_param=""
+        _valid_shape_param=""
+        if [ -f "${enh_stats_dir}/train/speech_anchor_shape" ] && [ -f "${enh_stats_dir}/valid/speech_anchor_shape" ]; then
+            _train_shape_param="--train_shape_file ${enh_stats_dir}/train/speech_anchor_shape "
+            _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_anchor_shape "
+        fi
         _fold_length_param="--fold_length ${_fold_length} "
-        _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
-
-        for spk in $(seq "${ref_num}"); do
-            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
-            _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/speech_ref${spk}_shape "
-            _fold_length_param+="--fold_length ${_fold_length} "
-
-            # for target-speaker extraction
-            if $is_tse_task; then
-                _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
-                _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/enroll_ref${spk}_shape "
-                _fold_length_param+="--fold_length ${_fold_length} "
-            fi
-        done
-
-        for spk in $(seq "${ref_num}"); do
-            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
-            _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_ref${spk}_shape "
-
-            # for target-speaker extraction
-            if $is_tse_task; then
-                _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
-                _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/enroll_ref${spk}_shape "
-            fi
-        done
-
-        if $use_dereverb_ref; then
-            # references for dereverberation
-            for n in $(seq "${dereverb_ref_num}"); do
-                _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/dereverb${n}.scp,dereverb_ref${n},${_type_ref} "
-                _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/dereverb_ref${n}_shape "
-                _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/dereverb${n}.scp,dereverb_ref${n},${_type_ref} "
-                _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/dereverb_ref${n}_shape "
-                _fold_length_param+="--fold_length ${_fold_length} "
-            done
-        fi
-
-        if $use_noise_ref; then
-            # references for denoising
-            for n in $(seq "${noise_type_num}"); do
-                _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/noise${n}.scp,noise_ref${n},${_type} "
-                _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/noise_ref${n}_shape "
-                _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/noise${n}.scp,noise_ref${n},${_type} "
-                _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/noise_ref${n}_shape "
-                _fold_length_param+="--fold_length ${_fold_length} "
-            done
-        fi
 
         # Add the category information at the end of the data path list
         if [ -e "${_enh_train_dir}/utt2category" ] && [ -e "${_enh_valid_dir}/utt2category" ]; then
@@ -770,11 +511,12 @@ if ! "${skip_train}"; then
         else
             jobname="${enh_exp}/train.log"
         fi
-        if $is_tse_task; then
-            train_module=espnet2.bin.enh_tse_train
-        else
-            train_module=espnet2.bin.enh_train
-        fi
+        train_module=espnet2.bin.enh_se_npz_train
+
+        _opts+="--preprocessor_conf contrastive_pool_rir_scp.tr=${_enh_train_dir}/rir_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_rir_scp.cv=${_enh_valid_dir}/rir_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_room_param_scp.tr=${_enh_train_dir}/room_param_npz.scp "
+        _opts+="--preprocessor_conf contrastive_pool_room_param_scp.cv=${_enh_valid_dir}/room_param_npz.scp "
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \
             --cmd "${cuda_cmd} --name ${jobname}" \

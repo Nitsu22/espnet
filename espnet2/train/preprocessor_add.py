@@ -486,11 +486,6 @@ class EnhPreprocessorPlus(CommonPreprocessor):
         ]
         length = speech_refs[0].shape[0]
         if length <= tgt_length:
-            # if length < tgt_length:
-            #     logging.warning(
-            #         f"The sample ({uid}) is not cropped due to its short length "
-            #         f"({length} < {tgt_length})."
-            #     )
             return 0, length
 
         start = np.random.randint(0, length - tgt_length)
@@ -709,7 +704,7 @@ class EnhPreprocessorPlus(CommonPreprocessor):
                 self._apply_to_all_signals(data, lambda x: x / ma, num_spk)
 
             self._apply_to_all_signals(data, lambda x: x.squeeze(), num_spk)
-        
+
         # Save multi-channel version before force_single_channel processing
         speech_mix_mc = data[self.speech_name].copy()
 
@@ -728,7 +723,7 @@ class EnhPreprocessorPlus(CommonPreprocessor):
                 volume_scale = self.volume_low
             ma = np.max(np.abs(data[self.speech_name]))
             self._apply_to_all_signals(data, lambda x: x * volume_scale / ma, num_spk)
-            
+
             # Apply volume normalization to multi-channel version
             if "speech_mix_mc" in data:
                 ma_mc = np.max(np.abs(data["speech_mix_mc"]))
@@ -749,7 +744,6 @@ class EnhPreprocessorPlus(CommonPreprocessor):
         if self.channel_reordering and self.train:
             if speech_mix.ndim > 1:
                 num_ch = speech_mix.shape[-1]
-                # chs = np.random.choice(range(num_ch), size=num_ch, replace=False).tolist()
                 chs = np.random.permutation(num_ch).tolist()
                 data[self.speech_name] = speech_mix[..., chs]
                 for i in range(num_spk):
@@ -779,3 +773,4 @@ class EnhPreprocessorPlus(CommonPreprocessor):
         data = self._speech_process(uid, data)
         data = self._text_process(data)
         return data
+

@@ -2,7 +2,7 @@
 
 # Copyright  2020  Shanghai Jiao Tong University (Authors: Wangyou Zhang)
 # Apache 2.0
-# NPz variant: uses create_wham_from_scratch_npz.py (wav + npz output)
+# NPz variant: uses create_wham_from_scratch_npz.py (npz-only output)
 
 wham_noise=   # Path to the directory containing WHAM! noise
 mono=False
@@ -76,7 +76,7 @@ if [ -z "$(python -m pip list | grep pyroomacoustics)" ]; then
   echo -e "Please install pyroomacoustics first:\n pip install pyroomacoustics==0.2.0"
   exit 1;
 fi
-# Run simulation with npz script (outputs wav + npz)
+# Run simulation with npz script (npz-only output)
 # (This may take ~11 hours to generate min version, 8k data
 #  on Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz)
 cd ${dir}/whamr_scripts || exit 1
@@ -87,9 +87,4 @@ ${train_cmd} ${dir}/whamr_scripts/mix_npz.log python create_wham_from_scratch_np
   --output-dir ${whamr_wav} \
   --skip-audio
 
-# In the default configuration, the script will write about 444 GB of data:
-#  - min_8k: 52 GB (mono=True) / 102 GB (mono=False)
-#  - min_16k: ? GB
-#  - max_8k: ? GB
-#  - max_16k: ? GB
-# Plus npz metadata under <whamr-wav>/wav*/{min,max}/{tr,cv,tt}/npz
+# This script writes npz/npy metadata under <whamr-wav>/wav*/{min,max}/{tr,cv,tt}/
