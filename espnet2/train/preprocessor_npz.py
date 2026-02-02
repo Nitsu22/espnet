@@ -454,14 +454,27 @@ class NpzPreprocessor(EnhPreprocessor):
 
         return speech_mix, s1_samples, s2_samples
 
-    def _apply_postprocess(self, uid: str, speech_mix, s1_samples, s2_samples):
+    def _apply_postprocess(self, uid: str, speech_mix, s1_samples, s2_samples, crop=None):
+        if crop is not None:
+            start, end = crop
+            speech_mix = speech_mix[start:end]
+            s1_samples = s1_samples[start:end]
+            s2_samples = s2_samples[start:end]
         tmp = {
             self.speech_name: speech_mix,
             self.speech_ref_name_prefix + "1": s1_samples,
         }
         if self.num_spk > 1:
             tmp[self.speech_ref_name_prefix + "2"] = s2_samples
-        tmp = super()._speech_process(uid, tmp)
+        if crop is not None and self.train and self.speech_segment is not None:
+            original = self.speech_segment
+            try:
+                self.speech_segment = None
+                tmp = super()._speech_process(uid, tmp)
+            finally:
+                self.speech_segment = original
+        else:
+            tmp = super()._speech_process(uid, tmp)
         return tmp[self.speech_name]
 
     def _speech_process(
@@ -479,7 +492,6 @@ class NpzPreprocessor(EnhPreprocessor):
         data_len = _as_str(meta["data_len"])
         mono = bool(_np_item(meta["mono"]))
         start_samp_16k = int(_np_item(meta["start_samp_16k"]))
-        split = _as_str(meta["split"])
         split = _as_str(meta["split"])
         wsjmix_scale = np.asarray(meta["wsjmix_scale"], dtype=np.float64)
         wham_speech_scale = float(_np_item(meta["wham_speech_scale"]))
@@ -564,6 +576,7 @@ class NpzPreprocessor(EnhPreprocessor):
         data_len = _as_str(meta["data_len"])
         mono = bool(_np_item(meta["mono"]))
         start_samp_16k = int(_np_item(meta["start_samp_16k"]))
+        split = _as_str(meta["split"])
         wsjmix_scale = np.asarray(meta["wsjmix_scale"], dtype=np.float64)
         wham_speech_scale = float(_np_item(meta["wham_speech_scale"]))
         wham_noise_scale = float(_np_item(meta["wham_noise_scale"]))
@@ -617,7 +630,21 @@ class NpzPreprocessor(EnhPreprocessor):
             s1_scale_factor=1.0,
             s2_scale_factor=1.0,
         )
-        speech_anchor = self._apply_postprocess(uid, speech_mix, s1_samples, s2_samples)
+        crop = None
+        if self.train and self.speech_segment is not None:
+            speech_segment = self.speech_segment // self.sample_rate * sample_rate
+            crop = self._random_crop_range(
+                {
+                    self.speech_ref_name_prefix + "1": s1_samples,
+                    self.speech_ref_name_prefix + "2": s2_samples,
+                },
+                self.num_spk,
+                speech_segment,
+                uid=uid,
+            )
+        speech_anchor = self._apply_postprocess(
+            uid, speech_mix, s1_samples, s2_samples, crop=crop
+        )
 
         s1_factor = rng.uniform(self.contrastive_scale_min, self.contrastive_scale_max)
         s2_factor = rng.uniform(self.contrastive_scale_min, self.contrastive_scale_max)
@@ -644,7 +671,9 @@ class NpzPreprocessor(EnhPreprocessor):
             s1_scale_factor=s1_factor,
             s2_scale_factor=s2_factor,
         )
-        speech_pos = self._apply_postprocess(uid, speech_mix, s1_samples, s2_samples)
+        speech_pos = self._apply_postprocess(
+            uid, speech_mix, s1_samples, s2_samples, crop=crop
+        )
 
         if isinstance(self._contrastive_pool_keys, dict):
             if split not in self._contrastive_pool_keys:
@@ -708,7 +737,7 @@ class NpzPreprocessor(EnhPreprocessor):
                 s2_scale_factor=s2_factor,
             )
             speech_negs.append(
-                self._apply_postprocess(uid, speech_mix, s1_samples, s2_samples)
+                self._apply_postprocess(uid, speech_mix, s1_samples, s2_samples, crop=crop)
             )
 
         preserved = {

@@ -10,9 +10,9 @@ sample_rate=8k
 
 
 
-train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
-valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
-test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
+train_set=tr_mix_clean_reverb_${min_or_max}_${sample_rate}
+valid_set=cv_mix_clean_reverb_${min_or_max}_${sample_rate}
+test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
 
 ./enh_npz.sh \
     --train_set "${train_set}" \
@@ -22,11 +22,12 @@ test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
     --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_beamformer_mvdr.yaml \
+    --enh_config ./conf/tuning/train_se_mc_conformer_div_npz.yaml \
     --use_dereverb_ref false \
-    --use_noise_ref true \
+    --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --stage 5 \
-    --stop_stage 5 \
+    --dumpdir dump_clean \
+    --stage 6 \
+    --stop_stage 6 \
     "$@"

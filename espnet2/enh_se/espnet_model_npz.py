@@ -1,5 +1,6 @@
 """Spatial Encoder model module for ESPnet."""
 
+import re
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -99,7 +100,7 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         speech_pos = speech_pos[:, :max_len, :]
 
         neg_keys = sorted(
-            [k for k in kwargs if k.startswith("speech_neg")],
+            [k for k in kwargs if re.fullmatch(r"speech_neg\d+", k)],
             key=lambda x: int(x.replace("speech_neg", "")),
         )
         if len(neg_keys) == 0:
