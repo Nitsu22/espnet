@@ -193,6 +193,7 @@ class NpzPreprocessor(EnhPreprocessor):
         avoid_allzero_segment: bool = True,
         flexible_numspk: bool = False,
         output_audio_subtype: Optional[str] = "PCM_16",
+        anchor_single_channel: bool = False,
         contrastive_enable: bool = False,
         contrastive_num_neg: int = 1,
         contrastive_seed: int = 1234,
@@ -253,6 +254,7 @@ class NpzPreprocessor(EnhPreprocessor):
         if output_audio_subtype is not None and output_audio_subtype != "PCM_16":
             raise ValueError("Only PCM_16 or None is supported for output_audio_subtype")
         self.output_audio_subtype = output_audio_subtype
+        self.anchor_single_channel = bool(anchor_single_channel)
 
         self.contrastive_enable = contrastive_enable
         self.contrastive_num_neg = int(contrastive_num_neg)
@@ -645,6 +647,9 @@ class NpzPreprocessor(EnhPreprocessor):
         speech_anchor = self._apply_postprocess(
             uid, speech_mix, s1_samples, s2_samples, crop=crop
         )
+        if self.anchor_single_channel and speech_anchor.ndim > 1:
+            # Match EnhPreprocessor single-channel behavior (take channel 0)
+            speech_anchor = speech_anchor[:, 0]
 
         s1_factor = rng.uniform(self.contrastive_scale_min, self.contrastive_scale_max)
         s2_factor = rng.uniform(self.contrastive_scale_min, self.contrastive_scale_max)

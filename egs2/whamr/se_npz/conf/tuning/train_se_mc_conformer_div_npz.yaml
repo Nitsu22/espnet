@@ -21,6 +21,7 @@ preprocessor_conf:
     speech_volume_normalize: null
     sample_rate: 8000
     force_single_channel: false
+    anchor_single_channel: true
     categories: null
     speech_segment: 32000
     avoid_allzero_segment: true

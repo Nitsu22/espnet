@@ -61,7 +61,7 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         """Forward pass for Spatial Encoder model with contrastive inputs.
 
         Args:
-            speech_anchor: (Batch, T, C) anchor waveform
+            speech_anchor: (Batch, T) or (Batch, T, C) anchor waveform
             speech_anchor_lengths: (Batch,)
             speech_pos: (Batch, T, C) positive waveform
             speech_pos_lengths: (Batch,)
@@ -94,9 +94,24 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         else:
             fs = None
 
+        # Determine anchor channel count (SC or MC)
+        if speech_anchor.ndim == 2:
+            anchor_sc = True
+        elif speech_anchor.ndim == 3:
+            if speech_anchor.shape[2] == 1:
+                anchor_sc = True
+                speech_anchor = speech_anchor.squeeze(2)
+            else:
+                anchor_sc = False
+        else:
+            raise ValueError(f"Unexpected speech_anchor shape: {speech_anchor.shape}")
+
         # for data-parallel: trim to max length
         max_len = speech_lengths.max()
-        speech_anchor = speech_anchor[:, :max_len, :]
+        if speech_anchor.ndim == 2:
+            speech_anchor = speech_anchor[:, :max_len]
+        else:
+            speech_anchor = speech_anchor[:, :max_len, :]
         speech_pos = speech_pos[:, :max_len, :]
 
         neg_keys = sorted(
@@ -114,9 +129,14 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
 
         # Encode anchor
         feature_anchor, flens = self.encoder(speech_anchor, speech_lengths, fs=fs)
-        embedding_anchor = self.spatial_encoder(
-            feature_anchor, flens, num_channels=num_channels_mc
-        )
+        if anchor_sc:
+            embedding_anchor = self.spatial_encoder(
+                feature_anchor, flens, num_channels=1
+            )
+        else:
+            embedding_anchor = self.spatial_encoder(
+                feature_anchor, flens, num_channels=num_channels_mc
+            )
 
         # Encode positive
         feature_pos, flens_pos = self.encoder(speech_pos, speech_lengths, fs=fs)
