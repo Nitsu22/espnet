@@ -25,9 +25,9 @@ test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
     --enh_config ./conf/tuning/train_se_mc_conformer_div_npz.yaml \
     --use_dereverb_ref false \
     --use_noise_ref false \
+    --enh_exp exp/enh_train_se_mc_conformer_div_negative_raw \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --dumpdir dump_clean \
     --stage 6 \
     --stop_stage 6 \
     "$@"
