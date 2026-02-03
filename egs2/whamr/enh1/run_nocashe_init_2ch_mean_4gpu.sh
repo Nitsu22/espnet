@@ -24,7 +24,7 @@ test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 # 従って、平均は real/imag を混ぜずに別々に行う:
 #   dst[:, 0] = mean(src[:, 0:M])   (real)
 #   dst[:, 1] = mean(src[:, M:2M])  (imag)
-init_param_src_path="exp/enh_train_enh_tflocoformer_nocashe_2ch_4gpu/valid.loss.best.pth"
+init_param_src_path="exp/enh_train_enh_tflocoformer_nocashe_2ch_4gpu/valid.loss.ave_5best.pth"
 init_param_path="${init_param_src_path%.pth}.convavg_to_1ch.pth"
 
 if [ ! -f "${init_param_path}" ]; then
