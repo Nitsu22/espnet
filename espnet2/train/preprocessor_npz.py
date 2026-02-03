@@ -198,6 +198,7 @@ class NpzPreprocessor(EnhPreprocessor):
         contrastive_num_neg: int = 1,
         contrastive_seed: int = 1234,
         contrastive_epoch: int = 0,
+        contrastive_random_each_call: bool = False,
         contrastive_scale_min: float = 0.9,
         contrastive_scale_max: float = 1.1,
         contrastive_pool_rir_scp: Optional[str] = None,
@@ -260,6 +261,7 @@ class NpzPreprocessor(EnhPreprocessor):
         self.contrastive_num_neg = int(contrastive_num_neg)
         self.contrastive_seed = int(contrastive_seed)
         self.contrastive_epoch = int(contrastive_epoch)
+        self.contrastive_random_each_call = bool(contrastive_random_each_call)
         self.contrastive_scale_min = float(contrastive_scale_min)
         self.contrastive_scale_max = float(contrastive_scale_max)
         if self.contrastive_scale_min > self.contrastive_scale_max:
@@ -607,7 +609,10 @@ class NpzPreprocessor(EnhPreprocessor):
                 f"metadata sample_rate {sample_rate} != preprocessor sample_rate {self.sample_rate}"
             )
 
-        rng = self._rng_for_uid(uid)
+        if self.contrastive_random_each_call:
+            rng = np.random.default_rng()
+        else:
+            rng = self._rng_for_uid(uid)
 
         speech_mix, s1_samples, s2_samples = self._synthesize_mix(
             sample_rate=sample_rate,
