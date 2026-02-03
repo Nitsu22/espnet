@@ -11,10 +11,14 @@ from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh_se.encoder.stft_encoder import STFTEncoder
 from espnet2.enh_se.espnet_model_npz import ESPnetSpatialEncoderModel
 from espnet2.enh_se.loss.criterions.abs_loss import AbsSELoss
-from espnet2.enh_se.loss.criterions.contrastive_loss import PairwiseNegativeLoss
+from espnet2.enh_se.loss.criterions.contrastive_loss import (
+    PairwiseNegativeLoss,
+    TripletLoss,
+)
 from espnet2.enh_se.loss.wrappers.abs_wrapper import AbsLossWrapper
 from espnet2.enh_se.loss.wrappers.contrastive_loss_wrapper import (
     ContrastiveLossWrapper,
+    TripletLossWrapper,
 )
 from espnet2.enh_se.spatial_encoder.abs_spatial_encoder import AbsSpatialEncoder
 from espnet2.enh_se.spatial_encoder.resnet2d_spatial_encoder import (
@@ -59,14 +63,14 @@ spatial_encoder_choices = ClassChoices(
 
 loss_wrapper_choices = ClassChoices(
     name="loss_wrappers",
-    classes=dict(contrastive=ContrastiveLossWrapper),
+    classes=dict(contrastive=ContrastiveLossWrapper, triplet=TripletLossWrapper),
     type_check=AbsLossWrapper,
     default=None,
 )
 
 criterion_choices = ClassChoices(
     name="criterions",
-    classes=dict(pairwise_negative=PairwiseNegativeLoss),
+    classes=dict(pairwise_negative=PairwiseNegativeLoss, triplet=TripletLoss),
     type_check=AbsSELoss,
     default=None,
 )

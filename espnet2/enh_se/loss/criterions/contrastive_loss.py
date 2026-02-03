@@ -73,3 +73,55 @@ class PairwiseNegativeLoss(AbsSELoss):
 
         return loss
 
+
+class TripletLoss(AbsSELoss):
+    """Triplet margin loss for contrastive learning.
+
+    This loss enforces anchor-positive to be closer than anchor-negative
+    by a margin. Embeddings are L2-normalized before distance computation.
+    """
+
+    @property
+    def name(self) -> str:
+        return "triplet_loss"
+
+    @typechecked
+    def __init__(
+        self,
+        margin: float = 0.2,
+        eps: float = 1e-8,
+    ):
+        """Initialize TripletLoss.
+
+        Args:
+            margin: Margin for triplet loss
+            eps: Small value for numerical stability in normalization
+        """
+        super().__init__()
+        self.margin = float(margin)
+        self.eps = float(eps)
+
+    def forward(
+        self,
+        anchor_emb: torch.Tensor,
+        pos_emb: torch.Tensor,
+        neg_emb: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute triplet margin loss.
+
+        Args:
+            anchor_emb: [B, E] - anchor embeddings
+            pos_emb: [B, E] - positive embeddings
+            neg_emb: [B, E] - negative embeddings
+
+        Returns:
+            loss: [B] - loss per sample
+        """
+        anchor = F.normalize(anchor_emb, p=2, dim=1, eps=self.eps)
+        pos = F.normalize(pos_emb, p=2, dim=1, eps=self.eps)
+        neg = F.normalize(neg_emb, p=2, dim=1, eps=self.eps)
+
+        d_pos = torch.linalg.vector_norm(anchor - pos, ord=2, dim=1)
+        d_neg = torch.linalg.vector_norm(anchor - neg, ord=2, dim=1)
+        loss = torch.clamp(d_pos - d_neg + self.margin, min=0.0)
+        return loss
