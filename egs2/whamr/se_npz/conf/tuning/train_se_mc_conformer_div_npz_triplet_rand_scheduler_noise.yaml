@@ -59,7 +59,7 @@ model_conf: {}
 # Optimizer configuration
 optim: adam
 optim_conf:
-    lr: 1.0e-03
+    lr: 1.0e-04
     eps: 1.0e-08
     weight_decay: 0
 
