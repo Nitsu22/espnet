@@ -84,9 +84,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_nocashe.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_2ch_init_4gpu \
+    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_2ch_init_mean_4gpu \
     --use_dereverb_ref false \
-    --use_noise_ref true \
+    --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
     --init_param "${init_param}" \
