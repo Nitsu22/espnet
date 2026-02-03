@@ -15,7 +15,7 @@ num_workers: 12
 # Preprocessor configuration
 preprocessor: npz
 preprocessor_conf:
-    mix_type: clean
+    mix_type: both
     ref_condition: reverb
     output_audio_subtype: PCM_16
     speech_volume_normalize: null
