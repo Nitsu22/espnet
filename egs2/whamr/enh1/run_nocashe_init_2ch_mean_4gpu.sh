@@ -30,47 +30,10 @@ init_param_path="${init_param_src_path%.pth}.convavg_to_1ch.pth"
 if [ ! -f "${init_param_path}" ]; then
     # Make sure torch is available (same as enh.sh does internally).
     . ./path.sh
-    INIT_PARAM_SRC_PATH="${init_param_src_path}" INIT_PARAM_DST_PATH="${init_param_path}" \
-        python3 - <<'PY'
-import os
-import torch
-
-src_path = os.environ["INIT_PARAM_SRC_PATH"]
-dst_path = os.environ["INIT_PARAM_DST_PATH"]
-module_key = "separator.conv.0"
-
-state = torch.load(src_path, map_location="cpu")
-weight_key = module_key + ".weight"
-bias_key = module_key + ".bias"
-if weight_key not in state:
-    raise KeyError(f"'{weight_key}' not found in state_dict: {src_path}")
-if bias_key not in state:
-    raise KeyError(f"'{bias_key}' not found in state_dict: {src_path}")
-
-w = state[weight_key]
-b = state[bias_key]
-if w.ndim != 4:
-    raise ValueError(f"Expected 4D conv weight, but got shape={tuple(w.shape)}")
-
-out_ch, in_ch, k_h, k_w = w.shape
-if in_ch % 2 != 0:
-    raise ValueError(f"Expected even in_channels (real+imag), but got shape={tuple(w.shape)}")
-m = in_ch // 2
-if m < 1:
-    raise ValueError(f"Invalid in_channels: {in_ch}")
-
-# Average across microphone channels, separately for real and imag.
-w_real = w[:, :m, :, :].mean(dim=1)
-w_imag = w[:, m:, :, :].mean(dim=1)
-w_new = torch.stack([w_real, w_imag], dim=1)  # (out_ch, 2, k_h, k_w)
-
-state[weight_key] = w_new
-state[bias_key] = b
-
-torch.save(state, dst_path)
-print(f"[INFO] Saved conv-averaged checkpoint: {dst_path}")
-print(f"[INFO] {weight_key}: {tuple(w.shape)} -> {tuple(w_new.shape)} (M={m})")
-PY
+    python3 ../tools/convavg_mc_to_sc_state_dict.py \
+        --src "${init_param_src_path}" \
+        --dst "${init_param_path}" \
+        --module_key "separator.conv.0"
 fi
 
 init_param="${init_param_path}"
