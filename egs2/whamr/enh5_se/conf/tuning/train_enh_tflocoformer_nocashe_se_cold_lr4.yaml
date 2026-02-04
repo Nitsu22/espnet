@@ -86,7 +86,7 @@ spatial_encoder_encoder_conf:
     hop_length: *hop_length
 spatial_encoder: mc_conformer_div
 spatial_encoder_conf:
-    path: ../se_npz/exp/enh_train_se_mc_conformer_div_triplet_rand_scheduler_noise/valid.loss.best.pth
+    path: /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/exp/enh_train_se_mc_conformer_div_triplet_rand_scheduler_noise/valid.loss.best.pth
     trainable: false
     embed_dim: 256
     num_channels_mc: 2

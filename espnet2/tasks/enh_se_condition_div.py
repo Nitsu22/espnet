@@ -649,29 +649,13 @@ class EnhancementTask(AbsTask):
 
         if spatial_encoder is not None and spatial_encoder_pretrained:
             ckpt_path = Path(spatial_encoder_pretrained).expanduser()
-            tried_paths = []
             if not ckpt_path.is_absolute():
-                candidates = []
-                candidates.append(Path.cwd() / ckpt_path)
-                config_path = getattr(args, "config", None)
-                if config_path:
-                    config_dir = Path(config_path).expanduser().resolve().parent
-                    candidates.append(config_dir / ckpt_path)
-                    candidates.append(config_dir.parent / ckpt_path)
-                    candidates.append(config_dir.parent.parent / ckpt_path)
-                for cand in candidates:
-                    tried_paths.append(str(cand))
-                    if cand.exists():
-                        ckpt_path = cand.resolve()
-                        break
-            if not ckpt_path.is_absolute():
-                tried_paths.append(str(ckpt_path))
-                ckpt_path = ckpt_path.resolve()
-            if not ckpt_path.exists():
                 raise ValueError(
-                    "spatial_encoder_conf.path not found. tried: "
-                    + ", ".join(tried_paths or [str(ckpt_path)])
+                    "spatial_encoder_conf.path must be absolute, "
+                    f"but got: {ckpt_path}"
                 )
+            if not ckpt_path.exists():
+                raise ValueError(f"spatial_encoder_conf.path not found: {ckpt_path}")
 
             if not hasattr(spatial_encoder, "sc_encoder"):
                 raise ValueError(
