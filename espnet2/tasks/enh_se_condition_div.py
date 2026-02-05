@@ -698,6 +698,9 @@ class EnhancementTask(AbsTask):
                 for param in spatial_encoder.parameters():
                     param.requires_grad = False
 
+        # Keep spatial encoder in eval() during training when frozen.
+        model.spatial_encoder_frozen = not spatial_encoder_trainable
+
         return model
 
     @classmethod

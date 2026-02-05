@@ -37,7 +37,7 @@ from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.distributed_utils import DistributedOption
 from espnet2.train.preprocessor import AbsPreprocessor, EnhPreprocessor, SePreprocessor
-from espnet2.train.preprocessor_npz import NpzPreprocessor
+from espnet2.train.preprocessor_npz import NpzPreprocessor, NpzSwapRirPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -77,7 +77,12 @@ criterion_choices = ClassChoices(
 
 preprocessor_choices = ClassChoices(
     name="preprocessor",
-    classes=dict(enh=EnhPreprocessor, se=SePreprocessor, npz=NpzPreprocessor),
+    classes=dict(
+        enh=EnhPreprocessor,
+        se=SePreprocessor,
+        npz=NpzPreprocessor,
+        npz_swap_rir=NpzSwapRirPreprocessor,
+    ),
     type_check=AbsPreprocessor,
     default=None,
 )

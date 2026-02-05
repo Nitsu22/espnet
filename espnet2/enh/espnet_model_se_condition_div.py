@@ -109,6 +109,8 @@ class ESPnetEnhancementModel(AbsESPnetModel):
         self.spatial_encoder = spatial_encoder
         self.spatial_encoder_encoder = spatial_encoder_encoder
         self.spatial_encoder_pooling = spatial_encoder_pooling
+        # If True, keep spatial_encoder in eval() even during training.
+        self.spatial_encoder_frozen = False
         # set num_spk to -1 if None for compatibility with `espnet2.enh.diffusion_enh`
         self.num_spk = separator.num_spk if separator is not None else -1
         # If True, self.num_spk is regarded as the MAXIMUM possible number of speakers
@@ -158,6 +160,14 @@ class ESPnetEnhancementModel(AbsESPnetModel):
             self.category_weights = tuple(category_weights)
         else:
             self.category_weights = tuple(1.0 for _ in self.categories)
+
+    def train(self, mode: bool = True):
+        """Override to keep spatial_encoder in eval() when frozen."""
+        super().train(mode)
+        if mode and getattr(self, "spatial_encoder_frozen", False):
+            if self.spatial_encoder is not None:
+                self.spatial_encoder.eval()
+        return self
 
     def forward(
         self,

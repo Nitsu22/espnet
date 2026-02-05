@@ -1,6 +1,7 @@
 """NPZ preprocessor for WHAMR-style data."""
 
 import hashlib
+import os
 from typing import Dict, List, Optional, Union
 
 import numpy as np
@@ -779,3 +780,429 @@ class NpzPreprocessor(EnhPreprocessor):
         data = self._speech_process(uid, data)
         data = self._text_process(data)
         return data
+
+
+class NpzSwapRirPreprocessor(NpzPreprocessor):
+    """NPZ preprocessor for contrastive learning with RIR swap.
+
+    Anchor  : data1 (speech/noise/RIR)
+    Positive: data2 speech/noise + data1 RIR
+    Negative: data2 (speech/noise/RIR)
+    """
+
+    def __init__(
+        self,
+        train: bool,
+        mix_type: str = "both",
+        ref_condition: str = "reverb",
+        npz_path_name: str = "npz_path",
+        s1_base_name: str = "s1_base",
+        s2_base_name: str = "s2_base",
+        s1_temp_name: str = "s1_temp",
+        s2_temp_name: str = "s2_temp",
+        noise_base_name: str = "noise_base",
+        rir_path_name: str = "rir_path",
+        room_param_path_name: str = "room_param_path",
+        rir_scp: Optional[str] = None,
+        rir_apply_prob: float = 0.0,
+        noise_scp: Optional[str] = None,
+        noise_apply_prob: float = 0.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech_mix",
+        speech_ref_name_prefix: str = "speech_ref",
+        noise_ref_name_prefix: str = "noise_ref",
+        dereverb_ref_name_prefix: str = "dereverb_ref",
+        use_reverberant_ref: bool = False,
+        num_spk: int = 2,
+        num_noise_type: int = 1,
+        sample_rate: int = 8000,
+        force_single_channel: bool = False,
+        channel_reordering: bool = False,
+        categories: Optional[List] = None,
+        data_aug_effects: List = None,
+        data_aug_num: List[int] = [1, 1],
+        data_aug_prob: float = 0.0,
+        speech_segment: Optional[int] = None,
+        avoid_allzero_segment: bool = True,
+        flexible_numspk: bool = False,
+        output_audio_subtype: Optional[str] = "PCM_16",
+        anchor_single_channel: bool = False,
+        contrastive_enable: bool = False,
+        contrastive_num_neg: int = 1,
+        contrastive_seed: int = 1234,
+        contrastive_epoch: int = 0,
+        contrastive_random_each_call: bool = False,
+        contrastive_scale_min: float = 1.0,
+        contrastive_scale_max: float = 1.0,
+        contrastive_pool_rir_scp: Optional[str] = None,
+        contrastive_pool_room_param_scp: Optional[str] = None,
+        contrastive_pool_npz_scp: Optional[Union[str, Dict[str, str]]] = None,
+    ):
+        super().__init__(
+            train=train,
+            mix_type=mix_type,
+            ref_condition=ref_condition,
+            npz_path_name=npz_path_name,
+            s1_base_name=s1_base_name,
+            s2_base_name=s2_base_name,
+            s1_temp_name=s1_temp_name,
+            s2_temp_name=s2_temp_name,
+            noise_base_name=noise_base_name,
+            rir_path_name=rir_path_name,
+            room_param_path_name=room_param_path_name,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+            speech_ref_name_prefix=speech_ref_name_prefix,
+            noise_ref_name_prefix=noise_ref_name_prefix,
+            dereverb_ref_name_prefix=dereverb_ref_name_prefix,
+            use_reverberant_ref=use_reverberant_ref,
+            num_spk=num_spk,
+            num_noise_type=num_noise_type,
+            sample_rate=sample_rate,
+            force_single_channel=force_single_channel,
+            channel_reordering=channel_reordering,
+            categories=categories,
+            data_aug_effects=data_aug_effects,
+            data_aug_num=data_aug_num,
+            data_aug_prob=data_aug_prob,
+            speech_segment=speech_segment,
+            avoid_allzero_segment=avoid_allzero_segment,
+            flexible_numspk=flexible_numspk,
+            output_audio_subtype=output_audio_subtype,
+            anchor_single_channel=anchor_single_channel,
+            contrastive_enable=contrastive_enable,
+            contrastive_num_neg=contrastive_num_neg,
+            contrastive_seed=contrastive_seed,
+            contrastive_epoch=contrastive_epoch,
+            contrastive_random_each_call=contrastive_random_each_call,
+            contrastive_scale_min=contrastive_scale_min,
+            contrastive_scale_max=contrastive_scale_max,
+            contrastive_pool_rir_scp=contrastive_pool_rir_scp,
+            contrastive_pool_room_param_scp=contrastive_pool_room_param_scp,
+        )
+
+        self.contrastive_pool_npz = None
+        self._contrastive_pool_npz_keys = None
+        if self.contrastive_enable:
+            if contrastive_pool_npz_scp is None:
+                raise ValueError("contrastive_pool_npz_scp is required")
+            if isinstance(contrastive_pool_npz_scp, dict):
+                self.contrastive_pool_npz = {}
+                self._contrastive_pool_npz_keys = {}
+                for split_key, scp_path in contrastive_pool_npz_scp.items():
+                    pool_npz = read_2columns_text(scp_path)
+                    if len(pool_npz) <= 1:
+                        raise ValueError(
+                            f"contrastive pool npz size is too small for split {split_key}"
+                        )
+                    self.contrastive_pool_npz[split_key] = pool_npz
+                    self._contrastive_pool_npz_keys[split_key] = sorted(pool_npz.keys())
+            else:
+                pool_npz = read_2columns_text(contrastive_pool_npz_scp)
+                if len(pool_npz) <= 1:
+                    raise ValueError("contrastive pool npz size is too small")
+                self.contrastive_pool_npz = pool_npz
+                self._contrastive_pool_npz_keys = sorted(pool_npz.keys())
+
+    def _resolve_npz_relpath(self, npz_path: str, relpath: str) -> str:
+        if os.path.isabs(relpath):
+            return relpath
+        base_dir = os.path.dirname(os.path.dirname(npz_path))
+        return os.path.join(base_dir, relpath)
+
+    def _get_npz_pool(self, split: str):
+        if isinstance(self._contrastive_pool_npz_keys, dict):
+            if split not in self._contrastive_pool_npz_keys:
+                raise ValueError(f"contrastive pool npz not found for split {split}")
+            pool_keys = self._contrastive_pool_npz_keys[split]
+            pool_npz = self.contrastive_pool_npz[split]
+        else:
+            pool_keys = self._contrastive_pool_npz_keys
+            pool_npz = self.contrastive_pool_npz
+        return pool_npz, pool_keys
+
+    def _load_npz_bundle(self, npz_path: str):
+        meta = self._load_npz(npz_path)
+        sample_rate = int(_np_item(meta["sample_rate"]))
+        data_len = _as_str(meta["data_len"])
+        mono = bool(_np_item(meta["mono"]))
+        start_samp_16k = int(_np_item(meta["start_samp_16k"]))
+        split = _as_str(meta["split"])
+        wsjmix_scale = np.asarray(meta["wsjmix_scale"], dtype=np.float64)
+        wham_speech_scale = float(_np_item(meta["wham_speech_scale"]))
+        wham_noise_scale = float(_np_item(meta["wham_noise_scale"]))
+
+        s1_base = np.asarray(
+            np.load(
+                self._resolve_npz_relpath(npz_path, _as_str(meta["s1_base_relpath"])),
+                allow_pickle=False,
+            ),
+            dtype=np.float64,
+        )
+        s2_base = np.asarray(
+            np.load(
+                self._resolve_npz_relpath(npz_path, _as_str(meta["s2_base_relpath"])),
+                allow_pickle=False,
+            ),
+            dtype=np.float64,
+        )
+        s1_temp = np.asarray(
+            np.load(
+                self._resolve_npz_relpath(npz_path, _as_str(meta["s1_temp_relpath"])),
+                allow_pickle=False,
+            ),
+            dtype=np.float64,
+        )
+        s2_temp = np.asarray(
+            np.load(
+                self._resolve_npz_relpath(npz_path, _as_str(meta["s2_temp_relpath"])),
+                allow_pickle=False,
+            ),
+            dtype=np.float64,
+        )
+        noise_base = np.asarray(
+            np.load(
+                self._resolve_npz_relpath(npz_path, _as_str(meta["noise_base_relpath"])),
+                allow_pickle=False,
+            ),
+            dtype=np.float64,
+        )
+        rir_path = self._resolve_npz_relpath(npz_path, _as_str(meta["rir_relpath"]))
+        room_param_path = self._resolve_npz_relpath(
+            npz_path, _as_str(meta["room_param_relpath"])
+        )
+
+        return {
+            "sample_rate": sample_rate,
+            "data_len": data_len,
+            "mono": mono,
+            "start_samp_16k": start_samp_16k,
+            "split": split,
+            "wsjmix_scale": wsjmix_scale,
+            "wham_speech_scale": wham_speech_scale,
+            "wham_noise_scale": wham_noise_scale,
+            "s1_base": s1_base,
+            "s2_base": s2_base,
+            "s1_temp": s1_temp,
+            "s2_temp": s2_temp,
+            "noise_base": noise_base,
+            "rir_path": rir_path,
+            "room_param_path": room_param_path,
+        }
+
+    def _speech_process_contrastive(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, Union[str, np.ndarray]]:
+        if self.contrastive_num_neg != 1:
+            raise ValueError("NpzSwapRirPreprocessor supports contrastive_num_neg=1")
+
+        npz_path = _as_str(data[self.npz_path_name])
+        meta = self._load_npz(npz_path)
+
+        sample_rate = int(_np_item(meta["sample_rate"]))
+        data_len = _as_str(meta["data_len"])
+        mono = bool(_np_item(meta["mono"]))
+        start_samp_16k = int(_np_item(meta["start_samp_16k"]))
+        split = _as_str(meta["split"])
+        wsjmix_scale = np.asarray(meta["wsjmix_scale"], dtype=np.float64)
+        wham_speech_scale = float(_np_item(meta["wham_speech_scale"]))
+        wham_noise_scale = float(_np_item(meta["wham_noise_scale"]))
+
+        s1_base = np.asarray(data[self.s1_base_name], dtype=np.float64)
+        s2_base = np.asarray(data[self.s2_base_name], dtype=np.float64)
+        s1_temp = np.asarray(data[self.s1_temp_name], dtype=np.float64)
+        s2_temp = np.asarray(data[self.s2_temp_name], dtype=np.float64)
+        noise_base = np.asarray(data[self.noise_base_name], dtype=np.float64)
+
+        rir_path = _as_str(data[self.rir_path_name])
+        room_param_path = _as_str(data[self.room_param_path_name])
+
+        (
+            rir_npz,
+            room_dim,
+            mic_pos,
+            s1_pos,
+            s2_pos,
+            t60,
+            room_fs,
+        ) = self._load_room_and_rir(rir_path, room_param_path)
+
+        if sample_rate != self.sample_rate:
+            raise ValueError(
+                f"metadata sample_rate {sample_rate} != preprocessor sample_rate {self.sample_rate}"
+            )
+
+        if self.contrastive_random_each_call:
+            rng = np.random.default_rng()
+        else:
+            rng = self._rng_for_uid(uid)
+
+        speech_mix, s1_samples, s2_samples = self._synthesize_mix(
+            sample_rate=sample_rate,
+            data_len=data_len,
+            start_samp_16k=start_samp_16k,
+            wsjmix_scale=wsjmix_scale,
+            wham_speech_scale=wham_speech_scale,
+            wham_noise_scale=wham_noise_scale,
+            mono=mono,
+            s1_base=s1_base,
+            s2_base=s2_base,
+            s1_temp=s1_temp,
+            s2_temp=s2_temp,
+            noise_base=noise_base,
+            rir_npz=rir_npz,
+            room_dim=room_dim,
+            mic_pos=mic_pos,
+            s1_pos=s1_pos,
+            s2_pos=s2_pos,
+            t60=t60,
+            room_fs=room_fs,
+            s1_scale_factor=1.0,
+            s2_scale_factor=1.0,
+        )
+        crop_anchor = None
+        if self.train and self.speech_segment is not None:
+            speech_segment = self.speech_segment // self.sample_rate * sample_rate
+            crop_anchor = self._random_crop_range(
+                {
+                    self.speech_ref_name_prefix + "1": s1_samples,
+                    self.speech_ref_name_prefix + "2": s2_samples,
+                },
+                self.num_spk,
+                speech_segment,
+                uid=uid,
+            )
+        speech_anchor = self._apply_postprocess(
+            uid, speech_mix, s1_samples, s2_samples, crop=crop_anchor
+        )
+        if self.anchor_single_channel and speech_anchor.ndim > 1:
+            speech_anchor = speech_anchor[:, 0]
+
+        pool_npz, pool_keys = self._get_npz_pool(split)
+        pool_keys = [k for k in pool_keys if k != uid]
+        if len(pool_keys) == 0:
+            raise ValueError("contrastive pool npz is too small for sampling data2")
+        data2_uid = rng.choice(pool_keys)
+        data2_npz_path = pool_npz[data2_uid]
+
+        data2 = self._load_npz_bundle(data2_npz_path)
+        sample_rate2 = data2["sample_rate"]
+        if sample_rate2 != self.sample_rate:
+            raise ValueError(
+                f"metadata sample_rate {sample_rate2} != preprocessor sample_rate {self.sample_rate}"
+            )
+
+        (
+            neg_rir_npz,
+            neg_room_dim,
+            neg_mic_pos,
+            neg_s1_pos,
+            neg_s2_pos,
+            neg_t60,
+            neg_room_fs,
+        ) = self._load_room_and_rir(data2["rir_path"], data2["room_param_path"])
+
+        speech_mix_pos, s1_pos_samples, s2_pos_samples = self._synthesize_mix(
+            sample_rate=sample_rate2,
+            data_len=data2["data_len"],
+            start_samp_16k=data2["start_samp_16k"],
+            wsjmix_scale=data2["wsjmix_scale"],
+            wham_speech_scale=data2["wham_speech_scale"],
+            wham_noise_scale=data2["wham_noise_scale"],
+            mono=data2["mono"],
+            s1_base=data2["s1_base"],
+            s2_base=data2["s2_base"],
+            s1_temp=data2["s1_temp"],
+            s2_temp=data2["s2_temp"],
+            noise_base=data2["noise_base"],
+            rir_npz=rir_npz,
+            room_dim=room_dim,
+            mic_pos=mic_pos,
+            s1_pos=s1_pos,
+            s2_pos=s2_pos,
+            t60=t60,
+            room_fs=room_fs,
+            s1_scale_factor=1.0,
+            s2_scale_factor=1.0,
+        )
+
+        speech_mix_neg, s1_neg_samples, s2_neg_samples = self._synthesize_mix(
+            sample_rate=sample_rate2,
+            data_len=data2["data_len"],
+            start_samp_16k=data2["start_samp_16k"],
+            wsjmix_scale=data2["wsjmix_scale"],
+            wham_speech_scale=data2["wham_speech_scale"],
+            wham_noise_scale=data2["wham_noise_scale"],
+            mono=data2["mono"],
+            s1_base=data2["s1_base"],
+            s2_base=data2["s2_base"],
+            s1_temp=data2["s1_temp"],
+            s2_temp=data2["s2_temp"],
+            noise_base=data2["noise_base"],
+            rir_npz=neg_rir_npz,
+            room_dim=neg_room_dim,
+            mic_pos=neg_mic_pos,
+            s1_pos=neg_s1_pos,
+            s2_pos=neg_s2_pos,
+            t60=neg_t60,
+            room_fs=neg_room_fs,
+            s1_scale_factor=1.0,
+            s2_scale_factor=1.0,
+        )
+
+        crop_posneg = None
+        if self.train and self.speech_segment is not None:
+            speech_segment = self.speech_segment // self.sample_rate * sample_rate2
+            crop_posneg = self._random_crop_range(
+                {
+                    self.speech_ref_name_prefix + "1": s1_pos_samples,
+                    self.speech_ref_name_prefix + "2": s2_pos_samples,
+                },
+                self.num_spk,
+                speech_segment,
+                uid=data2_uid,
+            )
+        speech_pos = self._apply_postprocess(
+            uid, speech_mix_pos, s1_pos_samples, s2_pos_samples, crop=crop_posneg
+        )
+        speech_neg = self._apply_postprocess(
+            uid, speech_mix_neg, s1_neg_samples, s2_neg_samples, crop=crop_posneg
+        )
+
+        preserved = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {
+                self.npz_path_name,
+                self.s1_base_name,
+                self.s2_base_name,
+                self.s1_temp_name,
+                self.s2_temp_name,
+                self.noise_base_name,
+                self.rir_path_name,
+                self.room_param_path_name,
+            }
+        }
+        data = preserved
+        data["speech_anchor"] = speech_anchor
+        data["speech_pos"] = speech_pos
+        data["speech_neg1"] = speech_neg
+        return data
+
+    def _speech_process(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, Union[str, np.ndarray]]:
+        if self.npz_path_name not in data:
+            return data
+        if self.contrastive_enable:
+            return self._speech_process_contrastive(uid, data)
+        return super()._speech_process(uid, data)
