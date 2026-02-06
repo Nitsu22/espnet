@@ -97,6 +97,9 @@ class TFLocoformerSeparator(AbsSeparator):
             Small constant for normalization layer.
         spatial_embed_dim: int
             Dimension of spatial embedding provided via additional["spatial_embedding"].
+        use_spatial_encoder: bool
+            If False, skip spatial embedding fusion (AEA) and behave like
+            tflocoformer_separator_nocashe.
     """
 
     def __init__(
@@ -124,6 +127,7 @@ class TFLocoformerSeparator(AbsSeparator):
         eps: float = 1.0e-5,
         # spatial embedding related
         spatial_embed_dim: int = 256,
+        use_spatial_encoder: bool = True,
     ):
         super().__init__()
         assert is_torch_2_0_plus, "Support only pytorch >= 2.0.0"
@@ -177,6 +181,7 @@ class TFLocoformerSeparator(AbsSeparator):
         self.deconv = nn.ConvTranspose2d(emb_dim, num_spk * 2, ks, padding=padding)
 
         self.spatial_embed_dim = spatial_embed_dim
+        self.use_spatial_encoder = use_spatial_encoder
         self.aea_blocks = nn.ModuleList(
             [
                 AEAFusionBlock(
@@ -223,23 +228,28 @@ class TFLocoformerSeparator(AbsSeparator):
         with torch.cuda.amp.autocast(enabled=False):
             batch = self.conv(batch)  # [B, emb_dim, T, F]
 
-        if additional is None or "spatial_embedding" not in additional:
-            raise ValueError("spatial_embedding is required in additional for AEA fusion.")
-        spatial_emb = additional["spatial_embedding"]
-        if spatial_emb.ndim != 2 or spatial_emb.shape[0] != batch.shape[0]:
-            raise ValueError(
-                "spatial_embedding must be [B, D] with "
-                f"B={batch.shape[0]}, but got {tuple(spatial_emb.shape)}"
-            )
-        if spatial_emb.shape[1] != self.spatial_embed_dim:
-            raise ValueError(
-                "spatial_embedding feature dimension must be "
-                f"{self.spatial_embed_dim}, but got {spatial_emb.shape[1]}"
-            )
+        spatial_emb = None
+        if self.use_spatial_encoder:
+            if additional is None or "spatial_embedding" not in additional:
+                raise ValueError(
+                    "spatial_embedding is required in additional for AEA fusion."
+                )
+            spatial_emb = additional["spatial_embedding"]
+            if spatial_emb.ndim != 2 or spatial_emb.shape[0] != batch.shape[0]:
+                raise ValueError(
+                    "spatial_embedding must be [B, D] with "
+                    f"B={batch.shape[0]}, but got {tuple(spatial_emb.shape)}"
+                )
+            if spatial_emb.shape[1] != self.spatial_embed_dim:
+                raise ValueError(
+                    "spatial_embedding feature dimension must be "
+                    f"{self.spatial_embed_dim}, but got {spatial_emb.shape[1]}"
+                )
 
         # separation
         for ii in range(self.n_layers):
-            batch = self.aea_blocks[ii](batch, spatial_emb)  # [B, emb_dim, T, F]
+            if self.use_spatial_encoder:
+                batch = self.aea_blocks[ii](batch, spatial_emb)  # [B, emb_dim, T, F]
             batch = self.blocks[ii](batch)  # [B, -1, T, F]
 
         with torch.cuda.amp.autocast(enabled=False):

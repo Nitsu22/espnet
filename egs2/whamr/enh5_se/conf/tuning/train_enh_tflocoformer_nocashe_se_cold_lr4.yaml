@@ -59,6 +59,7 @@ decoder_conf:
 separator: tflocoformer_nocashe_aeafusion
 separator_conf:
     num_spk: *num_spk
+    use_spatial_encoder: true
     n_layers: 6
     # general setup
     emb_dim: 128
