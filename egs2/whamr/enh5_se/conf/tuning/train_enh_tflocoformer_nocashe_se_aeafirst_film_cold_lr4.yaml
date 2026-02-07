@@ -60,6 +60,7 @@ separator: tflocoformer_nocashe_aeafusion_film_first
 separator_conf:
     num_spk: *num_spk
     use_spatial_encoder: true
+    film_init_identity: true
     n_layers: 6
     # general setup
     emb_dim: 128

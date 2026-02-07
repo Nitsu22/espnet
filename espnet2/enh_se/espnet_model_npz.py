@@ -78,13 +78,29 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
             raise ValueError("speech_pos is required for contrastive learning.")
 
         batch_size = speech_anchor.shape[0]
-        speech_lengths = (
-            speech_anchor_lengths
-            if speech_anchor_lengths is not None
-            else torch.ones(
-                batch_size, dtype=torch.long, device=speech_anchor.device
-            ).fill_(speech_anchor.shape[1])
-        )
+
+        def _resolve_lengths(
+            lengths: Optional[torch.Tensor],
+            waveform: torch.Tensor,
+            name: str,
+        ) -> torch.Tensor:
+            if lengths is None:
+                resolved = torch.full(
+                    (batch_size,),
+                    waveform.shape[1],
+                    dtype=torch.long,
+                    device=waveform.device,
+                )
+            else:
+                if lengths.ndim != 1:
+                    raise ValueError(f"{name} must be 1D, but got shape {lengths.shape}")
+                if lengths.shape[0] != batch_size:
+                    raise ValueError(
+                        f"{name} length {lengths.shape[0]} does not match batch size {batch_size}"
+                    )
+                resolved = lengths.to(device=waveform.device, dtype=torch.long)
+                resolved = torch.clamp(resolved, min=0)
+            return torch.clamp(resolved, max=waveform.shape[1])
 
         # Get sampling frequency if available
         fs = kwargs.get("utt2fs", None)
@@ -106,13 +122,21 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         else:
             raise ValueError(f"Unexpected speech_anchor shape: {speech_anchor.shape}")
 
+        speech_lengths = _resolve_lengths(
+            speech_anchor_lengths, speech_anchor, "speech_anchor_lengths"
+        )
+
         # for data-parallel: trim to max length
-        max_len = speech_lengths.max()
+        max_len = int(speech_lengths.max().item())
         if speech_anchor.ndim == 2:
             speech_anchor = speech_anchor[:, :max_len]
         else:
             speech_anchor = speech_anchor[:, :max_len, :]
         speech_pos = speech_pos[:, :max_len, :]
+        speech_lengths = torch.clamp(speech_lengths, max=speech_anchor.shape[1])
+        speech_pos_lengths = _resolve_lengths(
+            speech_pos_lengths, speech_pos, "speech_pos_lengths"
+        )
 
         neg_keys = sorted(
             [k for k in kwargs if re.fullmatch(r"speech_neg\d+", k)],
@@ -123,7 +147,10 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
         speech_negs = []
         for k in neg_keys:
             neg = kwargs[k][:, :max_len, :]
-            speech_negs.append(neg)
+            neg_lengths = _resolve_lengths(
+                kwargs.get(f"{k}_lengths", None), neg, f"{k}_lengths"
+            )
+            speech_negs.append((neg, neg_lengths))
 
         num_channels_mc = getattr(self.spatial_encoder, "num_channels_mc", 2)
 
@@ -139,15 +166,15 @@ class ESPnetSpatialEncoderModel(AbsESPnetModel):
             )
 
         # Encode positive
-        feature_pos, flens_pos = self.encoder(speech_pos, speech_lengths, fs=fs)
+        feature_pos, flens_pos = self.encoder(speech_pos, speech_pos_lengths, fs=fs)
         embedding_pos = self.spatial_encoder(
             feature_pos, flens_pos, num_channels=num_channels_mc
         )
 
         # Encode negatives
         embedding_negs = []
-        for neg in speech_negs:
-            feature_neg, flens_neg = self.encoder(neg, speech_lengths, fs=fs)
+        for neg, neg_lengths in speech_negs:
+            feature_neg, flens_neg = self.encoder(neg, neg_lengths, fs=fs)
             embedding_neg = self.spatial_encoder(
                 feature_neg, flens_neg, num_channels=num_channels_mc
             )

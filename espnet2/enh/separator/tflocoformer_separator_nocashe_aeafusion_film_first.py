@@ -32,6 +32,13 @@ class AEAFusionBlock(nn.Module):
         self.gamma_proj = nn.Linear(channels, channels)
         self.beta_proj = nn.Linear(channels, channels)
 
+    def init_film_identity(self):
+        """Initialize FiLM as pass-through (gamma=1, beta=0)."""
+        nn.init.zeros_(self.gamma_proj.weight)
+        nn.init.ones_(self.gamma_proj.bias)
+        nn.init.zeros_(self.beta_proj.weight)
+        nn.init.zeros_(self.beta_proj.bias)
+
     def forward(self, x: torch.Tensor, fixed_emb: torch.Tensor) -> torch.Tensor:
         """Fuse spatial embedding into feature map.
 
@@ -97,6 +104,9 @@ class TFLocoformerSeparator(AbsSeparator):
         use_spatial_encoder: bool
             If False, skip spatial embedding fusion (AEA) and behave like
             tflocoformer_separator_nocashe.
+        film_init_identity: bool
+            If True, initialize FiLM projection as pass-through
+            (gamma=1, beta=0). Default is False.
     """
 
     def __init__(
@@ -125,6 +135,7 @@ class TFLocoformerSeparator(AbsSeparator):
         # spatial embedding related
         spatial_embed_dim: int = 256,
         use_spatial_encoder: bool = True,
+        film_init_identity: bool = False,
     ):
         super().__init__()
         assert is_torch_2_0_plus, "Support only pytorch >= 2.0.0"
@@ -185,6 +196,8 @@ class TFLocoformerSeparator(AbsSeparator):
             emb_dim=spatial_embed_dim,
             n_heads=n_heads,
         )
+        if film_init_identity:
+            self.aea_block.init_film_identity()
 
     def forward(
         self,
