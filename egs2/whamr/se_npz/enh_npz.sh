@@ -391,6 +391,10 @@ if ! "${skip_train}"; then
         _opts+="--preprocessor_conf contrastive_pool_rir_scp.cv=${_enh_valid_dir}/rir_npz.scp "
         _opts+="--preprocessor_conf contrastive_pool_room_param_scp.tr=${_enh_train_dir}/room_param_npz.scp "
         _opts+="--preprocessor_conf contrastive_pool_room_param_scp.cv=${_enh_valid_dir}/room_param_npz.scp "
+        if [ -n "${enh_config}" ] && grep -Eq '^[[:space:]]*preprocessor:[[:space:]]*npz_swap_rir([[:space:]]|$)' "${enh_config}"; then
+            _opts+="--preprocessor_conf contrastive_pool_npz_scp.tr=${_enh_train_dir}/npz.scp "
+            _opts+="--preprocessor_conf contrastive_pool_npz_scp.cv=${_enh_valid_dir}/npz.scp "
+        fi
         # shellcheck disable=SC2046,SC2086
         ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
             ${python} -m ${train_module} \
@@ -517,6 +521,10 @@ if ! "${skip_train}"; then
         _opts+="--preprocessor_conf contrastive_pool_rir_scp.cv=${_enh_valid_dir}/rir_npz.scp "
         _opts+="--preprocessor_conf contrastive_pool_room_param_scp.tr=${_enh_train_dir}/room_param_npz.scp "
         _opts+="--preprocessor_conf contrastive_pool_room_param_scp.cv=${_enh_valid_dir}/room_param_npz.scp "
+        if [ -n "${enh_config}" ] && grep -Eq '^[[:space:]]*preprocessor:[[:space:]]*npz_swap_rir([[:space:]]|$)' "${enh_config}"; then
+            _opts+="--preprocessor_conf contrastive_pool_npz_scp.tr=${_enh_train_dir}/npz.scp "
+            _opts+="--preprocessor_conf contrastive_pool_npz_scp.cv=${_enh_valid_dir}/npz.scp "
+        fi
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \
             --cmd "${cuda_cmd} --name ${jobname}" \
