@@ -12,15 +12,6 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-# 2ch (multi-channel) で学習したSSモデルで 1ch (single-channel) 側を初期化する。
-# conv の入力チャネル差分を mic 方向の和で縮約してから --init_param でロードする。
-#
-# NOTE:
-# tflocoformer_nocashe 系は入力を torch.cat((real, imag), dim=1) で作るため、
-# in_channels の並びは [real_m0..real_m{M-1}, imag_m0..imag_m{M-1}] になる。
-# 従って、和は real/imag を混ぜずに別々に行う:
-#   dst[:, 0] = sum(src[:, 0:M])   (real)
-#   dst[:, 1] = sum(src[:, M:2M])  (imag)
 init_param_src_path="../enh1/exp/enh_train_enh_tflocoformer_nocashe_2ch_4gpu/valid.loss.ave_5best.pth"
 init_param_path="${init_param_src_path%.pth}.convsum_to_1ch.pth"
 
@@ -43,8 +34,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh_se_condition.sh \
     --ngpu 4 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_tflocoformer_nocashe_se_cold_lr4.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_cold_lr4_4gpu \
+    --enh_config ./conf/tuning/train_enh_tflocoformer_nocashe_se_aeafirst_cold_lr4.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_aeafirst_cold_lr4_initsum_4gpu \
     --use_dereverb_ref false \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
