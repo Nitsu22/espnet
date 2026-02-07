@@ -56,10 +56,9 @@ decoder: *encoder
 decoder_conf:
     n_fft: *n_fft
     hop_length: *hop_length
-separator: tflocoformer_nocashe_aeafusion
+separator: tflocoformer_nocashe_film
 separator_conf:
     num_spk: *num_spk
-    use_spatial_encoder: true
     n_layers: 6
     # general setup
     emb_dim: 128

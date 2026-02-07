@@ -11,46 +11,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from espnet2.enh.layers.complex_utils import new_complex_like
+from espnet2.enh.layers.film import FiLM
 from packaging.version import parse as V
 from rotary_embedding_torch import RotaryEmbedding
 
 from espnet2.enh.separator.abs_separator import AbsSeparator
 
 is_torch_2_0_plus = V(torch.__version__) >= V("2.0.0")
-
-
-class AEAFusionBlock(nn.Module):
-    """Adaptive Embedding Aggregation (AEA) fusion block with cross-attention."""
-
-    def __init__(self, channels: int, emb_dim: int, n_heads: int = 4):
-        super().__init__()
-        self.emb_proj = nn.Linear(emb_dim, channels)
-        self.mha = nn.MultiheadAttention(
-            embed_dim=channels, num_heads=n_heads, batch_first=True
-        )
-        self.lambda_param = nn.Parameter(torch.zeros(channels))
-        self.fusion_net = nn.Sequential(
-            nn.Conv2d(channels * 2, channels, kernel_size=1),
-            nn.PReLU(),
-            nn.GroupNorm(1, channels),
-        )
-
-    def forward(self, x: torch.Tensor, fixed_emb: torch.Tensor) -> torch.Tensor:
-        """Fuse spatial embedding into feature map.
-
-        Args:
-            x: [B, C, T, F]
-            fixed_emb: [B, emb_dim]
-        """
-        bsz, ch, t, f = x.shape
-        emb = self.emb_proj(fixed_emb)  # [B, C]
-        query = emb.unsqueeze(1)  # [B, 1, C]
-        key_value = x.permute(0, 2, 3, 1).reshape(bsz, t * f, ch)  # [B, T*F, C]
-        attn_out, _ = self.mha(query, key_value, key_value)  # [B, 1, C]
-        adaptive_emb = emb + self.lambda_param * attn_out.squeeze(1)  # [B, C]
-        adaptive_emb_map = adaptive_emb.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, t, f)
-        combined = torch.cat([x, adaptive_emb_map], dim=1)
-        return self.fusion_net(combined)
 
 
 class TFLocoformerSeparator(AbsSeparator):
@@ -177,16 +144,17 @@ class TFLocoformerSeparator(AbsSeparator):
         self.deconv = nn.ConvTranspose2d(emb_dim, num_spk * 2, ks, padding=padding)
 
         self.spatial_embed_dim = spatial_embed_dim
-        self.aea_blocks = nn.ModuleList(
+        self.film_blocks = nn.ModuleList(
             [
-                AEAFusionBlock(
-                    channels=emb_dim,
-                    emb_dim=spatial_embed_dim,
-                    n_heads=n_heads,
+                FiLM(
+                    embed_dim=spatial_embed_dim,
+                    feature_dim=emb_dim,
                 )
                 for _ in range(n_layers)
             ]
         )
+        for film in self.film_blocks:
+            film.init_identity()
 
     def forward(
         self,
@@ -224,7 +192,7 @@ class TFLocoformerSeparator(AbsSeparator):
             batch = self.conv(batch)  # [B, emb_dim, T, F]
 
         if additional is None or "spatial_embedding" not in additional:
-            raise ValueError("spatial_embedding is required in additional for AEA fusion.")
+            raise ValueError("spatial_embedding is required in additional for FiLM.")
         spatial_emb = additional["spatial_embedding"]
         if spatial_emb.ndim != 2 or spatial_emb.shape[0] != batch.shape[0]:
             raise ValueError(
@@ -239,7 +207,7 @@ class TFLocoformerSeparator(AbsSeparator):
 
         # separation
         for ii in range(self.n_layers):
-            batch = self.aea_blocks[ii](batch, spatial_emb)  # [B, emb_dim, T, F]
+            batch = self.film_blocks[ii](spatial_emb, batch)  # [B, emb_dim, T, F]
             batch = self.blocks[ii](batch)  # [B, -1, T, F]
 
         with torch.cuda.amp.autocast(enabled=False):

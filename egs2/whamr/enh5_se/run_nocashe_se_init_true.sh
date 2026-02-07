@@ -34,7 +34,7 @@ CUDA_VISIBLE_DEVICES=3 ./enh_se_condition.sh \
     --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/ttrain_enh_tflocoformer_nocashe_se_true.yaml \
+    --enh_config ./conf/tuning/ttrain_enh_tflocoformer_nocashe_se_film_cold_lr4.yaml \
     --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_true_sum_1gpu \
     --use_dereverb_ref false \
     --use_noise_ref false \
