@@ -67,6 +67,18 @@ from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
 from espnet2.enh.separator.tflocoformer_separator_nocashe import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocashe,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_aeafusion import (
+    TFLocoformerSeparator as TFLocoformerSeparatorNocasheAEAFusion,
+)
+from espnet2.enh.separator.tflocoformer_separator_nocashe_aeafusion_first import (
+    TFLocoformerSeparator as TFLocoformerSeparatorNocasheAEAFusionFirst,
+)
+from espnet2.enh.separator.tflocoformer_separator_nocashe_film import (
+    TFLocoformerSeparator as TFLocoformerSeparatorNocasheFiLM,
+)
+from espnet2.enh.separator.tflocoformer_separator_nocashe_film_first import (
+    TFLocoformerSeparator as TFLocoformerSeparatorNocasheFiLMFirst,
+)
 from espnet2.enh.separator.tflocoformer_separator_mc import TFLocoformerSeparatorMC
 from espnet2.enh.separator.tflocoformer_separator_nocashe_mc import (
     TFLocoformerSeparatorMC as TFLocoformerSeparatorNocasheMC,
@@ -128,6 +140,10 @@ separator_choices = ClassChoices(
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
         tflocoformer_nocashe=TFLocoformerSeparatorNocashe,
+        tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
+        tflocoformer_nocashe_aeafusion_first=TFLocoformerSeparatorNocasheAEAFusionFirst,
+        tflocoformer_nocashe_film=TFLocoformerSeparatorNocasheFiLM,
+        tflocoformer_nocashe_film_first=TFLocoformerSeparatorNocasheFiLMFirst,
         tflocoformer_nocashe_mc=TFLocoformerSeparatorNocasheMC,
         tflocoformer_mc=TFLocoformerSeparatorMC,
         tflocoformer_test=TFLocoformerSeparatorTest,
