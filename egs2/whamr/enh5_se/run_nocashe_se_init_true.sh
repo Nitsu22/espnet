@@ -12,11 +12,21 @@ train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
 test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
-# init_param_path="../enh1/exp/enh_train_enh_tflocoformer_nocashe_2ch_4gpu/valid.loss.best.pth"
-# init_param_exclude="separator.conv.0"
-# init_param="${init_param_path}:::${init_param_exclude}"
+init_param_src_path="../enh1/exp/enh_train_enh_tflocoformer_nocashe_2ch_4gpu/valid.loss.ave_5best.pth"
+init_param_path="${init_param_src_path%.pth}.convsum_to_1ch.pth"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh_se_condition.sh \
+if [ ! -f "${init_param_path}" ]; then
+    # Make sure torch is available (same as enh.sh does internally).
+    . ./path.sh
+    python3 ../tools/convsum_mc_to_sc_state_dict.py \
+        --src "${init_param_src_path}" \
+        --dst "${init_param_path}" \
+        --module_key "separator.conv.0"
+fi
+
+init_param="${init_param_path}"
+
+CUDA_VISIBLE_DEVICES=3 ./enh_se_condition.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
@@ -24,13 +34,13 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh_se_condition.sh \
     --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_tflocoformer_nocashe_se_cold_lr4.yaml \
-    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_cold_lr4_init_4gpu \
+    --enh_config ./conf/tuning/ttrain_enh_tflocoformer_nocashe_se_true.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_true_sum_1gpu \
     --use_dereverb_ref false \
     --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --init_param "${init_param}" \
     --stage 6 \
     --stop_stage 8 \
     "$@"
+

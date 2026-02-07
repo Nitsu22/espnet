@@ -22,10 +22,11 @@ test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
     --ngpu 2 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config ./conf/tuning/train_enh_beamformer_mvdr.yaml \
+    --enh_config ./conf/tuning/train_enh_tflocoformer.yaml \
     --use_dereverb_ref false \
     --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
+    --stage 5 \
     --stop_stage 5 \
     "$@"
