@@ -270,8 +270,12 @@ class SeparateSpeech:
                         "enh_model.spatial_encoder or enh_model.spatial_encoder_encoder "
                         "is not configured."
                     )
+                # Keep the same STFT configuration as the current inference path
+                # (self.enh_model.encoder is called without fs in this script).
+                # Passing fs here can rescale n_fft via STFTEncoder.default_fs logic
+                # and cause a frequency-bin mismatch against spatial_encoder.
                 feature_mix_sc, flens_sc = self.enh_model.spatial_encoder_encoder(
-                    speech_input, speech_lengths, fs=fs
+                    speech_input, speech_lengths
                 )
                 out["spatial_embedding"] = self.enh_model.spatial_encoder(
                     feature_mix_sc, flens_sc, num_channels=1
