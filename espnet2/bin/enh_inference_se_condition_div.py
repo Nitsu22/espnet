@@ -252,6 +252,32 @@ class SeparateSpeech:
             else:
                 additional["mode"] = "no_dereverb"
 
+        def _prepare_additional_for_separator(
+            speech_input: torch.Tensor, speech_lengths: torch.Tensor, base_additional: Dict
+        ) -> Dict:
+            # Keep category-related entries (e.g., mode), and attach spatial embedding
+            # when the separator requires spatial conditioning.
+            out = dict(base_additional)
+            if getattr(self.enh_model.separator, "use_spatial_encoder", False):
+                if (
+                    not hasattr(self.enh_model, "spatial_encoder")
+                    or self.enh_model.spatial_encoder is None
+                    or not hasattr(self.enh_model, "spatial_encoder_encoder")
+                    or self.enh_model.spatial_encoder_encoder is None
+                ):
+                    raise ValueError(
+                        "separator.use_spatial_encoder=True, but "
+                        "enh_model.spatial_encoder or enh_model.spatial_encoder_encoder "
+                        "is not configured."
+                    )
+                feature_mix_sc, flens_sc = self.enh_model.spatial_encoder_encoder(
+                    speech_input, speech_lengths, fs=fs
+                )
+                out["spatial_embedding"] = self.enh_model.spatial_encoder(
+                    feature_mix_sc, flens_sc, num_channels=1
+                )
+            return out
+
         if self.segmenting and lengths[0] > self.segment_size * fs:
             # Segment-wise speech enhancement/separation
             overlap_length = int(np.round(fs * (self.segment_size - self.hop_size)))
@@ -283,7 +309,12 @@ class SeparateSpeech:
                 if isinstance(self.enh_model, ESPnetDiffusionModel):
                     feats = [self.enh_model.enhance(feats)]
                 else:
-                    feats, _, _ = self.enh_model.separator(feats, f_lens, additional)
+                    additional_seg = _prepare_additional_for_separator(
+                        speech_seg, lengths_seg, additional
+                    )
+                    feats, _, _ = self.enh_model.separator(
+                        feats, f_lens, additional_seg
+                    )
                 processed_wav = [
                     self.enh_model.decoder(f, lengths_seg)[0] for f in feats
                 ]
@@ -343,7 +374,12 @@ class SeparateSpeech:
             if isinstance(self.enh_model, ESPnetDiffusionModel):
                 feats = [self.enh_model.enhance(feats)]
             else:
-                feats, _, _ = self.enh_model.separator(feats, f_lens, additional)
+                additional_full = _prepare_additional_for_separator(
+                    speech_mix, lengths, additional
+                )
+                feats, _, _ = self.enh_model.separator(
+                    feats, f_lens, additional_full
+                )
             waves = [self.enh_model.decoder(f, lengths)[0] for f in feats]
 
         ###################################
