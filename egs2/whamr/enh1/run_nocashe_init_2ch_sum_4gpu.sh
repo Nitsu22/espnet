@@ -53,6 +53,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
     --init_param "${init_param}" \
+    --gpu_inference true \
     --stage 6 \
     --stop_stage 8 \
     "$@"
