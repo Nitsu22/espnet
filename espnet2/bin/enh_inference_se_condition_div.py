@@ -4,7 +4,7 @@ import logging
 import sys
 from itertools import chain
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import humanfriendly
 import numpy as np
