@@ -27,7 +27,7 @@ test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
     --use_dereverb_ref false \
     --use_noise_ref false \
     --expdir exp_swap \
-    --enh_exp exp_swap/enh_train_se_mc_conformer_triplet_noise \
+    --enh_exp exp_swap/enh_train_se_mc_conformer_triplet_noise_noseg \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
     --stage 6 \
