@@ -200,6 +200,7 @@ class NpzPreprocessor(EnhPreprocessor):
         contrastive_seed: int = 1234,
         contrastive_epoch: int = 0,
         contrastive_random_each_call: bool = False,
+        contrastive_random_train_only: bool = False,
         contrastive_scale_min: float = 0.9,
         contrastive_scale_max: float = 1.1,
         contrastive_pool_rir_scp: Optional[str] = None,
@@ -263,6 +264,7 @@ class NpzPreprocessor(EnhPreprocessor):
         self.contrastive_seed = int(contrastive_seed)
         self.contrastive_epoch = int(contrastive_epoch)
         self.contrastive_random_each_call = bool(contrastive_random_each_call)
+        self.contrastive_random_train_only = bool(contrastive_random_train_only)
         self.contrastive_scale_min = float(contrastive_scale_min)
         self.contrastive_scale_max = float(contrastive_scale_max)
         if self.contrastive_scale_min > self.contrastive_scale_max:
@@ -610,7 +612,9 @@ class NpzPreprocessor(EnhPreprocessor):
                 f"metadata sample_rate {sample_rate} != preprocessor sample_rate {self.sample_rate}"
             )
 
-        if self.contrastive_random_each_call:
+        if self.contrastive_random_each_call and (
+            not self.contrastive_random_train_only or self.train
+        ):
             rng = np.random.default_rng()
         else:
             rng = self._rng_for_uid(uid)
@@ -834,6 +838,7 @@ class NpzSwapRirPreprocessor(NpzPreprocessor):
         contrastive_seed: int = 1234,
         contrastive_epoch: int = 0,
         contrastive_random_each_call: bool = False,
+        contrastive_random_train_only: bool = False,
         contrastive_scale_min: float = 1.0,
         contrastive_scale_max: float = 1.0,
         contrastive_pool_rir_scp: Optional[str] = None,
@@ -883,6 +888,7 @@ class NpzSwapRirPreprocessor(NpzPreprocessor):
             contrastive_seed=contrastive_seed,
             contrastive_epoch=contrastive_epoch,
             contrastive_random_each_call=contrastive_random_each_call,
+            contrastive_random_train_only=contrastive_random_train_only,
             contrastive_scale_min=contrastive_scale_min,
             contrastive_scale_max=contrastive_scale_max,
             contrastive_pool_rir_scp=contrastive_pool_rir_scp,
@@ -1040,7 +1046,9 @@ class NpzSwapRirPreprocessor(NpzPreprocessor):
                 f"metadata sample_rate {sample_rate} != preprocessor sample_rate {self.sample_rate}"
             )
 
-        if self.contrastive_random_each_call:
+        if self.contrastive_random_each_call and (
+            not self.contrastive_random_train_only or self.train
+        ):
             rng = np.random.default_rng()
         else:
             rng = self._rng_for_uid(uid)
