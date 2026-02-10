@@ -679,12 +679,6 @@ class EnhancementTask(AbsTask):
             if not ckpt_path.exists():
                 raise ValueError(f"spatial_encoder_conf.path not found: {ckpt_path}")
 
-            if not hasattr(spatial_encoder, "sc_encoder"):
-                raise ValueError(
-                    "spatial_encoder does not have sc_encoder, "
-                    "cannot load SC-only checkpoint."
-                )
-
             state = torch.load(str(ckpt_path), map_location="cpu")
             if isinstance(state, dict) and "state_dict" in state:
                 state_dict = state["state_dict"]
@@ -695,24 +689,72 @@ class EnhancementTask(AbsTask):
                     f"Unsupported checkpoint format: {type(state)} at {ckpt_path}"
                 )
 
-            prefix = "spatial_encoder.sc_encoder."
-            sc_state = {
-                k[len(prefix) :]: v for k, v in state_dict.items() if k.startswith(prefix)
-            }
-            if not sc_state:
-                raise ValueError(
-                    f"No keys with prefix '{prefix}' found in {ckpt_path}"
+            if hasattr(spatial_encoder, "sc_encoder"):
+                prefix = "spatial_encoder.sc_encoder."
+                sc_state = {
+                    k[len(prefix) :]: v
+                    for k, v in state_dict.items()
+                    if k.startswith(prefix)
+                }
+                if not sc_state:
+                    raise ValueError(
+                        f"No keys with prefix '{prefix}' found in {ckpt_path}"
+                    )
+
+                load_result = spatial_encoder.sc_encoder.load_state_dict(
+                    sc_state, strict=False
+                )
+                missing_keys = getattr(load_result, "missing_keys", [])
+                unexpected_keys = getattr(load_result, "unexpected_keys", [])
+                if missing_keys or unexpected_keys:
+                    raise ValueError(
+                        "SC checkpoint load mismatch: "
+                        f"missing={missing_keys}, unexpected={unexpected_keys}"
+                    )
+            elif isinstance(spatial_encoder, ResNet2DDivSpatialEncoder):
+                sc_prefixes = (
+                    "model.ri_stack_sc.",
+                    "model.proj_sc.",
+                    "model.trunk_sc.",
+                    "model.pooling_sc.",
+                    "model.embedding_head_sc.",
                 )
 
-            load_result = spatial_encoder.sc_encoder.load_state_dict(
-                sc_state, strict=False
-            )
-            missing_keys = getattr(load_result, "missing_keys", [])
-            unexpected_keys = getattr(load_result, "unexpected_keys", [])
-            if missing_keys or unexpected_keys:
+                remapped_state = {}
+                for key, value in state_dict.items():
+                    if key.startswith("spatial_encoder.model."):
+                        remapped_state[key[len("spatial_encoder.") :]] = value
+                    elif key.startswith("model."):
+                        remapped_state[key] = value
+
+                sc_state = {
+                    key: value
+                    for key, value in remapped_state.items()
+                    if key.startswith(sc_prefixes)
+                }
+                if not sc_state:
+                    raise ValueError(
+                        "No ResNet SC keys found in checkpoint. Expected keys "
+                        "starting with 'spatial_encoder.model.*' or 'model.*' "
+                        f"for SC branch at {ckpt_path}"
+                    )
+
+                load_result = spatial_encoder.load_state_dict(sc_state, strict=False)
+                missing_keys = getattr(load_result, "missing_keys", [])
+                unexpected_keys = getattr(load_result, "unexpected_keys", [])
+                missing_sc = [key for key in missing_keys if key.startswith(sc_prefixes)]
+                unexpected_sc = [
+                    key for key in unexpected_keys if key.startswith(sc_prefixes)
+                ]
+                if missing_sc or unexpected_sc:
+                    raise ValueError(
+                        "ResNet SC checkpoint load mismatch: "
+                        f"missing={missing_sc}, unexpected={unexpected_sc}"
+                    )
+            else:
                 raise ValueError(
-                    "SC checkpoint load mismatch: "
-                    f"missing={missing_keys}, unexpected={unexpected_keys}"
+                    "spatial_encoder does not have sc_encoder and is not "
+                    "ResNet2DDivSpatialEncoder; unsupported path loading format."
                 )
 
             if not spatial_encoder_trainable:
