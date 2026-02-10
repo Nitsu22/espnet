@@ -88,7 +88,7 @@ spatial_encoder_encoder_conf:
     hop_length: *hop_length
 spatial_encoder: resnet2d_div
 spatial_encoder_conf:
-    trainable: true
+    trainable: false
     embedding_dim: 128
     num_channels_mc: 2
 
