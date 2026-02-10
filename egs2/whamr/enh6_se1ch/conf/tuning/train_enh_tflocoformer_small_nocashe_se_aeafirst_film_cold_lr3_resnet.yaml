@@ -61,9 +61,9 @@ separator_conf:
     num_spk: *num_spk
     use_spatial_encoder: true
     film_init_identity: true
-    n_layers: 6
+    n_layers: 4
     # general setup
-    emb_dim: 128
+    emb_dim: 96
     norm_type: rmsgroupnorm
     num_groups: 4
     tf_order: ft
@@ -75,8 +75,8 @@ separator_conf:
         - swiglu_conv1d
         - swiglu_conv1d
     ffn_hidden_dim:
-        - 192
-        - 192 # list order must be the same as ffn_type
+        - 128
+        - 128 # list order must be the same as ffn_type
     conv1d_kernel: 8
     conv1d_shift: 1
     dropout: 0.0
