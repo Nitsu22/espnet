@@ -109,7 +109,8 @@ from espnet2.enh_se.spatial_encoder.resnet2d_div_spatial_encoder import (
     ResNet2DDivSpatialEncoder,
 )
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
-from espnet2.tasks.abs_task import AbsTask
+from espnet2.optimizers.optim_groups import add_optimizer_hooks
+from espnet2.tasks.abs_task import AbsTask, fairscale, optim_classes
 from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
@@ -330,6 +331,24 @@ class EnhancementTask(AbsTask):
                 },
             ],
             help="The criterions binded with the loss wrappers.",
+        )
+        group.add_argument(
+            "--aea_block_lr",
+            type=float,
+            default=None,
+            help=(
+                "Optional LR for separator AEA blocks (separator.aea_blocks). "
+                "If None, optim_conf.lr is used."
+            ),
+        )
+        group.add_argument(
+            "--non_aea_lr",
+            type=float,
+            default=None,
+            help=(
+                "Optional LR for non-AEA parameters when split-LR is enabled. "
+                "If None, optim_conf.lr is used."
+            ),
         )
 
         group = parser.add_argument_group(description="Preprocess related")
@@ -770,6 +789,89 @@ class EnhancementTask(AbsTask):
         model.spatial_encoder_frozen = not spatial_encoder_trainable
 
         return model
+
+    @classmethod
+    def _build_split_lr_param_groups(
+        cls, args: argparse.Namespace, model: torch.nn.Module
+    ) -> Optional[List[Dict]]:
+        aea_block_lr = getattr(args, "aea_block_lr", None)
+        non_aea_lr = getattr(args, "non_aea_lr", None)
+        if aea_block_lr is None and non_aea_lr is None:
+            return None
+
+        base_lr = args.optim_conf.get("lr", None)
+        if aea_block_lr is None:
+            aea_block_lr = base_lr
+        if non_aea_lr is None:
+            non_aea_lr = base_lr
+        if aea_block_lr is None or non_aea_lr is None:
+            raise ValueError(
+                "optim_conf.lr must be set when using aea_block_lr/non_aea_lr."
+            )
+
+        separator = getattr(model, "separator", None)
+        if separator is None or not hasattr(separator, "aea_blocks"):
+            raise ValueError(
+                "aea_block_lr/non_aea_lr is set, but model.separator.aea_blocks "
+                "is not available."
+            )
+
+        if args.exclude_weight_decay:
+            add_optimizer_hooks(model, **args.exclude_weight_decay_conf)
+
+        aea_param_ids = {
+            id(param)
+            for param in separator.aea_blocks.parameters()
+            if param.requires_grad
+        }
+        if not aea_param_ids:
+            raise ValueError(
+                "No trainable AEA parameters found in separator.aea_blocks."
+            )
+
+        param_groups = {}
+        for param in model.parameters():
+            if not param.requires_grad:
+                continue
+
+            hp = dict(getattr(param, "_optim", {}))
+            hp["lr"] = aea_block_lr if id(param) in aea_param_ids else non_aea_lr
+            key = tuple(sorted(hp.items()))
+            if key not in param_groups:
+                param_groups[key] = {"params": [], **hp}
+            param_groups[key]["params"].append(param)
+
+        return list(param_groups.values())
+
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        if cls.num_optimizers != 1:
+            raise RuntimeError(
+                "build_optimizers() must be overridden if num_optimizers != 1"
+            )
+
+        optim_class = optim_classes.get(args.optim)
+        if optim_class is None:
+            raise ValueError(f"must be one of {list(optim_classes)}: {args.optim}")
+
+        split_groups = cls._build_split_lr_param_groups(args, model)
+        if split_groups is None:
+            return super().build_optimizers(args, model)
+
+        if args.sharded_ddp:
+            if fairscale is None:
+                raise RuntimeError("Requiring fairscale. Do 'pip install fairscale'")
+            optim = fairscale.optim.oss.OSS(
+                params=split_groups, optim=optim_class, **args.optim_conf
+            )
+        else:
+            optim = optim_class(split_groups, **args.optim_conf)
+
+        return [optim]
 
     @classmethod
     def build_iter_factory(
