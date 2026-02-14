@@ -8,9 +8,9 @@ set -o pipefail
 min_or_max=min # "min" or "max". This is to determine how the mixtures are generated in local/data.sh.
 sample_rate=8k
 
-train_set=tr_mix_both_clean_${min_or_max}_${sample_rate}
-valid_set=cv_mix_both_clean_${min_or_max}_${sample_rate}
-test_sets="tt_mix_both_clean_${min_or_max}_${sample_rate}"
+train_set=tr_mix_clean_reverb_${min_or_max}_${sample_rate}
+valid_set=cv_mix_clean_reverb_${min_or_max}_${sample_rate}
+test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --train_set "${train_set}" \
