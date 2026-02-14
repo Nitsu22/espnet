@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "fixed_rirs": [
+    {
+      "label": "RIR1g",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/011c020e_1.7992_015a010n_-1.7992.npz"
+    },
+    {
+      "label": "RIR2",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/023c0213_1.5932_20na0106_-1.5932.npz"
+    },
+    {
+      "label": "RIR3",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/20ro010i_0.33852_01ba010f_-0.33852.npz"
+    },
+    {
+      "label": "RIR4",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/407o030d_0.2634_02ba010q_-0.2634.npz"
+    },
+    {
+      "label": "RIR5g",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/20nc010l_2.1155_20co010a_-2.1155.npz"
+    },
+    {
+      "label": "RIR6g",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/020c0206_0.15106_01sc020q_-0.15106.npz"
+    },
+    {
+      "label": "RIR7",
+      "path": "/net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/20lo010g_1.4418_029o030t_-1.4418.npz"
+    }
+  ],
+  "fixed_mixtures": [
+  ]
+}

@@ -1,0 +1,8 @@
+version: 1
+fixed_rirs:
+  - label: RIR2
+    path: /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/011c020e_1.7992_015a010n_-1.7992.npz
+  - label: RIR6
+    path: /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/011o0313_1.7001_01mc021e_-1.7001.npz
+  - label: RIR10
+    path: /net/midgar/work/nitsu/learning/tf-locoformer/espnet/egs2/whamr/se_npz/data/whamr/2speakers/wav8k/min/cv/rir_npz/011c0208_2.4906_01vc020l_-2.4906.npz
