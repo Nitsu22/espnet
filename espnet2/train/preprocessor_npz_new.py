@@ -1,4 +1,4 @@
-"""Additional NPZ preprocessors for stricter same-pair contrastive sampling."""
+"""Additional NPZ preprocessors for speaker-wise contrastive sampling."""
 
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -17,14 +17,16 @@ from espnet2.train.preprocessor_npz import (
 
 
 class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
-    """RIR-swap preprocessor with same-speaker-pair data2 sampling.
+    """RIR-swap preprocessor with speaker-wise random data2 construction.
 
     Anchor  : data1 (speech/noise/RIR)
     Positive: data2 speech + data1 noise + data1 RIR
-    Negative: data2 speech + data1 noise + data2 RIR
+    Negative: data2 speech + data1 noise + random RIR
 
-    data2 is sampled from the same unordered speaker pair as data1, with
-    both speaker utterances different from data1.
+    data2 is built speaker-wise:
+      - spk1 speech is sampled from random (spk1, *) sample
+      - spk2 speech is sampled from random (spk2, *) sample
+    Both sampled utterances must differ from the anchor utterances.
     """
 
     @typechecked
@@ -130,101 +132,121 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
             contrastive_pool_npz_scp=contrastive_pool_npz_scp,
         )
 
-        self._same_pair_by_split = isinstance(self._contrastive_pool_npz_keys, dict)
-        self._same_pair_uid_index = None
+        self._speaker_index_by_split = isinstance(self._contrastive_pool_npz_keys, dict)
+        self._speaker_uid_index = None
         self._uid_to_speaker_utt = None
         if self.contrastive_enable:
-            if self._same_pair_by_split:
-                self._same_pair_uid_index = {}
+            if self._speaker_index_by_split:
+                self._speaker_uid_index = {}
                 self._uid_to_speaker_utt = {}
                 for split_key, pool_keys in self._contrastive_pool_npz_keys.items():
-                    pair_index, utt_index = self._build_pair_indexes(pool_keys)
-                    self._same_pair_uid_index[split_key] = pair_index
+                    speaker_index, utt_index = self._build_speaker_indexes(pool_keys)
+                    self._speaker_uid_index[split_key] = speaker_index
                     self._uid_to_speaker_utt[split_key] = utt_index
             else:
-                pair_index, utt_index = self._build_pair_indexes(
+                speaker_index, utt_index = self._build_speaker_indexes(
                     self._contrastive_pool_npz_keys
                 )
-                self._same_pair_uid_index = pair_index
+                self._speaker_uid_index = speaker_index
                 self._uid_to_speaker_utt = utt_index
 
     @staticmethod
-    def _speaker_pair_key(spk1: str, spk2: str) -> Tuple[str, str]:
-        if spk1 <= spk2:
-            return (spk1, spk2)
-        return (spk2, spk1)
-
-    @staticmethod
-    def _parse_uid_speaker_utt(uid: str) -> Dict[str, str]:
+    def _parse_uid_fields(uid: str) -> Tuple[str, str, str, str]:
         parts = uid.split("_")
         if len(parts) < 7:
             raise ValueError(
-                "Failed to parse uid for same-pair sampling. "
+                "Failed to parse uid for speaker-wise sampling. "
                 f"Expected at least 7 '_' separated tokens, got {uid}"
             )
-        spk1 = parts[0]
-        spk2 = parts[1]
-        utt1 = parts[2]
-        utt2 = parts[4]
-        return {spk1: utt1, spk2: utt2}
+        return parts[0], parts[1], parts[2], parts[4]
 
-    def _build_pair_indexes(self, pool_keys: List[str]):
-        pair_index: Dict[Tuple[str, str], List[str]] = {}
+    def _build_speaker_indexes(self, pool_keys: List[str]):
+        speaker_index: Dict[str, List[str]] = {}
         utt_index: Dict[str, Dict[str, str]] = {}
         for key in pool_keys:
-            spk_to_utt = self._parse_uid_speaker_utt(key)
-            speakers = sorted(spk_to_utt.keys())
+            spk1, spk2, utt1, utt2 = self._parse_uid_fields(key)
+            spk_to_utt = {spk1: utt1, spk2: utt2}
+            speakers = list(spk_to_utt.keys())
             if len(speakers) != 2:
                 raise ValueError(
-                    "Exactly 2 speakers are required for same-pair sampling: "
+                    "Exactly 2 speakers are required for speaker-wise sampling: "
                     f"{key} -> {speakers}"
                 )
-            pair_key = self._speaker_pair_key(speakers[0], speakers[1])
-            pair_index.setdefault(pair_key, []).append(key)
+            for spk in speakers:
+                speaker_index.setdefault(spk, []).append(key)
             utt_index[key] = spk_to_utt
-        return pair_index, utt_index
+        return speaker_index, utt_index
 
-    def _resolve_pair_context(self, split: str):
-        if self._same_pair_by_split:
-            if split not in self._same_pair_uid_index:
-                raise ValueError(f"same-pair index not found for split {split}")
-            return self._same_pair_uid_index[split], self._uid_to_speaker_utt[split]
-        return self._same_pair_uid_index, self._uid_to_speaker_utt
-
-    def _sample_same_pair_uid(
+    def _sample_uid_for_speaker(
         self,
-        uid: str,
+        target_speaker: str,
+        anchor_utt: str,
         split: str,
         rng: np.random.Generator,
+        avoid_uid: Optional[str] = None,
     ) -> str:
-        pair_index, utt_index = self._resolve_pair_context(split)
-        if uid not in utt_index:
-            raise ValueError(f"uid not found in same-pair index: {uid}")
-
-        anchor_spk_to_utt = utt_index[uid]
-        speakers = sorted(anchor_spk_to_utt.keys())
-        pair_key = self._speaker_pair_key(speakers[0], speakers[1])
-        if pair_key not in pair_index:
-            raise ValueError(f"speaker pair not found in same-pair index: {pair_key}")
+        if self._speaker_index_by_split:
+            if split not in self._speaker_uid_index:
+                raise ValueError(f"speaker index not found for split {split}")
+            speaker_index = self._speaker_uid_index[split]
+            utt_index = self._uid_to_speaker_utt[split]
+        else:
+            speaker_index = self._speaker_uid_index
+            utt_index = self._uid_to_speaker_utt
+        if target_speaker not in speaker_index:
+            raise ValueError(
+                f"target speaker not found in speaker index: {target_speaker}, split={split}"
+            )
 
         candidates = []
-        for cand_uid in pair_index[pair_key]:
-            if cand_uid == uid:
+        for cand_uid in speaker_index[target_speaker]:
+            if avoid_uid is not None and cand_uid == avoid_uid:
                 continue
             cand_spk_to_utt = utt_index[cand_uid]
-            if set(cand_spk_to_utt.keys()) != set(anchor_spk_to_utt.keys()):
-                continue
-            if all(cand_spk_to_utt[spk] != anchor_spk_to_utt[spk] for spk in speakers):
+            if cand_spk_to_utt[target_speaker] != anchor_utt:
                 candidates.append(cand_uid)
 
         if len(candidates) == 0:
             raise ValueError(
-                "No valid same-speaker-pair candidate found under strict both-speaker "
-                f"different-utterance constraint for uid={uid}, split={split}, "
-                f"pair={pair_key}"
+                "No valid speaker-conditioned candidate found with different utterance: "
+                f"speaker={target_speaker}, anchor_utt={anchor_utt}, split={split}"
             )
 
         return str(rng.choice(candidates))
+
+    def _extract_speaker_streams(
+        self, bundle: Dict[str, Union[np.ndarray, str, int, float]], cand_uid: str, target_speaker: str
+    ):
+        spk1, spk2, _, _ = self._parse_uid_fields(cand_uid)
+        if target_speaker == spk1:
+            return bundle["s1_base"], bundle["s1_temp"]
+        if target_speaker == spk2:
+            return bundle["s2_base"], bundle["s2_temp"]
+        raise ValueError(
+            f"target speaker {target_speaker} is not contained in candidate uid {cand_uid}"
+        )
+
+    def _sample_random_rir_uid(
+        self,
+        split: str,
+        rng: np.random.Generator,
+        avoid_uid: Optional[str] = None,
+    ) -> Tuple[str, str, str]:
+        if isinstance(self._contrastive_pool_keys, dict):
+            if split not in self._contrastive_pool_keys:
+                raise ValueError(f"RIR pool not found for split {split}")
+            pool_keys = self._contrastive_pool_keys[split]
+            pool_rir = self.contrastive_pool_rir[split]
+            pool_room = self.contrastive_pool_room_param[split]
+        else:
+            pool_keys = self._contrastive_pool_keys
+            pool_rir = self.contrastive_pool_rir
+            pool_room = self.contrastive_pool_room_param
+        candidates = [k for k in pool_keys if k != avoid_uid]
+        if len(candidates) == 0:
+            raise ValueError(f"No available RIR candidates for split={split}")
+        rir_uid = str(rng.choice(candidates))
+        return pool_rir[rir_uid], pool_room[rir_uid], rir_uid
 
     def _synthesize_mix(
         self,
@@ -427,16 +449,52 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
             speech_anchor = speech_anchor[:, 0]
 
         pool_npz, _ = self._get_npz_pool(split)
-        data2_uid = self._sample_same_pair_uid(uid=uid, split=split, rng=rng)
-        data2_npz_path = pool_npz[data2_uid]
+        anchor_spk1, anchor_spk2, anchor_utt1, anchor_utt2 = self._parse_uid_fields(uid)
 
-        data2 = self._load_npz_bundle(data2_npz_path)
-        sample_rate2 = data2["sample_rate"]
-        if sample_rate2 != self.sample_rate:
-            raise ValueError(
-                f"metadata sample_rate {sample_rate2} != preprocessor sample_rate {self.sample_rate}"
-            )
+        data2_uid_spk1 = self._sample_uid_for_speaker(
+            target_speaker=anchor_spk1,
+            anchor_utt=anchor_utt1,
+            split=split,
+            rng=rng,
+            avoid_uid=uid,
+        )
+        data2_uid_spk2 = self._sample_uid_for_speaker(
+            target_speaker=anchor_spk2,
+            anchor_utt=anchor_utt2,
+            split=split,
+            rng=rng,
+            avoid_uid=uid,
+        )
 
+        bundle_cache: Dict[str, Dict[str, Union[np.ndarray, str, int, float]]] = {}
+        for sampled_uid in (data2_uid_spk1, data2_uid_spk2):
+            if sampled_uid not in bundle_cache:
+                bundle_cache[sampled_uid] = self._load_npz_bundle(pool_npz[sampled_uid])
+
+        bundle_spk1 = bundle_cache[data2_uid_spk1]
+        bundle_spk2 = bundle_cache[data2_uid_spk2]
+
+        for sampled_uid, sampled_bundle in (
+            (data2_uid_spk1, bundle_spk1),
+            (data2_uid_spk2, bundle_spk2),
+        ):
+            sampled_sr = sampled_bundle["sample_rate"]
+            if sampled_sr != self.sample_rate:
+                raise ValueError(
+                    f"metadata sample_rate {sampled_sr} != preprocessor sample_rate "
+                    f"{self.sample_rate} for uid={sampled_uid}"
+                )
+
+        data2_s1_base, data2_s1_temp = self._extract_speaker_streams(
+            bundle_spk1, data2_uid_spk1, anchor_spk1
+        )
+        data2_s2_base, data2_s2_temp = self._extract_speaker_streams(
+            bundle_spk2, data2_uid_spk2, anchor_spk2
+        )
+
+        neg_rir_path, neg_room_path, neg_rir_uid = self._sample_random_rir_uid(
+            split=split, rng=rng, avoid_uid=uid
+        )
         (
             neg_rir_npz,
             neg_room_dim,
@@ -445,20 +503,20 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
             neg_s2_pos,
             neg_t60,
             neg_room_fs,
-        ) = self._load_room_and_rir(data2["rir_path"], data2["room_param_path"])
+        ) = self._load_room_and_rir(neg_rir_path, neg_room_path)
 
         speech_mix_pos, s1_pos_samples, s2_pos_samples = self._synthesize_mix(
-            sample_rate=sample_rate2,
+            sample_rate=sample_rate,
             data_len=data_len,
             start_samp_16k=start_samp_16k,
-            wsjmix_scale=data2["wsjmix_scale"],
-            wham_speech_scale=data2["wham_speech_scale"],
+            wsjmix_scale=wsjmix_scale,
+            wham_speech_scale=wham_speech_scale,
             wham_noise_scale=wham_noise_scale,
-            mono=data2["mono"],
-            s1_base=data2["s1_base"],
-            s2_base=data2["s2_base"],
-            s1_temp=data2["s1_temp"],
-            s2_temp=data2["s2_temp"],
+            mono=mono,
+            s1_base=np.asarray(data2_s1_base, dtype=np.float64),
+            s2_base=np.asarray(data2_s2_base, dtype=np.float64),
+            s1_temp=np.asarray(data2_s1_temp, dtype=np.float64),
+            s2_temp=np.asarray(data2_s2_temp, dtype=np.float64),
             noise_base=noise_base,
             rir_npz=rir_npz,
             room_dim=room_dim,
@@ -472,17 +530,17 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
         )
 
         speech_mix_neg, s1_neg_samples, s2_neg_samples = self._synthesize_mix(
-            sample_rate=sample_rate2,
+            sample_rate=sample_rate,
             data_len=data_len,
             start_samp_16k=start_samp_16k,
-            wsjmix_scale=data2["wsjmix_scale"],
-            wham_speech_scale=data2["wham_speech_scale"],
+            wsjmix_scale=wsjmix_scale,
+            wham_speech_scale=wham_speech_scale,
             wham_noise_scale=wham_noise_scale,
-            mono=data2["mono"],
-            s1_base=data2["s1_base"],
-            s2_base=data2["s2_base"],
-            s1_temp=data2["s1_temp"],
-            s2_temp=data2["s2_temp"],
+            mono=mono,
+            s1_base=np.asarray(data2_s1_base, dtype=np.float64),
+            s2_base=np.asarray(data2_s2_base, dtype=np.float64),
+            s1_temp=np.asarray(data2_s1_temp, dtype=np.float64),
+            s2_temp=np.asarray(data2_s2_temp, dtype=np.float64),
             noise_base=noise_base,
             rir_npz=neg_rir_npz,
             room_dim=neg_room_dim,
@@ -497,7 +555,7 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
 
         crop_posneg = None
         if self.train and self.speech_segment is not None:
-            speech_segment = self.speech_segment // self.sample_rate * sample_rate2
+            speech_segment = self.speech_segment // self.sample_rate * sample_rate
             crop_posneg = self._random_crop_range(
                 {
                     self.speech_ref_name_prefix + "1": s1_pos_samples,
@@ -505,7 +563,7 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
                 },
                 self.num_spk,
                 speech_segment,
-                uid=data2_uid,
+                uid=f"{data2_uid_spk1}__{data2_uid_spk2}__{neg_rir_uid}",
             )
         speech_pos = self._apply_postprocess(
             uid, speech_mix_pos, s1_pos_samples, s2_pos_samples, crop=crop_posneg
