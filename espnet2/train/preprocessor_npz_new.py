@@ -5,7 +5,15 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from typeguard import typechecked
 
-from espnet2.train.preprocessor_npz import NpzSwapRirPreprocessor, _as_str, _np_item
+from espnet2.train.preprocessor_npz import (
+    NpzSwapRirPreprocessor,
+    _append_or_truncate,
+    _as_str,
+    _fix_length,
+    _get_whamroom_cls,
+    _np_item,
+    _quantize_pcm16,
+)
 
 
 class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
@@ -218,6 +226,114 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
 
         return str(rng.choice(candidates))
 
+    def _synthesize_mix(
+        self,
+        sample_rate: int,
+        data_len: str,
+        start_samp_16k: int,
+        wsjmix_scale: np.ndarray,
+        wham_speech_scale: float,
+        wham_noise_scale: float,
+        mono: bool,
+        s1_base: np.ndarray,
+        s2_base: np.ndarray,
+        s1_temp: np.ndarray,
+        s2_temp: np.ndarray,
+        noise_base: np.ndarray,
+        rir_npz,
+        room_dim: np.ndarray,
+        mic_pos: np.ndarray,
+        s1_pos: np.ndarray,
+        s2_pos: np.ndarray,
+        t60: float,
+        room_fs: int,
+        s1_scale_factor: float,
+        s2_scale_factor: float,
+    ):
+        WhamRoom = _get_whamroom_cls()
+        room = WhamRoom(room_dim, mic_pos, s1_pos, s2_pos, t60, fs=room_fs)
+        room.rir_anechoic = self._rir_to_list(
+            np.asarray(rir_npz["rir_anechoic"], dtype=np.float64)
+        )
+        room.rir_reverberant = self._rir_to_list(
+            np.asarray(rir_npz["rir_reverberant"], dtype=np.float64)
+        )
+        room.rir = room.rir_anechoic
+        room.add_audio(s1_temp, s2_temp)
+
+        anechoic = room.generate_audio(anechoic=True, fs=sample_rate)
+        reverberant = room.generate_audio(fs=sample_rate)
+
+        left_ch = 0
+        ch_ind = left_ch if mono else [0, 1]
+
+        if wsjmix_scale.shape[0] != 2:
+            raise ValueError(f"wsjmix_scale must have 2 elements: {wsjmix_scale}")
+        s1 = s1_base * wham_speech_scale * s1_scale_factor
+        s2 = s2_base * wham_speech_scale * s2_scale_factor
+
+        s1_spatial_scaling = np.sqrt(
+            np.sum(s1**2) / np.sum(anechoic[0, left_ch, :] ** 2)
+        )
+        s2_spatial_scaling = np.sqrt(
+            np.sum(s2**2) / np.sum(anechoic[1, left_ch, :] ** 2)
+        )
+
+        noise_samples_full = noise_base * wham_noise_scale
+
+        if data_len == "max":
+            out_len = len(noise_samples_full)
+        else:
+            out_len = np.minimum(len(s1), len(s2))
+
+        s1_anechoic, s2_anechoic = _fix_length(
+            anechoic[0, ch_ind, :out_len].T * s1_spatial_scaling,
+            anechoic[1, ch_ind, :out_len].T * s2_spatial_scaling,
+            data_len,
+        )
+        s1_reverb, s2_reverb = _fix_length(
+            reverberant[0, ch_ind, :out_len].T * s1_spatial_scaling,
+            reverberant[1, ch_ind, :out_len].T * s2_spatial_scaling,
+            data_len,
+        )
+
+        if self.ref_condition == "anechoic":
+            s1_src, s2_src = s1_anechoic, s2_anechoic
+        else:
+            s1_src, s2_src = s1_reverb, s2_reverb
+
+        s1_samples, s2_samples, noise_samples = _append_or_truncate(
+            s1_src,
+            s2_src,
+            noise_samples_full,
+            data_len,
+            start_samp_16k,
+            downsample=(sample_rate != room_fs),
+        )
+
+        # Use strict truncation to the shortest stream to avoid shape mismatch.
+        target_len = min(len(noise_samples), len(s1_samples), len(s2_samples))
+        if len(noise_samples) != target_len:
+            noise_samples = noise_samples[:target_len]
+        if len(s1_samples) != target_len:
+            s1_samples = s1_samples[:target_len]
+        if len(s2_samples) != target_len:
+            s2_samples = s2_samples[:target_len]
+
+        if self.mix_type == "clean":
+            speech_mix = s1_samples + s2_samples
+        elif self.mix_type == "single":
+            speech_mix = noise_samples + s1_samples
+        else:
+            speech_mix = noise_samples + s1_samples + s2_samples
+
+        if self.output_audio_subtype == "PCM_16":
+            speech_mix = _quantize_pcm16(speech_mix)
+            s1_samples = _quantize_pcm16(s1_samples)
+            s2_samples = _quantize_pcm16(s2_samples)
+
+        return speech_mix, s1_samples, s2_samples
+
     def _speech_process_contrastive(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, Union[str, np.ndarray]]:
@@ -333,8 +449,8 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
 
         speech_mix_pos, s1_pos_samples, s2_pos_samples = self._synthesize_mix(
             sample_rate=sample_rate2,
-            data_len=data2["data_len"],
-            start_samp_16k=data2["start_samp_16k"],
+            data_len=data_len,
+            start_samp_16k=start_samp_16k,
             wsjmix_scale=data2["wsjmix_scale"],
             wham_speech_scale=data2["wham_speech_scale"],
             wham_noise_scale=wham_noise_scale,
@@ -357,8 +473,8 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
 
         speech_mix_neg, s1_neg_samples, s2_neg_samples = self._synthesize_mix(
             sample_rate=sample_rate2,
-            data_len=data2["data_len"],
-            start_samp_16k=data2["start_samp_16k"],
+            data_len=data_len,
+            start_samp_16k=start_samp_16k,
             wsjmix_scale=data2["wsjmix_scale"],
             wham_speech_scale=data2["wham_speech_scale"],
             wham_noise_scale=wham_noise_scale,
