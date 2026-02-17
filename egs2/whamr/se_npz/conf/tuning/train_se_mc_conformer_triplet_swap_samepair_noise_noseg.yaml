@@ -1,0 +1,95 @@
+# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Initialization
+init: xavier_uniform
+
+# Training configuration
+max_epoch: 200
+use_amp: false
+batch_type: folded
+batch_size: 16
+num_workers: 12
+
+# Preprocessor configuration
+preprocessor: npz_swap_rir_samepair_new
+preprocessor_conf:
+    mix_type: both
+    ref_condition: reverb
+    output_audio_subtype: PCM_16
+    speech_volume_normalize: null
+    sample_rate: 8000
+    force_single_channel: false
+    anchor_single_channel: true
+    categories: null
+    speech_segment: null
+    avoid_allzero_segment: true
+    contrastive_enable: true
+    contrastive_num_neg: 1
+    contrastive_seed: 1234
+    contrastive_epoch: 0
+    contrastive_random_each_call: true
+    contrastive_random_train_only: true
+    contrastive_scale_min: 0.9
+    contrastive_scale_max: 1.1
+    contrastive_pool_rir_scp: null
+    contrastive_pool_room_param_scp: null
+    contrastive_pool_npz_scp: null
+
+# Spatial Encoder model configuration
+encoder: &encoder stft
+encoder_conf:
+    n_fft: &n_fft 256
+    hop_length: &hop_length 64
+spatial_encoder: mc_conformer_div
+spatial_encoder_conf:
+    embed_dim: 256
+    num_channels_mc: 2
+    freq_bins: 129   # n_fft 256, onesided -> 256//2+1
+    attention_heads: 4
+    num_blocks: 3
+    ffn_expansion: 4
+    conv_kernel_size: 31
+    dropout_rate: 0.1
+    eps: 1.0e-8
+    l2_norm_eps: 1.0e-8
+
+# ESPnet model configuration
+model_conf: {}
+
+# Optimizer configuration
+optim: adam
+optim_conf:
+    lr: 1.0e-04
+    eps: 1.0e-08
+    weight_decay: 0
+
+# Scheduler configuration (ReduceLROnPlateau)
+scheduler: reducelronplateau
+scheduler_conf:
+    mode: min
+    factor: 0.1
+    patience: 10
+
+# Validation and model saving
+patience: 20
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+nbest_averaging_interval: 0
+
+# Loss configuration
+criterions:
+  - name: triplet
+    conf:
+        margin: 0.2
+        eps: 1.0e-8
+    wrapper: triplet
+    wrapper_conf:
+        weight: 1.0

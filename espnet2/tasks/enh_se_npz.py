@@ -38,6 +38,7 @@ from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.distributed_utils import DistributedOption
 from espnet2.train.preprocessor import AbsPreprocessor, EnhPreprocessor, SePreprocessor
 from espnet2.train.preprocessor_npz import NpzPreprocessor, NpzSwapRirPreprocessor
+from espnet2.train.preprocessor_npz_new import NpzSwapRirSamePairNewPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -82,6 +83,7 @@ preprocessor_choices = ClassChoices(
         se=SePreprocessor,
         npz=NpzPreprocessor,
         npz_swap_rir=NpzSwapRirPreprocessor,
+        npz_swap_rir_samepair_new=NpzSwapRirSamePairNewPreprocessor,
     ),
     type_check=AbsPreprocessor,
     default=None,
