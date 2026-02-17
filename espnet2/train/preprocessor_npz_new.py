@@ -39,7 +39,7 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
         noise_apply_prob: float = 0.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
-        speech_volume_normalize: float = None,
+        speech_volume_normalize: Optional[float] = None,
         speech_name: str = "speech_mix",
         speech_ref_name_prefix: str = "speech_ref",
         noise_ref_name_prefix: str = "noise_ref",
@@ -51,7 +51,7 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
         force_single_channel: bool = False,
         channel_reordering: bool = False,
         categories: Optional[List] = None,
-        data_aug_effects: List = None,
+        data_aug_effects: Optional[List] = None,
         data_aug_num: List[int] = [1, 1],
         data_aug_prob: float = 0.0,
         speech_segment: Optional[int] = None,
@@ -67,8 +67,8 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
         contrastive_random_train_only: bool = False,
         contrastive_scale_min: float = 1.0,
         contrastive_scale_max: float = 1.0,
-        contrastive_pool_rir_scp: Optional[str] = None,
-        contrastive_pool_room_param_scp: Optional[str] = None,
+        contrastive_pool_rir_scp: Optional[Union[str, Dict[str, str]]] = None,
+        contrastive_pool_room_param_scp: Optional[Union[str, Dict[str, str]]] = None,
         contrastive_pool_npz_scp: Optional[Union[str, Dict[str, str]]] = None,
     ):
         super().__init__(
