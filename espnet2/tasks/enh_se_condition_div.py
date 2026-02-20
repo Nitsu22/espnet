@@ -358,6 +358,15 @@ class EnhancementTask(AbsTask):
                 "If None, optim_conf.lr is used."
             ),
         )
+        group.add_argument(
+            "--spatial_encoder_lr",
+            type=float,
+            default=None,
+            help=(
+                "Optional LR for trainable model.spatial_encoder parameters when "
+                "split-LR is enabled. If None, non_aea_lr (or optim_conf.lr) is used."
+            ),
+        )
 
         group = parser.add_argument_group(description="Preprocess related")
         group.add_argument(
@@ -804,7 +813,12 @@ class EnhancementTask(AbsTask):
     ) -> Optional[List[Dict]]:
         aea_block_lr = getattr(args, "aea_block_lr", None)
         non_aea_lr = getattr(args, "non_aea_lr", None)
-        if aea_block_lr is None and non_aea_lr is None:
+        spatial_encoder_lr = getattr(args, "spatial_encoder_lr", None)
+        if (
+            aea_block_lr is None
+            and non_aea_lr is None
+            and spatial_encoder_lr is None
+        ):
             return None
 
         base_lr = args.optim_conf.get("lr", None)
@@ -812,9 +826,11 @@ class EnhancementTask(AbsTask):
             aea_block_lr = base_lr
         if non_aea_lr is None:
             non_aea_lr = base_lr
-        if aea_block_lr is None or non_aea_lr is None:
+        if spatial_encoder_lr is None:
+            spatial_encoder_lr = non_aea_lr
+        if aea_block_lr is None or non_aea_lr is None or spatial_encoder_lr is None:
             raise ValueError(
-                "optim_conf.lr must be set when using aea_block_lr/non_aea_lr."
+                "optim_conf.lr must be set when using split LR options."
             )
 
         separator = getattr(model, "separator", None)
@@ -837,13 +853,39 @@ class EnhancementTask(AbsTask):
                 "No trainable AEA parameters found in separator.aea_blocks."
             )
 
+        spatial_param_ids = set()
+        if getattr(args, "spatial_encoder_lr", None) is not None:
+            spatial_encoder = getattr(model, "spatial_encoder", None)
+            if spatial_encoder is None:
+                raise ValueError(
+                    "spatial_encoder_lr is set, but model.spatial_encoder is not "
+                    "available."
+                )
+            spatial_param_ids = {
+                id(param)
+                for param in spatial_encoder.parameters()
+                if param.requires_grad
+            }
+            if not spatial_param_ids:
+                raise ValueError(
+                    "spatial_encoder_lr is set, but no trainable parameters were "
+                    "found in model.spatial_encoder. Set spatial_encoder_conf."
+                    "trainable=true."
+                )
+
         param_groups = {}
         for param in model.parameters():
             if not param.requires_grad:
                 continue
 
             hp = dict(getattr(param, "_optim", {}))
-            hp["lr"] = aea_block_lr if id(param) in aea_param_ids else non_aea_lr
+            pid = id(param)
+            if pid in aea_param_ids:
+                hp["lr"] = aea_block_lr
+            elif pid in spatial_param_ids:
+                hp["lr"] = spatial_encoder_lr
+            else:
+                hp["lr"] = non_aea_lr
             key = tuple(sorted(hp.items()))
             if key not in param_groups:
                 param_groups[key] = {"params": [], **hp}
