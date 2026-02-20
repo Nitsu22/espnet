@@ -689,12 +689,13 @@ class NpzSwapRirAblationSameUidPreprocessor(NpzSwapRirSamePairNewPreprocessor):
                 speech_segment,
                 uid=uid,
             )
-        speech_anchor = self._apply_postprocess(
+        speech_anchor_full = self._apply_postprocess(
             uid, speech_mix, s1_samples, s2_samples, crop=crop
         )
+        speech_pos = np.copy(speech_anchor_full)
+        speech_anchor = speech_anchor_full
         if self.anchor_single_channel and speech_anchor.ndim > 1:
             speech_anchor = speech_anchor[:, 0]
-        speech_pos = np.copy(speech_anchor)
 
         neg_rir_path, neg_room_path, _ = self._sample_random_rir_uid(
             split=split, rng=rng, avoid_uid=uid
