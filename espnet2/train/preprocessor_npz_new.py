@@ -592,3 +592,167 @@ class NpzSwapRirSamePairNewPreprocessor(NpzSwapRirPreprocessor):
         data["speech_pos"] = speech_pos
         data["speech_neg1"] = speech_neg
         return data
+
+
+class NpzSwapRirAblationSameUidPreprocessor(NpzSwapRirSamePairNewPreprocessor):
+    """RIR-swap ablation preprocessor with same-uid anchor/positive.
+
+    Anchor  : data1 (speech/noise/RIR)
+    Positive: data1 (speech/noise/RIR)  # identical to anchor
+    Negative: data1 speech/noise + random RIR
+    """
+
+    def _speech_process_contrastive(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, Union[str, np.ndarray]]:
+        if self.contrastive_num_neg != 1:
+            raise ValueError(
+                "NpzSwapRirAblationSameUidPreprocessor supports contrastive_num_neg=1"
+            )
+
+        npz_path = _as_str(data[self.npz_path_name])
+        meta = self._load_npz(npz_path)
+
+        sample_rate = int(_np_item(meta["sample_rate"]))
+        data_len = _as_str(meta["data_len"])
+        mono = bool(_np_item(meta["mono"]))
+        start_samp_16k = int(_np_item(meta["start_samp_16k"]))
+        split = _as_str(meta["split"])
+        wsjmix_scale = np.asarray(meta["wsjmix_scale"], dtype=np.float64)
+        wham_speech_scale = float(_np_item(meta["wham_speech_scale"]))
+        wham_noise_scale = float(_np_item(meta["wham_noise_scale"]))
+
+        s1_base = np.asarray(data[self.s1_base_name], dtype=np.float64)
+        s2_base = np.asarray(data[self.s2_base_name], dtype=np.float64)
+        s1_temp = np.asarray(data[self.s1_temp_name], dtype=np.float64)
+        s2_temp = np.asarray(data[self.s2_temp_name], dtype=np.float64)
+        noise_base = np.asarray(data[self.noise_base_name], dtype=np.float64)
+
+        rir_path = _as_str(data[self.rir_path_name])
+        room_param_path = _as_str(data[self.room_param_path_name])
+
+        (
+            rir_npz,
+            room_dim,
+            mic_pos,
+            s1_pos,
+            s2_pos,
+            t60,
+            room_fs,
+        ) = self._load_room_and_rir(rir_path, room_param_path)
+
+        if sample_rate != self.sample_rate:
+            raise ValueError(
+                f"metadata sample_rate {sample_rate} != preprocessor sample_rate {self.sample_rate}"
+            )
+
+        if self.contrastive_random_each_call and (
+            not self.contrastive_random_train_only or self.train
+        ):
+            rng = np.random.default_rng()
+        else:
+            rng = self._rng_for_uid(uid)
+
+        speech_mix, s1_samples, s2_samples = self._synthesize_mix(
+            sample_rate=sample_rate,
+            data_len=data_len,
+            start_samp_16k=start_samp_16k,
+            wsjmix_scale=wsjmix_scale,
+            wham_speech_scale=wham_speech_scale,
+            wham_noise_scale=wham_noise_scale,
+            mono=mono,
+            s1_base=s1_base,
+            s2_base=s2_base,
+            s1_temp=s1_temp,
+            s2_temp=s2_temp,
+            noise_base=noise_base,
+            rir_npz=rir_npz,
+            room_dim=room_dim,
+            mic_pos=mic_pos,
+            s1_pos=s1_pos,
+            s2_pos=s2_pos,
+            t60=t60,
+            room_fs=room_fs,
+            s1_scale_factor=1.0,
+            s2_scale_factor=1.0,
+        )
+
+        crop = None
+        if self.train and self.speech_segment is not None:
+            speech_segment = self.speech_segment // self.sample_rate * sample_rate
+            crop = self._random_crop_range(
+                {
+                    self.speech_ref_name_prefix + "1": s1_samples,
+                    self.speech_ref_name_prefix + "2": s2_samples,
+                },
+                self.num_spk,
+                speech_segment,
+                uid=uid,
+            )
+        speech_anchor = self._apply_postprocess(
+            uid, speech_mix, s1_samples, s2_samples, crop=crop
+        )
+        if self.anchor_single_channel and speech_anchor.ndim > 1:
+            speech_anchor = speech_anchor[:, 0]
+        speech_pos = np.copy(speech_anchor)
+
+        neg_rir_path, neg_room_path, _ = self._sample_random_rir_uid(
+            split=split, rng=rng, avoid_uid=uid
+        )
+        (
+            neg_rir_npz,
+            neg_room_dim,
+            neg_mic_pos,
+            neg_s1_pos,
+            neg_s2_pos,
+            neg_t60,
+            neg_room_fs,
+        ) = self._load_room_and_rir(neg_rir_path, neg_room_path)
+
+        speech_mix_neg, s1_neg_samples, s2_neg_samples = self._synthesize_mix(
+            sample_rate=sample_rate,
+            data_len=data_len,
+            start_samp_16k=start_samp_16k,
+            wsjmix_scale=wsjmix_scale,
+            wham_speech_scale=wham_speech_scale,
+            wham_noise_scale=wham_noise_scale,
+            mono=mono,
+            s1_base=s1_base,
+            s2_base=s2_base,
+            s1_temp=s1_temp,
+            s2_temp=s2_temp,
+            noise_base=noise_base,
+            rir_npz=neg_rir_npz,
+            room_dim=neg_room_dim,
+            mic_pos=neg_mic_pos,
+            s1_pos=neg_s1_pos,
+            s2_pos=neg_s2_pos,
+            t60=neg_t60,
+            room_fs=neg_room_fs,
+            s1_scale_factor=1.0,
+            s2_scale_factor=1.0,
+        )
+        speech_neg = self._apply_postprocess(
+            uid, speech_mix_neg, s1_neg_samples, s2_neg_samples, crop=crop
+        )
+
+        preserved = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {
+                self.npz_path_name,
+                self.s1_base_name,
+                self.s2_base_name,
+                self.s1_temp_name,
+                self.s2_temp_name,
+                self.noise_base_name,
+                self.rir_path_name,
+                self.room_param_path_name,
+            }
+        }
+        data = preserved
+        data["speech_anchor"] = speech_anchor
+        data["speech_pos"] = speech_pos
+        data["speech_neg1"] = speech_neg
+        return data
