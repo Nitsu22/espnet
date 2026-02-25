@@ -1230,12 +1230,14 @@ class NpzSpatialAblationPreprocessor(NpzSwapRirPreprocessor):
         sample_rate: int = 8000,
         seed: int = 1234,
         epoch: int = 0,
+        mix_type: str = "both",
         output_audio_subtype: Optional[str] = "PCM_16",
     ):
         super().__init__(
             train=False,
+            mix_type=mix_type,
             sample_rate=sample_rate,
-            force_single_channel=False,
+            force_single_channel=True,
             output_audio_subtype=output_audio_subtype,
             contrastive_enable=False,
             contrastive_seed=seed,
@@ -1286,6 +1288,13 @@ class NpzSpatialAblationPreprocessor(NpzSwapRirPreprocessor):
             room_fs,
         ) = self._load_room_and_rir(rir_path, room_param_path)
 
+        use_mono = bool(bundle["mono"] or self.force_single_channel)
+
+        def _to_mono_if_needed(x: np.ndarray) -> np.ndarray:
+            if use_mono and isinstance(x, np.ndarray) and x.ndim > 1:
+                return x[:, 0]
+            return x
+
         speech_mix, s1_samples, s2_samples = self._synthesize_mix(
             sample_rate=bundle["sample_rate"],
             data_len=bundle["data_len"],
@@ -1293,12 +1302,12 @@ class NpzSpatialAblationPreprocessor(NpzSwapRirPreprocessor):
             wsjmix_scale=bundle["wsjmix_scale"],
             wham_speech_scale=bundle["wham_speech_scale"],
             wham_noise_scale=bundle["wham_noise_scale"],
-            mono=bundle["mono"],
-            s1_base=bundle["s1_base"],
-            s2_base=bundle["s2_base"],
-            s1_temp=bundle["s1_temp"],
-            s2_temp=bundle["s2_temp"],
-            noise_base=bundle["noise_base"],
+            mono=use_mono,
+            s1_base=_to_mono_if_needed(bundle["s1_base"]),
+            s2_base=_to_mono_if_needed(bundle["s2_base"]),
+            s1_temp=_to_mono_if_needed(bundle["s1_temp"]),
+            s2_temp=_to_mono_if_needed(bundle["s2_temp"]),
+            noise_base=_to_mono_if_needed(bundle["noise_base"]),
             rir_npz=rir_npz,
             room_dim=room_dim,
             mic_pos=mic_pos,

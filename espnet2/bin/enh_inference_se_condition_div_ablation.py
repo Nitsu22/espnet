@@ -661,12 +661,26 @@ def inference(
         )
         if not pool_npz_scp.exists():
             raise FileNotFoundError(f"Missing pool npz.scp: {pool_npz_scp}")
+
+        npz_dir_name = npz_dir.name
+        if "mix_clean" in npz_dir_name:
+            ablation_mix_type = "clean"
+        elif "mix_single" in npz_dir_name:
+            ablation_mix_type = "single"
+        else:
+            ablation_mix_type = "both"
+        logging.info(
+            "Using NpzSpatialAblationPreprocessor mix_type=%s for %s",
+            ablation_mix_type,
+            npz_dir_name,
+        )
         npz_ablator = NpzSpatialAblationPreprocessor(
             npz_scp=str(npz_scp),
             pool_npz_scp=str(pool_npz_scp),
             sample_rate=int(fs),
             seed=ablation_seed,
             epoch=ablation_epoch,
+            mix_type=ablation_mix_type,
         )
 
     def _as_numpy_first_batch(value):
