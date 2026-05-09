@@ -1329,11 +1329,11 @@ class NpzSpatialAblationPreprocessor(NpzSwapRirPreprocessor):
 
         Args:
             uid: Anchor utterance id.
-            mode: oracle | swap_rir | rand_sample
+            mode: oracle | swap_rir | swap_audio | rand_sample
         Returns:
             (T, C) float32 waveform.
         """
-        if mode not in ("oracle", "swap_rir", "rand_sample"):
+        if mode not in ("oracle", "swap_rir", "swap_audio", "rand_sample"):
             raise ValueError(f"Unsupported ablation mode: {mode}")
 
         anchor = self._load_bundle_from_map(uid, self.npz_map)
@@ -1349,7 +1349,10 @@ class NpzSpatialAblationPreprocessor(NpzSwapRirPreprocessor):
             return self._synthesize_from_bundle(
                 uid, anchor, data2["rir_path"], data2["room_param_path"]
             )
-        else:
+        if mode == "swap_audio":
             return self._synthesize_from_bundle(
-                uid2, data2, data2["rir_path"], data2["room_param_path"]
+                uid2, data2, anchor["rir_path"], anchor["room_param_path"]
             )
+        return self._synthesize_from_bundle(
+            uid2, data2, data2["rir_path"], data2["room_param_path"]
+        )

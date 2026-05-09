@@ -6,7 +6,7 @@ set -o pipefail
 
 min_or_max=min # "min" or "max". This is to determine how the mixtures are generated in local/data.sh.
 sample_rate=8k
-ablation_mode=swap_rir # oracle | swap_rir | rand_sample | mean
+ablation_mode=swap_rir # oracle | swap_rir | swap_audio | rand_sample | mean
 ablation_npz_root=../se_npz/data
 ablation_seed=1234
 ablation_epoch=0
@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "${ablation_mode}" in
-    oracle|swap_rir|rand_sample|mean) ;;
+    oracle|swap_rir|swap_audio|rand_sample|mean) ;;
     *)
         echo "Invalid --ablation_mode: ${ablation_mode}" >&2
         exit 2 ;;
@@ -95,5 +95,6 @@ CUDA_VISIBLE_DEVICES=7 ./enh_se_condition_ablation.sh \
 
 # bash run_eval_ablation.sh --ablation_mode oracle
 # bash run_eval_ablation.sh --ablation_mode swap_rir
+# bash run_eval_ablation.sh --ablation_mode swap_audio
 # bash run_eval_ablation.sh --ablation_mode rand_sample
 # bash run_eval_ablation.sh --ablation_mode mean

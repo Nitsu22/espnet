@@ -83,7 +83,7 @@ inference_model=valid.loss.ave.pth
 download_model=
 
 # Spatial ablation related (non-intrusive; only used in stage 7 inference)
-spatial_ablation_mode=oracle # oracle | swap_rir | rand_sample | mean
+spatial_ablation_mode=oracle # oracle | swap_rir | swap_audio | rand_sample | mean
 ablation_npz_root=../se_npz/data
 ablation_pool_npz_scp=
 ablation_seed=1234

@@ -611,16 +611,22 @@ def inference(
         **separate_speech_kwargs,
     )
 
-    supported_modes = ("oracle", "swap_rir", "rand_sample", "mean")
+    supported_modes = ("oracle", "swap_rir", "swap_audio", "rand_sample", "mean")
     if spatial_ablation_mode not in supported_modes:
         raise ValueError(
             f"Unsupported --spatial_ablation_mode: {spatial_ablation_mode}. "
             f"Supported: {supported_modes}"
         )
-    if ablation_mean_source_mode not in ("oracle", "swap_rir", "rand_sample"):
+    if ablation_mean_source_mode not in (
+        "oracle",
+        "swap_rir",
+        "swap_audio",
+        "rand_sample",
+    ):
         raise ValueError(
             "Unsupported --ablation_mean_source_mode: "
-            f"{ablation_mean_source_mode}. Supported: ('oracle', 'swap_rir', 'rand_sample')"
+            f"{ablation_mean_source_mode}. Supported: "
+            "('oracle', 'swap_rir', 'swap_audio', 'rand_sample')"
         )
 
     def _build_loader():
@@ -641,14 +647,15 @@ def inference(
         )
 
     npz_ablator = None
-    need_npz = spatial_ablation_mode in ("swap_rir", "rand_sample") or (
+    need_npz = spatial_ablation_mode in ("swap_rir", "swap_audio", "rand_sample") or (
         spatial_ablation_mode == "mean"
-        and ablation_mean_source_mode in ("swap_rir", "rand_sample")
+        and ablation_mean_source_mode in ("swap_rir", "swap_audio", "rand_sample")
     )
     if need_npz:
         if not ablation_npz_data_dir:
             raise ValueError(
-                "--ablation_npz_data_dir is required for swap_rir/rand_sample modes"
+                "--ablation_npz_data_dir is required for "
+                "swap_rir/swap_audio/rand_sample modes"
             )
         npz_dir = Path(ablation_npz_data_dir)
         npz_scp = npz_dir / "npz.scp"
@@ -774,7 +781,7 @@ def inference(
         batch = {k: v for k, v in batch.items() if not k.endswith("_lengths")}
 
         uid = keys[0]
-        if spatial_ablation_mode in ("swap_rir", "rand_sample"):
+        if spatial_ablation_mode in ("swap_rir", "swap_audio", "rand_sample"):
             spatial_mix = _build_spatial_mix(
                 uid=uid,
                 speech_mix_value=batch["speech_mix"],
@@ -928,11 +935,12 @@ def get_parser():
         "--spatial_ablation_mode",
         type=str,
         default="oracle",
-        choices=("oracle", "swap_rir", "rand_sample", "mean"),
+        choices=("oracle", "swap_rir", "swap_audio", "rand_sample", "mean"),
         help=(
             "Ablation mode for spatial conditioning. "
             "oracle: default behavior, "
             "swap_rir: anchor speech/noise with sampled different RIR, "
+            "swap_audio: sampled different speech/noise with anchor RIR, "
             "rand_sample: sampled different sample + its RIR, "
             "mean: fixed mean embedding."
         ),
@@ -971,7 +979,7 @@ def get_parser():
         "--ablation_mean_source_mode",
         type=str,
         default="oracle",
-        choices=("oracle", "swap_rir", "rand_sample"),
+        choices=("oracle", "swap_rir", "swap_audio", "rand_sample"),
         help="Source mode used when computing mean embedding from data.",
     )
 

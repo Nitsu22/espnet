@@ -57,9 +57,9 @@ case "${ablation_mode}" in
         exit 2 ;;
 esac
 
-train_set=tr_mix_clean_reverb_${min_or_max}_${sample_rate}
-valid_set=cv_mix_clean_reverb_${min_or_max}_${sample_rate}
-test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
+train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
+valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
+test_sets="tt_mix_both_reverb_${min_or_max}_${sample_rate}"
 
 mean_emb_opts=()
 if [ -n "${ablation_mean_embedding_path}" ]; then
@@ -74,14 +74,14 @@ CUDA_VISIBLE_DEVICES=0 ./enh_se_condition_ablation.sh \
     --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_aeafusion_trainable_lr3_resnet_256_4gpu_small_clean_film \
+    --enh_config ./conf/tuning/ttrain_enh_tflocoformer_nocashe_se_aeaall_cold_lr3_resnet_256_small_film.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_nocashe_se_aeafusion_cold_lr3_resnet_256_4gpu_small_film \
     --use_dereverb_ref false \
-    --use_noise_ref false \
+    --use_noise_ref true \
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
-    --dumpdir dump_clean \
     --gpu_inference true \
-    --inference_tag "enhanced_ablation_${ablation_mode}_best_small_clean_film" \
+    --inference_tag "enhanced_ablation_${ablation_mode}" \
     --spatial_ablation_mode "${ablation_mode}" \
     --ablation_npz_root "${ablation_npz_root}" \
     --ablation_seed "${ablation_seed}" \
@@ -93,8 +93,8 @@ CUDA_VISIBLE_DEVICES=0 ./enh_se_condition_ablation.sh \
     --stop_stage 8 \
     "${passthrough_opts[@]}"
 
-# bash run_eval_ablation_small.sh --ablation_mode oracle
-# bash run_eval_ablation_small.sh --ablation_mode swap_rir
-# bash run_eval_ablation_small.sh --ablation_mode swap_audio
-# bash run_eval_ablation_small.sh --ablation_mode rand_sample
-# bash run_eval_ablation_small.sh --ablation_mode mean
+# bash run_eval_ablation_small_cold_film.sh --ablation_mode oracle
+# bash run_eval_ablation_small_cold_film.sh --ablation_mode swap_rir
+# bash run_eval_ablation_small_cold_film.sh --ablation_mode swap_audio
+# bash run_eval_ablation_small_cold_film.sh --ablation_mode rand_sample
+# bash run_eval_ablation_small_cold_film.sh --ablation_mode mean
