@@ -414,7 +414,8 @@ Required checks:
 - Decide the first fixed `rir_length` in 8 kHz samples.
 - Validate 16 kHz -> 8 kHz RIR downsampling once before training.
 
-No model code should be written before these are decided.
+Implementation has started. Do not start a fair-comparison training run until the
+final `rir_length` is confirmed.
 
 ### Phase 1: Data plumbing
 
@@ -427,6 +428,14 @@ Expected output:
 - `rir_npz.scp`
 - `room_param_npz.scp`
 - successful key matching validation
+
+Implemented note:
+
+- `local/prepare_rir_data.sh` supports separate audio and RIR-NPZ sources.
+- The current runnable path uses speech wav scps from `egs2/whamr/se2_data/data`
+  and `rir_npz.scp` / `room_param_npz.scp` from `egs2/whamr/se_npz/data`.
+- This split is necessary because the inspected `se_npz` speech scps point to
+  NPZ paths and the corresponding non-random speech wav directories are empty.
 
 ### Phase 2: Minimal task
 
@@ -493,3 +502,31 @@ Resolved decisions:
 - RIR NPZ axis order is handled as `[source, mic, time]` in the RIR task.
 
 Until `rir_length` is resolved, implementation can proceed structurally, but the first training run should not be started.
+
+## Implementation status
+
+Implemented files:
+
+- `espnet2/train/preprocessor_rir.py`
+- `espnet2/rir/espnet_model.py`
+- `espnet2/rir/predictor/abs_predictor.py`
+- `espnet2/rir/predictor/tflocoformer_predictor.py`
+- `espnet2/rir/loss/criterions/time_domain.py`
+- `espnet2/tasks/rir.py`
+- `espnet2/bin/rir_train.py`
+- `egs2/whamr/rir/local/prepare_rir_data.sh`
+- `egs2/whamr/rir/rir.sh`
+- `egs2/whamr/rir/run_rir.sh`
+- `egs2/whamr/rir/conf/tuning/train_rir_tflocoformer.yaml`
+
+Verification completed:
+
+- `python -m espnet2.bin.rir_train --print_config` passes with the RIR config.
+- `RIRPreprocessor` loads existing 16 kHz `rir_npz.scp` targets and produces 8 kHz fixed-length `rir_ref`.
+- The TF-Locoformer RIR model forward pass works on a small dummy batch.
+- `local/prepare_rir_data.sh` was verified on `/tmp` output and produced key-matched RIR data dirs.
+- `rir_train --collect_stats true` passed on a 2-utterance `/tmp` subset and produced `speech_mix_shape` and `rir_ref_shape`.
+
+Compatibility change:
+
+- `espnet2/enh/separator/tflocoformer_separator.py` was minimally changed from `.view(...)` to `.reshape(...)` at the non-contiguous tensor reshape points used by the base TF-Locoformer. This is required for the RIR predictor forward pass and preserves behavior for contiguous tensors.

@@ -453,9 +453,9 @@ class LocoformerBlock(nn.Module):
         # Self-attention
         input_ = output
         output = self.attn_norm(output)
-        output = output.view([B * T, F, C])
+        output = output.reshape([B * T, F, C])
         output = self.attn(output)
-        output = output.view([B, T, F, C]) + input_
+        output = output.reshape([B, T, F, C]) + input_
 
         # FFN after self-attention
         input_ = output
@@ -807,7 +807,7 @@ class RMSGroupNorm(nn.Module):
         output = input / (rms + self.eps)
 
         # reshape and affine transformation
-        output = output.view(others + (-1,))
+        output = output.reshape(others + (-1,))
         output = output * self.gamma
         if self.bias:
             output = output + self.beta
