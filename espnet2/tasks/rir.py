@@ -5,6 +5,10 @@ import numpy as np
 import torch
 from typeguard import typechecked
 
+from espnet2.enh.decoder.abs_decoder import AbsDecoder
+from espnet2.enh.decoder.conv_decoder import ConvDecoder
+from espnet2.enh.decoder.null_decoder import NullDecoder
+from espnet2.enh.decoder.stft_decoder import STFTDecoder
 from espnet2.enh.encoder.abs_encoder import AbsEncoder
 from espnet2.enh.encoder.conv_encoder import ConvEncoder
 from espnet2.enh.encoder.null_encoder import NullEncoder
@@ -18,15 +22,15 @@ from espnet2.enh.loss.criterions.time_domain import (
 from espnet2.enh.loss.wrappers.abs_wrapper import AbsLossWrapper
 from espnet2.enh.loss.wrappers.fixed_order import FixedOrderSolver
 from espnet2.enh.loss.wrappers.pit_solver import PITSolver
+from espnet2.enh.separator.abs_separator import AbsSeparator
+from espnet2.enh.separator.fla_tflocoformer_separator import (
+    TFLocoformerSeparator as FLATFLocoformerSeparator,
+)
+from espnet2.enh.separator.tflocoformer_separator import TFLocoformerSeparator
 from espnet2.rir.espnet_model import ESPnetRIRModel
 from espnet2.rir.loss.criterions.time_domain import (
     RIRCorrelationLoss,
     RIRMultiTaskLoss,
-)
-from espnet2.rir.predictor.abs_predictor import AbsRIRPredictor
-from espnet2.rir.predictor.tflocoformer_predictor import (
-    FLATFLocoformerRIRPredictor,
-    TFLocoformerRIRPredictor,
 )
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
@@ -47,14 +51,21 @@ encoder_choices = ClassChoices(
     default="stft",
 )
 
-predictor_choices = ClassChoices(
-    name="predictor",
+separator_choices = ClassChoices(
+    name="separator",
     classes=dict(
-        tflocoformer=TFLocoformerRIRPredictor,
-        fla_tflocoformer=FLATFLocoformerRIRPredictor,
+        tflocoformer=TFLocoformerSeparator,
+        fla_tflocoformer=FLATFLocoformerSeparator,
     ),
-    type_check=AbsRIRPredictor,
+    type_check=AbsSeparator,
     default="tflocoformer",
+)
+
+decoder_choices = ClassChoices(
+    name="decoder",
+    classes=dict(stft=STFTDecoder, conv=ConvDecoder, same=NullDecoder),
+    type_check=AbsDecoder,
+    default="stft",
 )
 
 loss_wrapper_choices = ClassChoices(
@@ -90,7 +101,8 @@ class RIRTask(AbsTask):
 
     class_choices_list = [
         encoder_choices,
-        predictor_choices,
+        separator_choices,
+        decoder_choices,
         preprocessor_choices,
     ]
 
@@ -208,10 +220,10 @@ class RIRTask(AbsTask):
     @typechecked
     def build_model(cls, args: argparse.Namespace) -> ESPnetRIRModel:
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
-        predictor = predictor_choices.get_class(args.predictor)(
-            encoder.output_dim,
-            **args.predictor_conf,
+        separator = separator_choices.get_class(args.separator)(
+            encoder.output_dim, **args.separator_conf
         )
+        decoder = decoder_choices.get_class(args.decoder)(**args.decoder_conf)
 
         loss_wrappers = []
         for ctr in args.criterions:
@@ -225,7 +237,8 @@ class RIRTask(AbsTask):
 
         model = ESPnetRIRModel(
             encoder=encoder,
-            predictor=predictor,
+            separator=separator,
+            decoder=decoder,
             loss_wrappers=loss_wrappers,
             **args.model_conf,
         )

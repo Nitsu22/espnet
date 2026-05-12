@@ -9,9 +9,7 @@ preprocessor: rir
 preprocessor_conf:
     speech_sample_rate: 8000
     rir_sample_rate: 8000
-    # Provisional 1 second target at 8 kHz. Change this before the first
-    # fair-comparison training run if a different RIR length is selected.
-    rir_length: &rir_length 8000
+    rir_length: &rir_length 32000
     rir_target: reverberant
     rir_source_index: 0
     rir_mic_index: 0
@@ -47,16 +45,17 @@ scheduler_conf:
     factor: 0.5
     patience: 3
 
-encoder: stft
+encoder: &encoder stft
 encoder_conf:
     n_fft: &n_fft 256
     hop_length: &hop_length 64
-
-predictor: tflocoformer
-predictor_conf:
-    rir_length: *rir_length
-    num_sources: 1
-    num_mics: 1
+decoder: *encoder
+decoder_conf:
+    n_fft: *n_fft
+    hop_length: *hop_length
+separator: tflocoformer
+separator_conf:
+    num_spk: 1
     n_layers: 4
     emb_dim: 96
     norm_type: rmsgroupnorm
@@ -76,12 +75,13 @@ predictor_conf:
     conv1d_shift: 1
     dropout: 0.0
     eps: 1.0e-5
-    pooling: mean
-    hidden_dim: 256
 
 criterions:
-  - name: mrstft
+  - name: rir_multitask
     conf:
+        mrstft_weight: 1.0
+        l1_weight: 0.1
+        corr_weight: 0.1
         window_sz:
             - 128
             - 256
@@ -96,13 +96,3 @@ criterions:
     wrapper: fixed_order
     wrapper_conf:
         weight: 1.0
-  - name: l1
-    conf: {}
-    wrapper: fixed_order
-    wrapper_conf:
-        weight: 0.1
-  - name: corr
-    conf: {}
-    wrapper: fixed_order
-    wrapper_conf:
-        weight: 0.1

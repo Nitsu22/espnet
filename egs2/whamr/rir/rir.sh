@@ -32,7 +32,7 @@ local_data_opts=
 min_wav_duration=0.1
 max_wav_duration=60
 speech_fold_length=32000
-rir_fold_length=8000
+rir_fold_length=32000
 
 . utils/parse_options.sh
 . ./path.sh
