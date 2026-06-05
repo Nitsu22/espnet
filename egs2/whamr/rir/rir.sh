@@ -17,6 +17,7 @@ rir_config=conf/tuning/train_rir_tflocoformer.yaml
 rir_args=
 rir_tag=
 rir_exp=
+rir_model_type=
 
 fs=8k
 ngpu=1
@@ -45,7 +46,11 @@ python=${python:-python3}
 [ -z "${test_sets}" ] && { echo "--test_sets is required" >&2; exit 2; }
 
 data_feats=${dumpdir}/raw
-rir_stats_dir="${expdir}/rir_stats_${fs}"
+rir_stats_tag="${fs}"
+if [ -n "${rir_model_type}" ] && [ "${rir_model_type}" != direct ]; then
+  rir_stats_tag="${fs}_${rir_model_type}"
+fi
+rir_stats_dir="${expdir}/rir_stats_${rir_stats_tag}"
 
 if [ -z "${rir_tag}" ]; then
   if [ -n "${rir_config}" ]; then
@@ -83,12 +88,29 @@ if ! "${skip_data_prep}"; then
         "${data_feats}${suf}/${dset}/logs/wav" \
         "${data_feats}${suf}/${dset}/data/wav"
 
+      utt_extra_files="rir_npz.scp room_param_npz.scp"
+      if [ "${rir_model_type}" = rec_rir ]; then
+        for name in speech_direct speech_reverb; do
+          if [ ! -f "data/${dset}/${name}.scp" ]; then
+            echo "Missing data/${dset}/${name}.scp for --rir_model_type rec_rir" >&2
+            exit 1
+          fi
+          scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
+            --out-filename "${name}.scp" \
+            --audio-format "${audio_format}" --fs "${fs}" \
+            "data/${dset}/${name}.scp" "${data_feats}${suf}/${dset}" \
+            "${data_feats}${suf}/${dset}/logs/${name}" \
+            "${data_feats}${suf}/${dset}/data/${name}"
+          utt_extra_files="${utt_extra_files} ${name}.scp"
+        done
+      fi
+
       cp "data/${dset}/rir_npz.scp" "${data_feats}${suf}/${dset}/rir_npz.scp"
       cp "data/${dset}/room_param_npz.scp" \
         "${data_feats}${suf}/${dset}/room_param_npz.scp"
       echo "raw" > "${data_feats}${suf}/${dset}/feats_type"
       utils/fix_data_dir.sh \
-        --utt_extra_files "rir_npz.scp room_param_npz.scp" \
+        --utt_extra_files "${utt_extra_files}" \
         "${data_feats}${suf}/${dset}"
     done
   fi
@@ -101,6 +123,14 @@ if ! "${skip_data_prep}"; then
       cp "${data_feats}/org/${dset}/room_param_npz.scp" \
         "${data_feats}/${dset}/room_param_npz.scp"
       cp "${data_feats}/org/${dset}/feats_type" "${data_feats}/${dset}/feats_type"
+      utt_extra_files="rir_npz.scp room_param_npz.scp"
+      if [ "${rir_model_type}" = rec_rir ]; then
+        for name in speech_direct speech_reverb; do
+          cp "${data_feats}/org/${dset}/${name}.scp" \
+            "${data_feats}/${dset}/${name}.scp"
+          utt_extra_files="${utt_extra_files} ${name}.scp"
+        done
+      fi
 
       fs_int=$(python3 -c "import humanfriendly as h; print(h.parse_size('${fs}'))")
       min_length=$(python3 -c "print(int(${min_wav_duration} * ${fs_int}))")
@@ -111,12 +141,12 @@ if ! "${skip_data_prep}"; then
         "${data_feats}/org/${dset}/utt2num_samples" \
         > "${data_feats}/${dset}/utt2num_samples"
 
-      for scp in wav.scp rir_npz.scp room_param_npz.scp; do
+      for scp in wav.scp ${utt_extra_files}; do
         utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples" \
           "${data_feats}/org/${dset}/${scp}" > "${data_feats}/${dset}/${scp}"
       done
       utils/fix_data_dir.sh \
-        --utt_extra_files "rir_npz.scp room_param_npz.scp" \
+        --utt_extra_files "${utt_extra_files}" \
         "${data_feats}/${dset}"
     done
   fi
@@ -143,13 +173,21 @@ if ! "${skip_train}"; then
 
     opts=
     [ -n "${rir_config}" ] && opts+="--config ${rir_config} "
+    [ -n "${rir_model_type}" ] && opts+="--rir_model_type ${rir_model_type} "
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/wav.scp,speech_mix,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_npz.scp,rir_path,text "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/wav.scp,speech_mix,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_npz.scp,rir_path,text "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
+    if [ "${rir_model_type}" = rec_rir ]; then
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct.scp,speech_direct,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb.scp,speech_reverb,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct.scp,speech_direct,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb.scp,speech_reverb,sound "
+    else
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_npz.scp,rir_path,text "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_npz.scp,rir_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
+    fi
 
     mkdir -p "${rir_stats_dir}"
     ${train_cmd} JOB=1:"${nj_stats}" "${logdir}"/stats.JOB.log \
@@ -175,19 +213,35 @@ if ! "${skip_train}"; then
     valid_dir="${data_feats}/${valid_set}"
     opts=
     [ -n "${rir_config}" ] && opts+="--config ${rir_config} "
+    [ -n "${rir_model_type}" ] && opts+="--rir_model_type ${rir_model_type} "
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/wav.scp,speech_mix,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_npz.scp,rir_path,text "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/wav.scp,speech_mix,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_npz.scp,rir_path,text "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
-
-    train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape "
-    train_shape_param+="--train_shape_file ${rir_stats_dir}/train/rir_ref_shape "
-    valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
-    valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/rir_ref_shape "
-    fold_length_param="--fold_length ${speech_fold_length} --fold_length ${rir_fold_length} "
+    if [ "${rir_model_type}" = rec_rir ]; then
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct.scp,speech_direct,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb.scp,speech_reverb,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct.scp,speech_direct,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb.scp,speech_reverb,sound "
+      train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_direct_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_reverb_shape "
+      valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_direct_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_reverb_shape "
+      fold_length_param="--fold_length ${speech_fold_length} "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+    else
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_npz.scp,rir_path,text "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_npz.scp,rir_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
+      train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/rir_ref_shape "
+      valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/rir_ref_shape "
+      fold_length_param="--fold_length ${speech_fold_length} --fold_length ${rir_fold_length} "
+    fi
 
     mkdir -p "${rir_exp}"
     ${python} -m espnet2.bin.launch \

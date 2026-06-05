@@ -1,0 +1,74 @@
+init: null
+max_epoch: 100
+use_amp: true
+batch_type: folded
+batch_size: 4
+num_workers: 4
+
+sample_rate: 8000
+force_single_channel: true
+rir_model_type: rec_rir
+preprocessor: rec_rir
+preprocessor_conf:
+    speech_segment: 32000
+    force_single_channel: true
+
+model_conf:
+    extract_feats_in_collect_stats: false
+    sr: 8000
+    n_fft: 256
+    win_len: 256
+    hop_len: 128
+    win_type: sqrthann
+    dim_input: 2
+    dim_output_spch: 2
+    dim_output_CTF: 120
+    dim_hidden: 96
+    dim_squeeze: 8
+    num_freqs: 129
+    num_layers_spch: 6
+    num_layers_noise: 2
+    num_layers_CTF: 6
+    encoder_kernel_size: 5
+    dropout:
+        - 0.0
+        - 0.0
+        - 0.0
+    kernel_size:
+        - 5
+        - 3
+    conv_groups:
+        - 8
+        - 8
+    norms:
+        - LN
+        - LN
+        - LN
+        - LN
+        - LN
+        - LN
+    full_share: 0
+    attention: mamba(16,4)
+    loss_type: RIMag
+    loss_w_cln: 1.0
+    loss_w_rvb: 1.0
+    loss_w_rec: 1.0
+    normalize_by_mix: true
+    pim_sweep_duration: 8.192
+
+optim: adamw
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 0.0
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+scheduler: null
+

@@ -34,10 +34,12 @@ from espnet2.rir.loss.criterions.time_domain import (
 )
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.torch_utils.initialize import initialize
+from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import AbsPreprocessor
 from espnet2.train.preprocessor_rir import RIRPreprocessor
+from espnet2.train.preprocessor_rec_rir import RecRIRPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -90,7 +92,7 @@ criterion_choices = ClassChoices(
 
 preprocessor_choices = ClassChoices(
     name="preprocessor",
-    classes=dict(rir=RIRPreprocessor),
+    classes=dict(rir=RIRPreprocessor, rec_rir=RecRIRPreprocessor),
     type_check=AbsPreprocessor,
     default="rir",
 )
@@ -131,6 +133,14 @@ class RIRTask(AbsTask):
             action=NestedDictAction,
             default=get_default_kwargs(ESPnetRIRModel),
             help="The keyword arguments for model class.",
+        )
+        group.add_argument(
+            "--rir_model_type",
+            type=str,
+            default="direct",
+            choices=["direct", "rec_rir"],
+            help="RIR model family. 'direct' predicts waveform RIR directly; "
+            "'rec_rir' uses the official Rec-RIR CTF model.",
         )
         group.add_argument(
             "--criterions",
@@ -208,17 +218,34 @@ class RIRTask(AbsTask):
     ) -> Tuple[str, ...]:
         if inference:
             return ("speech_mix",)
-        return ("speech_mix", "rir_path", "room_param_path")
+        return ("speech_mix",)
 
     @classmethod
     def optional_data_names(
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
-        return ("category", "fs")
+        return (
+            "rir_path",
+            "room_param_path",
+            "speech_direct",
+            "speech_reverb",
+            "category",
+            "fs",
+        )
 
     @classmethod
     @typechecked
-    def build_model(cls, args: argparse.Namespace) -> ESPnetRIRModel:
+    def build_model(cls, args: argparse.Namespace) -> AbsESPnetModel:
+        if getattr(args, "rir_model_type", "direct") == "rec_rir":
+            from espnet2.rir.rec_rir.espnet_model import ESPnetRecRIRModel
+
+            model_conf = dict(args.model_conf)
+            model_conf.pop("normalize_variance", None)
+            model = ESPnetRecRIRModel(**model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
         separator = separator_choices.get_class(args.separator)(
             encoder.output_dim, **args.separator_conf
