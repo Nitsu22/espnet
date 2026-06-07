@@ -12,11 +12,12 @@ log() {
 }
 
 help_message=$(cat << EOF
-Usage: $0 [--mono <True/False>] [--min_or_max <min/max>] [--sample_rate <8k/16k>]
+Usage: $0 [--mono <True/False>] [--min_or_max <min/max>] [--sample_rate <8k/16k>] [--sample_rates "<8k 16k>"]
   optional argument:
     [--mono]: True (Default), False
     [--min_or_max]: min (Default), max
     [--sample_rate]: 8k (Default), 16k
+    [--sample_rates]: "8k 16k" (Default)
 EOF
 )
 
@@ -29,13 +30,14 @@ wham_noise=/net/midgar/work/nitsu/data/wsj/wham_noise
 whamr_wav=$PWD/data/whamr/2speakers
 whamr_scripts=$PWD/data/whamr
 whamr_script_dir=$PWD/whamr_scripts
-wham_create_script=${whamr_script_dir}/create_wham_from_scratch.py
+wham_create_script=${whamr_script_dir}/create_wham_from_scratch_rir.py
 
 other_text=data/local/other_text/text
 nlsyms=data/nlsyms.txt
 mono=False
 min_or_max=min
 sample_rate=8k
+sample_rates="8k 16k"
 
 
 . utils/parse_options.sh
@@ -58,20 +60,23 @@ fi
 ### This part is for WHAMR!
 ### Download mixture scripts and create mixtures for 2 speakers
 local/whamr_create_mixture.sh --mono ${mono} --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+    --sample-rates "${sample_rates}" \
     --wham-create-script ${wham_create_script} \
     ${wham_noise:+--wham_noise $wham_noise} \
     ${whamr_scripts} ${WSJ0} ${wsj_full_wav} \
     ${whamr_wav} || exit 1;
 
-# The following datasets will be created:
-# {tr,cv,tt}_mix_{both,clean,single}_{anechoic,reverb}_${min_or_max}_${sample_rate}
+# The following datasets will be created for each sample rate in ${sample_rates}:
+# {tr,cv,tt}_mix_{both,clean,single}_{anechoic,reverb}_${min_or_max}_{8k,16k}
 #
 # Note:
 #   - `both`: a mixture of speech1, speech2 and noise (for speech separation)
 #   - `clean`: a mixture of speech1 and speech2 (for speech separation)
 #   - `single`: a mixture of speech1 and noise (for speech enhancement)
-local/whamr_data_prep.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
-    ${whamr_script_dir} ${whamr_wav} ${wsj_full_wav} || exit 1;
+for sr in ${sample_rates}; do
+    local/whamr_data_prep.sh --min-or-max ${min_or_max} --sample-rate ${sr} \
+        ${whamr_script_dir} ${whamr_wav} ${wsj_full_wav} || exit 1;
+done
 
 
 ### Also need wsj corpus to prepare language information

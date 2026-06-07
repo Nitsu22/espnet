@@ -13,9 +13,7 @@ num_workers: 4
 # preprocessor
 preprocessor: enh_rir
 preprocessor_conf:
-    rir_path_name: rir_path
     rir_ref_name: rir_ref
-    rir_target: reverberant
     rir_mic_index: 0
 num_spk: &num_spk 2
 iterator_type: sequence # not to discard short samples

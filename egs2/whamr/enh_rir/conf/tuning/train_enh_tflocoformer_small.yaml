@@ -56,7 +56,7 @@ decoder: *encoder
 decoder_conf:
     n_fft: *n_fft
     hop_length: *hop_length
-separator: tflocoformer
+separator: tflocoformer_nocashe
 separator_conf:
     num_spk: *num_spk
     n_layers: 4

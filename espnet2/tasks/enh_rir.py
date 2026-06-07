@@ -517,10 +517,10 @@ class EnhancementRIRTask(AbsTask):
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
         if not inference:
-            retval = ("speech_ref1", "rir_path")
+            retval = ("speech_ref1", "rir_ref")
         else:
             # Inference mode
-            retval = ("speech_mix", "rir_path")
+            retval = ("speech_mix", "rir_ref")
         return retval
 
     @classmethod

@@ -41,7 +41,6 @@ python=python3          # Specify python to execute espnet commands
 
 # Data preparation related
 local_data_opts= # The options given to local/data.sh.
-rir_data_dir=../se_npz/data # Directory containing WHAMR RIR npz scp files.
 
 # Speed perturbation related
 speed_perturb_factors=  # perturbation factors, e.g. "0.9 1.0 1.1" (separated by space).
@@ -73,6 +72,7 @@ use_dereverb_ref=false
 use_noise_ref=false
 variable_num_refs=false # Whether to use variable numbers of references in spk1.scp, dereverb1.scp, enroll_spk1.scp, etc.
 extra_wav_list= # Extra list of scp files for wav formatting
+rir_ref_num=2  # Number of RIR reference files: rir1.scp, rir2.scp
 
 # Pretrained model related
 # The number of --init_param must be same.
@@ -132,7 +132,6 @@ Options:
 
     # Data preparation related
     --local_data_opts # The options given to local/data.sh (default="${local_data_opts}").
-    --rir_data_dir    # Directory containing rir_npz.scp for train/valid (default="${rir_data_dir}").
 
     # Speed perturbation related
     --speed_perturb_factors   # speed perturbation factors, e.g. "0.9 1.0 1.1" (separated by space, default="${speed_perturb_factors}").
@@ -166,6 +165,7 @@ Options:
                           for training a denoising model (default="${use_noise_ref}")
     --variable_num_refs # Whether or not to use variable numbers of references in spk1.scp, dereverb1.scp, enroll_spk1.scp, etc. If True, --ref_num and --dereverb_ref_num must be 1. (default="${variable_num_refs}")
     --extra_wav_list    # Extra list of scp files for wav formatting (default="${extra_wav_list}")
+    --rir_ref_num       # Number of RIR reference files (default="${rir_ref_num}")
 
     # Pretrained model related
     --init_param    # pretrained model path and module name (default="${init_param}")
@@ -228,6 +228,41 @@ utt_extra_files="utt2category"
 
 data_feats=${dumpdir}/raw
 
+make_rir_scp() {
+    local dir=$1
+    local rir_scp=${dir}/rir.scp
+
+    if [ "${rir_ref_num}" -ne 2 ]; then
+        log "enh_rir currently supports --rir_ref_num 2 only, but got ${rir_ref_num}"
+        exit 1
+    fi
+    if [ ! -f "${dir}/rir1.scp" ] || [ ! -f "${dir}/rir2.scp" ]; then
+        log "Error: ${dir}/rir1.scp and ${dir}/rir2.scp are required"
+        exit 1
+    fi
+
+    awk '
+        NR == FNR {
+            rir1[$1] = $2
+            order[++n] = $1
+            next
+        }
+        {
+            rir2[$1] = $2
+        }
+        END {
+            for (i = 1; i <= n; i++) {
+                key = order[i]
+                if (!(key in rir2)) {
+                    print "Error: missing key in rir2.scp: " key > "/dev/stderr"
+                    exit 1
+                }
+                print key, rir1[key], rir2[key]
+            }
+        }
+    ' "${dir}/rir1.scp" "${dir}/rir2.scp" > "${rir_scp}"
+}
+
 if $is_tse_task; then
     if $use_noise_ref; then
         log "--use_noise_ref must be false for the target speaker extraction (TSE) task"
@@ -247,15 +282,9 @@ if $is_tse_task; then
     exit 1
 fi
 inf_num=${inf_num:=${ref_num}}
-
-if ! "${skip_train}"; then
-    [ -f "${rir_data_dir}/${train_set}/rir_npz.scp" ] || { log "Error: ${rir_data_dir}/${train_set}/rir_npz.scp is required"; exit 2; };
-    [ -f "${rir_data_dir}/${valid_set}/rir_npz.scp" ] || { log "Error: ${rir_data_dir}/${valid_set}/rir_npz.scp is required"; exit 2; };
-fi
-if ! "${skip_eval}" && [ "${stage}" -le 7 ] && [ "${stop_stage}" -ge 7 ]; then
-    for dset in "${valid_set}" ${test_sets}; do
-        [ -f "${rir_data_dir}/${dset}/rir_npz.scp" ] || { log "Error: ${rir_data_dir}/${dset}/rir_npz.scp is required for stage 7"; exit 2; };
-    done
+if [ -n "${speed_perturb_factors}" ]; then
+    log "enh_rir with rir1.scp/rir2.scp does not support speed perturbation."
+    exit 1
 fi
 
 # Set tag for naming of model directory
@@ -338,7 +367,7 @@ if ! "${skip_data_prep}"; then
     if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
         log "Stage 1: Data preparation for data/${train_set}, data/${valid_set}, etc."
         # [Task dependent] Need to create data.sh for new corpus
-        local/data.sh ${local_data_opts}
+        local/data_rir.sh ${local_data_opts}
     fi
 
     if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
@@ -407,6 +436,7 @@ if ! "${skip_data_prep}"; then
                     _spk_list+="enroll_spk${i} "
                 fi
             done
+            _spk_list+=$(for n in $(seq "${rir_ref_num}"); do echo -n "rir${n} "; done)
             if $use_noise_ref && [ -n "${_suf}" ]; then
                 # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
                 _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
@@ -435,9 +465,22 @@ if ! "${skip_data_prep}"; then
                         continue
                     fi
                 fi
+                if [[ "${spk}" == rir* ]]; then
+                    if [ -e "data/${dset}/segments" ]; then
+                        log "enh_rir does not support segmented RIR scp files: data/${dset}/${spk}.scp"
+                        exit 1
+                    fi
+                    utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
+                    continue
+                fi
+                _utt2num_samples_opt=
+                if [ "${spk}" != "wav" ]; then
+                    _utt2num_samples_opt="--write_utt2num_samples false"
+                fi
                 # shellcheck disable=SC2086
                 scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
                     --out-filename "${spk}.scp" \
+                    ${_utt2num_samples_opt} \
                     --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
                     "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
                     "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
@@ -449,11 +492,13 @@ if ! "${skip_data_prep}"; then
                     # shellcheck disable=SC2086
                     scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
                         --out-filename "$f" \
+                        --write_utt2num_samples false \
                         --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
                         "data/${dset}/$f" "${data_feats}/${dset}" \
                         "${data_feats}/${dset}/logs/${f%.*}" "${data_feats}/${dset}/data/${f%.*}"
                 fi
             done
+            make_rir_scp "${data_feats}${_suf}/${dset}"
 
             echo "${feats_type}" > "${data_feats}${_suf}/${dset}/feats_type"
 
@@ -481,6 +526,9 @@ if ! "${skip_data_prep}"; then
                     _scp_list+="enroll_spk${i}.scp "
                 fi
             done
+            _spk_list+=$(for n in $(seq "${rir_ref_num}"); do echo -n "rir${n} "; done)
+            _scp_list+=$(for n in $(seq "${rir_ref_num}"); do echo -n "rir${n}.scp "; done)
+            _scp_list+="rir.scp "
             if $use_noise_ref; then
                 # references for denoising ("noise1 noise2 ... niose${noise_type_num} ")
                 _spk_list+=$(for n in $(seq $noise_type_num); do echo -n "noise$n "; done)
@@ -518,6 +566,7 @@ if ! "${skip_data_prep}"; then
                     utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
                     >"${data_feats}/${dset}/${spk}.scp"
             done
+            make_rir_scp "${data_feats}/${dset}"
 
             # fix_data_dir.sh leaves only utts which exist in all files
             utils/fix_data_dir.sh --utt_extra_files "${_scp_list} ${utt_extra_files}" "${data_feats}/${dset}"
@@ -558,6 +607,7 @@ if ! "${skip_train}"; then
                 _type_ref="sound"
             fi
         fi
+        _type_rir_ref="variable_columns_sound"
 
         # 1. Split the key file
         _logdir="${enh_stats_dir}/logdir"
@@ -591,9 +641,9 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${rir_data_dir}/${train_set}/rir_npz.scp,rir_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${rir_data_dir}/${valid_set}/rir_npz.scp,rir_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
         for spk in $(seq "${ref_num}"); do
             _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
             _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
@@ -702,6 +752,7 @@ if ! "${skip_train}"; then
                 _type_ref="sound"
             fi
         fi
+        _type_rir_ref="variable_columns_sound"
         _fold_length="$((enh_speech_fold_length * 100))"
 
         # prepare train and valid data parameters
@@ -710,10 +761,10 @@ if ! "${skip_train}"; then
         _fold_length_param="--fold_length ${_fold_length} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
         _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
-        _train_data_param+="--train_data_path_and_name_and_type ${rir_data_dir}/${train_set}/rir_npz.scp,rir_path,text "
+        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
         _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/rir_ref_shape "
         _fold_length_param+="--fold_length ${_fold_length} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${rir_data_dir}/${valid_set}/rir_npz.scp,rir_path,text "
+        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
         _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/rir_ref_shape "
 
         for spk in $(seq "${ref_num}"); do
@@ -844,10 +895,11 @@ if ! "${skip_eval}"; then
                 # "sound" supports "wav", "flac", etc.
                 _type=sound
             fi
+            _type_rir_ref="variable_columns_sound"
 
             # for target-speaker extraction
             _data_param="--data_path_and_name_and_type ${_data}/${_scp},speech_mix,${_type} "
-            _data_param+="--data_path_and_name_and_type ${rir_data_dir}/${dset}/rir_npz.scp,rir_path,text "
+            _data_param+="--data_path_and_name_and_type ${_data}/rir.scp,rir_ref,${_type_rir_ref} "
             if $is_tse_task; then
                 for spk in $(seq "${ref_num}"); do
                     _data_param+="--data_path_and_name_and_type ${_data}/enroll_spk${spk}.scp,enroll_ref${spk},text "

@@ -39,7 +39,7 @@ wsj_full_wav=$3
 
 # check if the wav dirs exist.
 for x in tr cv tt; do
-  for ddir in mix_both_anechoic mix_clean_anechoic mix_single_anechoic noise s1_reverb s2_reverb mix_both_reverb mix_clean_reverb mix_single_reverb s1_anechoic s2_anechoic; do
+  for ddir in mix_both_anechoic mix_clean_anechoic mix_single_anechoic noise s1_reverb s2_reverb mix_both_reverb mix_clean_reverb mix_single_reverb s1_anechoic s2_anechoic rir1_reverb rir2_reverb; do
     f=${whamr_wav_dir}/wav${sample_rate}/${min_or_max}/${x}/${ddir}
     if [ ! -d $f ]; then
       echo "Error: $f is not a directory."
@@ -93,6 +93,15 @@ for x in tr cv tt; do
           spk2_wav_dir=${rootdir}/s2_${cond}
           sed -e "s#${mixwav_dir}#${spk2_wav_dir}#g" ${data}/${ddir}/wav.scp \
             > ${data}/${ddir}/spk2_reverb.scp
+        fi
+
+        rir1_wav_dir=${rootdir}/rir1_${cond}
+        sed -e "s#${mixwav_dir}#${rir1_wav_dir}#g" ${data}/${ddir}/wav.scp \
+          > ${data}/${ddir}/rir1.scp
+        if [[ "$mixtype" != "single" ]]; then
+          rir2_wav_dir=${rootdir}/rir2_${cond}
+          sed -e "s#${mixwav_dir}#${rir2_wav_dir}#g" ${data}/${ddir}/wav.scp \
+            > ${data}/${ddir}/rir2.scp
         fi
       else
         # original code
