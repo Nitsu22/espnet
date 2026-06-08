@@ -10,8 +10,8 @@ cd "${script_dir}"
 
 min_or_max=min # "min" or "max". This is to determine how the mixtures are generated in local/data.sh.
 sample_rate=8k
-stage=6
-stop_stage=8
+stage=3
+stop_stage=5
 dumpdir=dump_rir_clean
 expdir=exp
 

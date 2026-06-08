@@ -465,23 +465,24 @@ if ! "${skip_data_prep}"; then
                         continue
                     fi
                 fi
-                if [[ "${spk}" == rir* ]]; then
-                    if [ -e "data/${dset}/segments" ]; then
-                        log "enh_rir does not support segmented RIR scp files: data/${dset}/${spk}.scp"
-                        exit 1
-                    fi
-                    utils/filter_scp.pl "${data_feats}${_suf}/${dset}/wav.scp" "data/${dset}/${spk}.scp" > "${data_feats}${_suf}/${dset}/${spk}.scp"
-                    continue
+                if [[ "${spk}" == rir* ]] && [ -e "data/${dset}/segments" ]; then
+                    log "enh_rir does not support segmented RIR scp files: data/${dset}/${spk}.scp"
+                    exit 1
                 fi
                 _utt2num_samples_opt=
                 if [ "${spk}" != "wav" ]; then
                     _utt2num_samples_opt="--write_utt2num_samples false"
                 fi
+                _audio_format="${audio_format}"
+                if [[ "${spk}" == rir* ]] && [[ "${audio_format}" == *ark* ]]; then
+                    # RIR refs are consumed as variable_columns_sound, not kaldi_ark.
+                    _audio_format=wav
+                fi
                 # shellcheck disable=SC2086
                 scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
                     --out-filename "${spk}.scp" \
                     ${_utt2num_samples_opt} \
-                    --audio-format "${audio_format}" --fs "${fs}" ${_opts} \
+                    --audio-format "${_audio_format}" --fs "${fs}" ${_opts} \
                     "data/${dset}/${spk}.scp" "${data_feats}${_suf}/${dset}" \
                     "${data_feats}${_suf}/${dset}/logs/${spk}" "${data_feats}${_suf}/${dset}/data/${spk}"
 
