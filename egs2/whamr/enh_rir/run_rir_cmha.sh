@@ -13,7 +13,7 @@ sample_rate=8k
 stage=3
 stop_stage=8
 dumpdir=dump_rir
-expdir=exp/rir_cmha
+expdir=exp
 
 train_set=tr_mix_both_reverb_${min_or_max}_${sample_rate}
 valid_set=cv_mix_both_reverb_${min_or_max}_${sample_rate}
