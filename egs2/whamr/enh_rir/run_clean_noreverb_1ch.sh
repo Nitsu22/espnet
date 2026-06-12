@@ -19,17 +19,18 @@ train_set=tr_mix_clean_anechoic_${min_or_max}_${sample_rate}
 valid_set=cv_mix_clean_anechoic_${min_or_max}_${sample_rate}
 test_sets="tt_mix_clean_anechoic_${min_or_max}_${sample_rate}"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
+CUDA_VISIBLE_DEVICES=0 ./enh.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
     --fs ${sample_rate} \
-    --ngpu 4 \
+    --ngpu 1 \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_small.yaml \
+    --enh_args "--batch_size 16" \
     --expdir "${expdir}" \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_clean_noreverb \
+    --enh_exp exp/enh_train_enh_tflocoformer_small_clean_noreverb_1ch \
     --use_dereverb_ref false \
     --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
