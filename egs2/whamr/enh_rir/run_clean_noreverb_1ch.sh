@@ -30,7 +30,7 @@ CUDA_VISIBLE_DEVICES=0 ./enh.sh \
     --enh_config ./conf/tuning/train_enh_tflocoformer_small.yaml \
     --enh_args "--batch_size 16" \
     --expdir "${expdir}" \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_clean_noreverb_1ch \
+    --enh_exp exp_noreverb/enh_train_enh_tflocoformer_small_clean_noreverb_1ch \
     --use_dereverb_ref false \
     --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \

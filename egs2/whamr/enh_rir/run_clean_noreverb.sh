@@ -29,7 +29,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./enh.sh \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_small.yaml \
     --expdir "${expdir}" \
-    --enh_exp exp/enh_train_enh_tflocoformer_small_clean_noreverb \
+    --enh_exp exp_noreverb/enh_train_enh_tflocoformer_small_clean_noreverb \
     --use_dereverb_ref false \
     --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \
