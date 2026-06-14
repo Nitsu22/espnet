@@ -13,7 +13,7 @@ sample_rate=8k
 stage=3
 stop_stage=4
 dumpdir=dump_clean
-expdir=exp
+expdir=exp_noreverb
 
 train_set=tr_mix_clean_anechoic_${min_or_max}_${sample_rate}
 valid_set=cv_mix_clean_anechoic_${min_or_max}_${sample_rate}
