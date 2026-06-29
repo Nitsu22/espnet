@@ -87,12 +87,13 @@ class SepReformerSTFT(torch.nn.Module):
         return magnitude, phase
 
 
-class SepReformerLoss(TimeDomainLoss):
-    """Official-style SepReformer time and auxiliary magnitude losses.
+class SepReformerMagnitudeLoss(TimeDomainLoss):
+    """Official-style SepReformer auxiliary STFT-magnitude loss.
 
-    The wrapper performs PIT over speakers and combines the final time-domain
-    loss with the auxiliary STFT-magnitude loss. ``forward`` is kept as the
-    pairwise time-domain loss to satisfy ESPnet's criterion interface.
+    This criterion implements the pairwise part of the official
+    ``PIT_SISNR_mag`` loss. PIT and layer selection are handled by the loss
+    wrapper so it can be combined with ESPnet's existing ``SISNRLoss`` for the
+    final waveform output.
     """
 
     def __init__(
@@ -103,15 +104,13 @@ class SepReformerLoss(TimeDomainLoss):
         scale_inv: bool = True,
         mel_opt: bool = False,
         sample_rate: int = 16000,
-        eps_time: float = 1.0e-8,
         eps_mag: float = 1.0e-12,
-        time_loss_floor: Optional[float] = -30.0,
         name: Optional[str] = None,
         only_for_test: bool = False,
         is_noise_loss: bool = False,
         is_dereverb_loss: bool = False,
     ):
-        _name = "sepreformer_loss" if name is None else name
+        _name = "sepreformer_mag_loss" if name is None else name
         super().__init__(
             _name,
             only_for_test=only_for_test,
@@ -119,9 +118,7 @@ class SepReformerLoss(TimeDomainLoss):
             is_dereverb_loss=is_dereverb_loss,
         )
         self.scale_inv = scale_inv
-        self.eps_time = eps_time
         self.eps_mag = eps_mag
-        self.time_loss_floor = time_loss_floor
         self.stft = SepReformerSTFT(
             frame_length=frame_length,
             frame_shift=frame_shift,
@@ -142,32 +139,6 @@ class SepReformerLoss(TimeDomainLoss):
             self.mel_scale = None
 
     def forward(self, ref: torch.Tensor, est: torch.Tensor) -> torch.Tensor:
-        return self.time_pair_loss(ref, est)
-
-    @torch.cuda.amp.autocast(enabled=False)
-    def time_pair_loss(self, ref: torch.Tensor, est: torch.Tensor) -> torch.Tensor:
-        assert ref.shape == est.shape, (ref.shape, est.shape)
-        ref = ref.float()
-        est = est.float()
-
-        est_zm = est - torch.mean(est, dim=-1, keepdim=True)
-        ref_zm = ref - torch.mean(ref, dim=-1, keepdim=True)
-        if self.scale_inv:
-            scale = torch.sum(est_zm * ref_zm, dim=-1, keepdim=True) / (
-                _l2norm(ref_zm, keepdim=True) ** 2 + self.eps_time
-            )
-            ref_zm = scale * ref_zm
-
-        loss = -20.0 * torch.log10(
-            self.eps_time
-            + _l2norm(ref_zm) / (_l2norm(est_zm - ref_zm) + self.eps_time)
-        )
-        if self.time_loss_floor is not None:
-            loss = torch.clamp(loss, min=self.time_loss_floor)
-        return loss
-
-    @torch.cuda.amp.autocast(enabled=False)
-    def mag_pair_loss(self, ref: torch.Tensor, est: torch.Tensor) -> torch.Tensor:
         assert ref.shape == est.shape, (ref.shape, est.shape)
         ref = ref.float()
         est = est.float()

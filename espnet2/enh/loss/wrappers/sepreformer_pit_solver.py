@@ -4,36 +4,33 @@ from typing import Callable, Dict, List, Optional, Tuple
 import torch
 
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
-from espnet2.enh.loss.criterions.sepreformer import SepReformerLoss
 from espnet2.enh.loss.wrappers.abs_wrapper import AbsLossWrapper
 
 
 class SepReformerPITSolver(AbsLossWrapper):
-    """SepReformer PIT loss wrapper.
+    """PIT wrapper for SepReformer's multi-layer output.
 
-    Expects SepReformer training output in the form
-    ``[aux_layer_1, ..., aux_layer_N, final]`` where each layer is a speaker
-    list. The final layer receives the time-domain loss, while auxiliary layers
-    receive the STFT-magnitude loss.
+    The wrapper keeps the criterion generic and only selects which layer(s) of
+    ``[aux_layer_1, ..., aux_layer_N, final]`` should receive that criterion.
+    This lets the config reuse ESPnet's existing ``si_snr`` criterion for the
+    final waveform and use a SepReformer-specific magnitude criterion only for
+    auxiliary outputs.
     """
 
     def __init__(
         self,
         criterion: AbsEnhLoss,
         weight: float = 1.0,
-        alpha: float = 0.4,
+        layer: str = "final",
         independent_perm: bool = True,
         flexible_numspk: bool = False,
     ):
         super().__init__()
-        if not isinstance(criterion, SepReformerLoss):
-            raise TypeError(
-                "SepReformerPITSolver requires SepReformerLoss, but got "
-                f"{type(criterion)}."
-            )
+        if layer not in ("final", "aux"):
+            raise ValueError(f"Unsupported SepReformer loss layer: {layer}")
         self.criterion = criterion
         self.weight = weight
-        self.alpha = alpha
+        self.layer = layer
         self.independent_perm = independent_perm
         self.flexible_numspk = flexible_numspk
 
@@ -43,7 +40,7 @@ class SepReformerPITSolver(AbsLossWrapper):
         infs: List,
         others: Optional[Dict] = None,
     ) -> Tuple[torch.Tensor, Dict, Dict]:
-        """Compute final time PIT loss plus auxiliary magnitude PIT loss."""
+        """Compute PIT loss on the configured SepReformer output layer."""
         if others is None:
             others = {}
         if not infs:
@@ -56,48 +53,73 @@ class SepReformerPITSolver(AbsLossWrapper):
             aux_layers = []
             final = list(infs)
 
+        if self.layer == "aux":
+            return self._aux_loss(ref, aux_layers, others)
+
+        return self._final_loss(ref, final, others)
+
+    def _final_loss(
+        self,
+        ref: List[torch.Tensor],
+        final: List[torch.Tensor],
+        others: Dict,
+    ) -> Tuple[torch.Tensor, Dict, Dict]:
         if self.flexible_numspk:
             num_spk = len(final)
         else:
             assert len(ref) == len(final), (len(ref), len(final))
             num_spk = len(ref)
 
-        time_loss, perm = self._pit_loss(
+        loss, perm = self._pit_loss(
             ref,
             final,
             num_spk,
-            self.criterion.time_pair_loss,
+            self.criterion,
             others.get("perm"),
         )
+        return loss, {self.criterion.name: loss.detach()}, {"perm": perm}
 
-        mag_losses = []
+    def _aux_loss(
+        self,
+        ref: List[torch.Tensor],
+        aux_layers: List[List[torch.Tensor]],
+        others: Dict,
+    ) -> Tuple[torch.Tensor, Dict, Dict]:
+        del others
+        if not aux_layers:
+            if torch.is_grad_enabled():
+                raise ValueError(
+                    "SepReformer auxiliary loss requires multi-layer outputs. "
+                    "Please enable `output_aux` in the separator config."
+                )
+            loss = ref[0].new_zeros(())
+            stats = {self.criterion.name: torch.full_like(loss, float("nan"))}
+            return loss, stats, {}
+
+        if self.flexible_numspk:
+            num_spk = len(aux_layers[0])
+        else:
+            assert len(ref) == len(aux_layers[0]), (len(ref), len(aux_layers[0]))
+            num_spk = len(ref)
+
+        losses = []
         for aux in aux_layers:
             assert len(aux) == num_spk, (len(aux), num_spk)
-            mag_loss, _ = self._pit_loss(
+            layer_loss, _ = self._pit_loss(
                 ref,
                 list(aux),
                 num_spk,
-                self.criterion.mag_pair_loss,
+                self.criterion,
                 None,
             )
-            mag_losses.append(mag_loss)
+            losses.append(layer_loss)
 
-        if mag_losses:
-            mag_loss = torch.stack(mag_losses).mean()
-            loss = (1.0 - self.alpha) * time_loss + self.alpha * mag_loss
-        else:
-            mag_loss = torch.full_like(time_loss.detach(), float("nan"))
-            loss = time_loss
+        loss = torch.stack(losses).mean()
+        stats = {self.criterion.name: loss.detach()}
+        for idx, layer_loss in enumerate(losses):
+            stats[self.criterion.name + f"_layer{idx + 1}"] = layer_loss.detach()
 
-        stats = {
-            self.criterion.name: loss.detach(),
-            self.criterion.name + "_time": time_loss.detach(),
-            self.criterion.name + "_mag": mag_loss.detach(),
-        }
-        for idx, layer_loss in enumerate(mag_losses):
-            stats[self.criterion.name + f"_mag{idx + 1}"] = layer_loss.detach()
-
-        return loss, stats, {"perm": perm}
+        return loss, stats, {}
 
     def _pit_loss(
         self,

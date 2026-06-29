@@ -38,7 +38,7 @@ best_model_criterion:
     - loss
     - min
 -   - valid
-    - sepreformer_loss
+    - sepreformer_time_loss
     - min
 keep_nbest_models: 5
 scheduler: warmupreducelronplateau
@@ -75,18 +75,26 @@ separator_conf:
     output_aux: true
 
 criterions:
-  - name: sepreformer
+  - name: si_snr
+    conf:
+        name: sepreformer_time_loss
+        clamp_db: 30
+        zero_mean: true
+    wrapper: sepreformer_pit
+    wrapper_conf:
+        layer: final
+        weight: 0.6
+        independent_perm: true
+  - name: sepreformer_mag
     conf:
         frame_length: 512
         frame_shift: 128
         window: hann
         scale_inv: true
         mel_opt: false
-        eps_time: 1.0e-8
         eps_mag: 1.0e-12
-        time_loss_floor: -30.0
     wrapper: sepreformer_pit
     wrapper_conf:
-        weight: 1.0
-        alpha: 0.4
+        layer: aux
+        weight: 0.4
         independent_perm: true
