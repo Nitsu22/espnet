@@ -35,10 +35,10 @@ val_scheduler_criterion:
 - loss
 best_model_criterion:
 -   - valid
-    - si_snr
-    - max
--   - valid
     - loss
+    - min
+-   - valid
+    - sepreformer_loss
     - min
 keep_nbest_models: 5
 scheduler: warmupreducelronplateau
@@ -75,16 +75,18 @@ separator_conf:
     output_aux: true
 
 criterions:
-  - name: si_snr
+  - name: sepreformer
     conf:
-        eps: 1.0e-7
-    wrapper: multilayer_pit
+        frame_length: 512
+        frame_shift: 128
+        window: hann
+        scale_inv: true
+        mel_opt: false
+        eps_time: 1.0e-8
+        eps_mag: 1.0e-12
+        time_loss_floor: -30.0
+    wrapper: sepreformer_pit
     wrapper_conf:
         weight: 1.0
+        alpha: 0.4
         independent_perm: true
-        layer_weights:
-          - 1.0
-          - 1.0
-          - 1.0
-          - 1.0
-          - 1.0

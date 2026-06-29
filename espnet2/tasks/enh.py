@@ -23,6 +23,7 @@ from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
+from espnet2.enh.loss.criterions.sepreformer import SepReformerLoss
 from espnet2.enh.loss.criterions.tf_domain import (
     FrequencyDomainAbsCoherence,
     FrequencyDomainDPCL,
@@ -44,6 +45,7 @@ from espnet2.enh.loss.wrappers.fixed_order import FixedOrderSolver
 from espnet2.enh.loss.wrappers.mixit_solver import MixITSolver
 from espnet2.enh.loss.wrappers.multilayer_pit_solver import MultiLayerPITSolver
 from espnet2.enh.loss.wrappers.pit_solver import PITSolver
+from espnet2.enh.loss.wrappers.sepreformer_pit_solver import SepReformerPITSolver
 from espnet2.enh.separator.abs_separator import AbsSeparator
 from espnet2.enh.separator.asteroid_models import AsteroidModel_Converter
 from espnet2.enh.separator.conformer_separator import ConformerSeparator
@@ -175,6 +177,7 @@ loss_wrapper_choices = ClassChoices(
         pit=PITSolver,
         fixed_order=FixedOrderSolver,
         multilayer_pit=MultiLayerPITSolver,
+        sepreformer_pit=SepReformerPITSolver,
         dpcl=DPCLSolver,
         mixit=MixITSolver,
     ),
@@ -198,6 +201,7 @@ criterion_choices = ClassChoices(
         mse_fd=FrequencyDomainMSE,
         mse_td=TimeDomainMSE,
         mr_l1_tfd=MultiResL1SpecLoss,
+        sepreformer=SepReformerLoss,
     ),
     type_check=AbsEnhLoss,
     default=None,
