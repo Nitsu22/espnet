@@ -1,0 +1,90 @@
+# SepReformer Base configuration for WHAMR clean-speech targets.
+#
+# This uses `encoder: same` and `decoder: same` because the SepReformer
+# separator contains the official audio encoder and decoder internally.
+
+init: none
+max_epoch: 200
+use_amp: false
+batch_type: folded
+batch_size: 2
+num_workers: 12
+grad_clip: 5
+
+# preprocessor
+preprocessor: enh
+num_spk: &num_spk 2
+iterator_type: sequence
+speech_segment: 32000
+shuffle_within_batch: true
+force_single_channel: true
+
+# espnet model configuration
+model_conf:
+    normalize_variance: false
+
+# optimizer and scheduler
+optim: adamw
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 1.0e-02
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - si_snr
+    - max
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+    warmup_steps: 1000
+    mode: min
+    factor: 0.8
+    patience: 3
+
+# model configuration
+encoder: same
+decoder: same
+separator: sepreformer
+separator_conf:
+    num_spk: *num_spk
+    num_stages: 4
+    audio_enc_in_channels: 1
+    audio_enc_out_channels: 256
+    audio_enc_kernel_size: 16
+    audio_enc_stride: 4
+    audio_enc_groups: 1
+    audio_enc_bias: false
+    feature_dim: 128
+    feature_kernel_size: 1
+    feature_bias: false
+    num_mha_heads: 8
+    maxlen: 2000
+    embed_v: false
+    global_dropout_rate: 0.05
+    local_kernel_size: 65
+    local_dropout_rate: 0.05
+    samp_kernel_size: 5
+    spk_attention_dropout_rate: 0.05
+    output_aux: true
+
+criterions:
+  - name: si_snr
+    conf:
+        eps: 1.0e-7
+    wrapper: multilayer_pit
+    wrapper_conf:
+        weight: 1.0
+        independent_perm: true
+        layer_weights:
+          - 1.0
+          - 1.0
+          - 1.0
+          - 1.0
+          - 1.0
