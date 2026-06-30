@@ -23,7 +23,10 @@ from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
-from espnet2.enh.loss.criterions.sepreformer import SepReformerMagnitudeLoss
+from espnet2.enh.loss.criterions.sepreformer import (
+    SepReformerMagnitudeLoss,
+    SepReformerTimeLoss,
+)
 from espnet2.enh.loss.criterions.tf_domain import (
     FrequencyDomainAbsCoherence,
     FrequencyDomainDPCL,
@@ -202,6 +205,7 @@ criterion_choices = ClassChoices(
         mse_td=TimeDomainMSE,
         mr_l1_tfd=MultiResL1SpecLoss,
         sepreformer_mag=SepReformerMagnitudeLoss,
+        sepreformer_time=SepReformerTimeLoss,
     ),
     type_check=AbsEnhLoss,
     default=None,

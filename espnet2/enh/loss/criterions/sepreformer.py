@@ -87,6 +87,56 @@ class SepReformerSTFT(torch.nn.Module):
         return magnitude, phase
 
 
+class SepReformerTimeLoss(TimeDomainLoss):
+    """Official-style SepReformer final waveform loss.
+
+    This criterion implements the pairwise part of the official
+    ``PIT_SISNR_time`` loss. PIT over speakers is handled by the loss wrapper.
+    """
+
+    def __init__(
+        self,
+        scale_inv: bool = True,
+        eps: float = 1.0e-8,
+        loss_floor: Optional[float] = -30.0,
+        name: Optional[str] = None,
+        only_for_test: bool = False,
+        is_noise_loss: bool = False,
+        is_dereverb_loss: bool = False,
+    ):
+        _name = "sepreformer_time_loss" if name is None else name
+        super().__init__(
+            _name,
+            only_for_test=only_for_test,
+            is_noise_loss=is_noise_loss,
+            is_dereverb_loss=is_dereverb_loss,
+        )
+        self.scale_inv = scale_inv
+        self.eps = eps
+        self.loss_floor = loss_floor
+
+    @torch.cuda.amp.autocast(enabled=False)
+    def forward(self, ref: torch.Tensor, est: torch.Tensor) -> torch.Tensor:
+        assert ref.shape == est.shape, (ref.shape, est.shape)
+        ref = ref.float()
+        est = est.float()
+
+        est_zm = est - torch.mean(est, dim=-1, keepdim=True)
+        ref_zm = ref - torch.mean(ref, dim=-1, keepdim=True)
+        if self.scale_inv:
+            scale = torch.sum(est_zm * ref_zm, dim=-1, keepdim=True) / (
+                _l2norm(ref_zm, keepdim=True) ** 2 + self.eps
+            )
+            ref_zm = scale * ref_zm
+
+        loss = -20.0 * torch.log10(
+            self.eps + _l2norm(ref_zm) / (_l2norm(est_zm - ref_zm) + self.eps)
+        )
+        if self.loss_floor is not None:
+            loss = torch.clamp(loss, min=self.loss_floor)
+        return loss
+
+
 class SepReformerMagnitudeLoss(TimeDomainLoss):
     """Official-style SepReformer auxiliary STFT-magnitude loss.
 
