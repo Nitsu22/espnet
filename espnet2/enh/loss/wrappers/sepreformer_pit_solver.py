@@ -22,17 +22,63 @@ class SepReformerPITSolver(AbsLossWrapper):
         criterion: AbsEnhLoss,
         weight: float = 1.0,
         layer: str = "final",
+        alpha: Optional[float] = None,
+        alpha_role: Optional[str] = None,
+        alpha_decay_start_epoch: int = 100,
+        alpha_decay_interval: int = 5,
+        alpha_decay_rate: float = 0.8,
         independent_perm: bool = True,
         flexible_numspk: bool = False,
     ):
         super().__init__()
         if layer not in ("final", "aux"):
             raise ValueError(f"Unsupported SepReformer loss layer: {layer}")
+        if alpha_role not in (None, "final", "aux"):
+            raise ValueError(f"Unsupported SepReformer alpha role: {alpha_role}")
         self.criterion = criterion
-        self.weight = weight
+        self._weight = weight
         self.layer = layer
+        self.alpha = alpha
+        self.alpha_role = alpha_role
+        self.alpha_decay_start_epoch = alpha_decay_start_epoch
+        self.alpha_decay_interval = alpha_decay_interval
+        self.alpha_decay_rate = alpha_decay_rate
+        self.current_epoch = None
         self.independent_perm = independent_perm
         self.flexible_numspk = flexible_numspk
+
+    @property
+    def weight(self) -> float:
+        if self.alpha_role is None:
+            return self._weight
+
+        if not torch.is_grad_enabled():
+            return 1.0 if self.alpha_role == "final" else 0.0
+
+        alpha = self.current_alpha
+        if self.alpha_role == "final":
+            return 1.0 - alpha
+        return alpha
+
+    @weight.setter
+    def weight(self, value: float) -> None:
+        self._weight = value
+
+    @property
+    def current_alpha(self) -> float:
+        alpha = self.alpha if self.alpha is not None else self._weight
+        if self.current_epoch is None:
+            return alpha
+        if self.current_epoch > self.alpha_decay_start_epoch:
+            exponent = 1 + (
+                (self.current_epoch - self.alpha_decay_start_epoch - 1)
+                // self.alpha_decay_interval
+            )
+            alpha = alpha * (self.alpha_decay_rate**exponent)
+        return alpha
+
+    def set_epoch(self, epoch: Optional[int]) -> None:
+        self.current_epoch = None if epoch is None else int(epoch)
 
     def forward(
         self,
@@ -77,7 +123,15 @@ class SepReformerPITSolver(AbsLossWrapper):
             self.criterion,
             others.get("perm"),
         )
-        return loss, {self.criterion.name: loss.detach()}, {"perm": perm}
+        stats = {
+            self.criterion.name: loss.detach(),
+            self.criterion.name + "_weight": ref[0].new_tensor(self.weight),
+        }
+        if self.alpha_role is not None:
+            stats[self.criterion.name + "_alpha"] = ref[0].new_tensor(
+                self.current_alpha
+            )
+        return loss, stats, {"perm": perm}
 
     def _aux_loss(
         self,
@@ -93,7 +147,14 @@ class SepReformerPITSolver(AbsLossWrapper):
                     "Please enable `output_aux` in the separator config."
                 )
             loss = ref[0].new_zeros(())
-            stats = {self.criterion.name: torch.full_like(loss, float("nan"))}
+            stats = {
+                self.criterion.name: torch.full_like(loss, float("nan")),
+                self.criterion.name + "_weight": ref[0].new_tensor(self.weight),
+            }
+            if self.alpha_role is not None:
+                stats[self.criterion.name + "_alpha"] = ref[0].new_tensor(
+                    self.current_alpha
+                )
             return loss, stats, {}
 
         if self.flexible_numspk:
@@ -115,7 +176,14 @@ class SepReformerPITSolver(AbsLossWrapper):
             losses.append(layer_loss)
 
         loss = torch.stack(losses).mean()
-        stats = {self.criterion.name: loss.detach()}
+        stats = {
+            self.criterion.name: loss.detach(),
+            self.criterion.name + "_weight": ref[0].new_tensor(self.weight),
+        }
+        if self.alpha_role is not None:
+            stats[self.criterion.name + "_alpha"] = ref[0].new_tensor(
+                self.current_alpha
+            )
         for idx, layer_loss in enumerate(losses):
             stats[self.criterion.name + f"_layer{idx + 1}"] = layer_loss.detach()
 

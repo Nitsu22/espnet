@@ -83,7 +83,11 @@ criterions:
     wrapper: sepreformer_pit
     wrapper_conf:
         layer: final
-        weight: 0.6
+        alpha: 0.4
+        alpha_role: final
+        alpha_decay_start_epoch: 100
+        alpha_decay_interval: 5
+        alpha_decay_rate: 0.8
         independent_perm: true
   - name: sepreformer_mag
     conf:
@@ -96,5 +100,9 @@ criterions:
     wrapper: sepreformer_pit
     wrapper_conf:
         layer: aux
-        weight: 0.4
+        alpha: 0.4
+        alpha_role: aux
+        alpha_decay_start_epoch: 100
+        alpha_decay_interval: 5
+        alpha_decay_rate: 0.8
         independent_perm: true
