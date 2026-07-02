@@ -7,7 +7,7 @@ set -o pipefail
 
 min_or_max=min
 sample_rate=8k
-ngpu=2
+ngpu=1
 dumpdir=dump_rir_clean
 
 train_set=tr_mix_clean_reverb_${min_or_max}_${sample_rate}
@@ -29,6 +29,6 @@ test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
     --inference_model "valid.loss.best.pth" \
     --audio_format wav \
     --dumpdir "${dumpdir}" \
-    --stage 5 \
+    --stage 6 \
     --stop_stage 8 \
     "$@"
