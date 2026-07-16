@@ -73,6 +73,7 @@ use_noise_ref=false
 variable_num_refs=false # Whether to use variable numbers of references in spk1.scp, dereverb1.scp, enroll_spk1.scp, etc.
 extra_wav_list= # Extra list of scp files for wav formatting
 rir_ref_num=2  # Number of RIR reference files: rir1.scp, rir2.scp
+rir_condition_type=rir_ref  # "rir_ref" or "rir_ctf"
 
 # Pretrained model related
 # The number of --init_param must be same.
@@ -166,6 +167,7 @@ Options:
     --variable_num_refs # Whether or not to use variable numbers of references in spk1.scp, dereverb1.scp, enroll_spk1.scp, etc. If True, --ref_num and --dereverb_ref_num must be 1. (default="${variable_num_refs}")
     --extra_wav_list    # Extra list of scp files for wav formatting (default="${extra_wav_list}")
     --rir_ref_num       # Number of RIR reference files (default="${rir_ref_num}")
+    --rir_condition_type # RIR conditioning type: "rir_ref" or "rir_ctf" (default="${rir_condition_type}")
 
     # Pretrained model related
     --init_param    # pretrained model path and module name (default="${init_param}")
@@ -222,6 +224,10 @@ fi
 [ -z "${train_set}" ] && { log "${help_message}"; log "Error: --train_set is required"; exit 2; };
 [ -z "${valid_set}" ] &&   { log "${help_message}"; log "Error: --valid_set is required"  ; exit 2; };
 [ -z "${test_sets}" ] && { log "${help_message}"; log "Error: --test_sets is required"; exit 2; };
+if [ "${rir_condition_type}" != rir_ref ] && [ "${rir_condition_type}" != rir_ctf ]; then
+    log "Error: --rir_condition_type must be rir_ref or rir_ctf, but got ${rir_condition_type}"
+    exit 2
+fi
 
 # Extra files for enhancement process
 utt_extra_files="utt2category"
@@ -609,6 +615,7 @@ if ! "${skip_train}"; then
             fi
         fi
         _type_rir_ref="variable_columns_sound"
+        _type_rir_ctf="npy"
 
         # 1. Split the key file
         _logdir="${enh_stats_dir}/logdir"
@@ -642,9 +649,14 @@ if ! "${skip_train}"; then
 
         # prepare train and valid data parameters
         _train_data_param="--train_data_path_and_name_and_type ${_enh_train_dir}/wav.scp,speech_mix,${_type} "
-        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
+        if [ "${rir_condition_type}" = rir_ref ]; then
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
+        else
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir_ctf.scp,rir_ctf,${_type_rir_ctf} "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir_ctf.scp,rir_ctf,${_type_rir_ctf} "
+        fi
         for spk in $(seq "${ref_num}"); do
             _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
             _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
@@ -675,7 +687,11 @@ if ! "${skip_train}"; then
         # NOTE: --*_shape_file doesn't require length information if --batch_type=unsorted,
         #       but it's used only for deciding the sample ids.
 
-        train_module=espnet2.bin.enh_rir_train
+        if [ "${rir_condition_type}" = rir_ref ]; then
+            train_module=espnet2.bin.enh_rir_train
+        else
+            train_module=espnet2.bin.enh_rir_ctf_train
+        fi
         # shellcheck disable=SC2046,SC2086
         ${train_cmd} JOB=1:"${_nj}" "${_logdir}"/stats.JOB.log \
             ${python} -m ${train_module} \
@@ -754,6 +770,7 @@ if ! "${skip_train}"; then
             fi
         fi
         _type_rir_ref="variable_columns_sound"
+        _type_rir_ctf="npy"
         _fold_length="$((enh_speech_fold_length * 100))"
 
         # prepare train and valid data parameters
@@ -762,11 +779,18 @@ if ! "${skip_train}"; then
         _fold_length_param="--fold_length ${_fold_length} "
         _valid_data_param="--valid_data_path_and_name_and_type ${_enh_valid_dir}/wav.scp,speech_mix,${_type} "
         _valid_shape_param="--valid_shape_file ${enh_stats_dir}/valid/speech_mix_shape "
-        _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
-        _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/rir_ref_shape "
+        if [ "${rir_condition_type}" = rir_ref ]; then
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir.scp,rir_ref,${_type_rir_ref} "
+            _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/rir_ref_shape "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
+            _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/rir_ref_shape "
+        else
+            _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/rir_ctf.scp,rir_ctf,${_type_rir_ctf} "
+            _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/rir_ctf_shape "
+            _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir_ctf.scp,rir_ctf,${_type_rir_ctf} "
+            _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/rir_ctf_shape "
+        fi
         _fold_length_param+="--fold_length ${_fold_length} "
-        _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/rir.scp,rir_ref,${_type_rir_ref} "
-        _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/rir_ref_shape "
 
         for spk in $(seq "${ref_num}"); do
             _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/spk${spk}.scp,speech_ref${spk},${_type_ref} "
@@ -841,7 +865,11 @@ if ! "${skip_train}"; then
         else
             jobname="${enh_exp}/train.log"
         fi
-        train_module=espnet2.bin.enh_rir_train
+        if [ "${rir_condition_type}" = rir_ref ]; then
+            train_module=espnet2.bin.enh_rir_train
+        else
+            train_module=espnet2.bin.enh_rir_ctf_train
+        fi
         # shellcheck disable=SC2086
         ${python} -m espnet2.bin.launch \
             --cmd "${cuda_cmd} --name ${jobname}" \
@@ -897,10 +925,15 @@ if ! "${skip_eval}"; then
                 _type=sound
             fi
             _type_rir_ref="variable_columns_sound"
+            _type_rir_ctf="npy"
 
             # for target-speaker extraction
             _data_param="--data_path_and_name_and_type ${_data}/${_scp},speech_mix,${_type} "
-            _data_param+="--data_path_and_name_and_type ${_data}/rir.scp,rir_ref,${_type_rir_ref} "
+            if [ "${rir_condition_type}" = rir_ref ]; then
+                _data_param+="--data_path_and_name_and_type ${_data}/rir.scp,rir_ref,${_type_rir_ref} "
+            else
+                _data_param+="--data_path_and_name_and_type ${_data}/rir_ctf.scp,rir_ctf,${_type_rir_ctf} "
+            fi
             if $is_tse_task; then
                 for spk in $(seq "${ref_num}"); do
                     _data_param+="--data_path_and_name_and_type ${_data}/enroll_spk${spk}.scp,enroll_ref${spk},text "
@@ -920,6 +953,8 @@ if ! "${skip_eval}"; then
             log "Enhancement started... log: '${_logdir}/enh_inference.*.log'"
             if $is_tse_task; then
                 infer_module=espnet2.bin.enh_tse_inference
+            elif [ "${rir_condition_type}" = rir_ctf ]; then
+                infer_module=espnet2.bin.enh_rir_ctf_inference
             else
                 infer_module=espnet2.bin.enh_rir_inference
             fi

@@ -40,6 +40,7 @@ from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import AbsPreprocessor
 from espnet2.train.preprocessor_rir import RIRPreprocessor
 from espnet2.train.preprocessor_rec_rir import RecRIRPreprocessor
+from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -92,7 +93,11 @@ criterion_choices = ClassChoices(
 
 preprocessor_choices = ClassChoices(
     name="preprocessor",
-    classes=dict(rir=RIRPreprocessor, rec_rir=RecRIRPreprocessor),
+    classes=dict(
+        rir=RIRPreprocessor,
+        rec_rir=RecRIRPreprocessor,
+        rec_rir_pit=RecRIRPITPreprocessor,
+    ),
     type_check=AbsPreprocessor,
     default="rir",
 )
@@ -138,9 +143,10 @@ class RIRTask(AbsTask):
             "--rir_model_type",
             type=str,
             default="direct",
-            choices=["direct", "rec_rir"],
+            choices=["direct", "rec_rir", "rec_rir_pit"],
             help="RIR model family. 'direct' predicts waveform RIR directly; "
-            "'rec_rir' uses the official Rec-RIR CTF model.",
+            "'rec_rir' uses the official Rec-RIR CTF model; "
+            "'rec_rir_pit' trains a two-source Rec-RIR PIT baseline.",
         )
         group.add_argument(
             "--criterions",
@@ -229,6 +235,10 @@ class RIRTask(AbsTask):
             "room_param_path",
             "speech_direct",
             "speech_reverb",
+            "speech_direct1",
+            "speech_direct2",
+            "speech_reverb1",
+            "speech_reverb2",
             "category",
             "fs",
         )
@@ -242,6 +252,16 @@ class RIRTask(AbsTask):
             model_conf = dict(args.model_conf)
             model_conf.pop("normalize_variance", None)
             model = ESPnetRecRIRModel(**model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_pit":
+            from espnet2.rir.rec_rir.espnet_model_pit import ESPnetRecRIRPITModel
+
+            model_conf = dict(args.model_conf)
+            model_conf.pop("normalize_variance", None)
+            model = ESPnetRecRIRPITModel(**model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model

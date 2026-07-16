@@ -45,6 +45,7 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
         normalize_variance_per_ch: bool = False,
         categories: list = [],
         category_weights: list = [],
+        rir_condition_type: str = "rir_ref",
     ):
         """Main entry of speech enhancement/separation model training.
 
@@ -89,6 +90,9 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
                 Different categories will have different loss name suffixes.
             category_weights: list of weights for each category.
                 Used to set loss weights for batches of different categories.
+            rir_condition_type: input condition type. "rir_ref" keeps the original
+                oracle-RIR path. "rir_ctf" uses a precomputed Rec-RIR CTF feature and
+                does not run the RIR waveform through the encoder.
         """
 
         super().__init__()
@@ -147,6 +151,13 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
         else:
             self.category_weights = tuple(1.0 for _ in self.categories)
 
+        if rir_condition_type not in ("rir_ref", "rir_ctf"):
+            raise ValueError(
+                "rir_condition_type must be 'rir_ref' or 'rir_ctf', "
+                f"but got {rir_condition_type}"
+            )
+        self.rir_condition_type = rir_condition_type
+
     def forward(
         self,
         speech_mix: torch.Tensor,
@@ -165,13 +176,26 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
                             espnet2/iterators/chunk_iter_factory.py
             kwargs: "utt_id" is among the input.
         """
-        assert "rir_ref" in kwargs, "RIR reference input is required for enh_rir."
-        rir_ref = kwargs["rir_ref"]
-        rir_ref_lengths = kwargs.get("rir_ref_lengths", None)
-        if rir_ref_lengths is None:
-            rir_ref_lengths = torch.ones(rir_ref.shape[0]).int().fill_(
-                rir_ref.shape[1]
-            )
+        rir_ref = None
+        rir_ref_lengths = None
+        rir_ctf = None
+        rir_ctf_lengths = None
+        if self.rir_condition_type == "rir_ref":
+            assert "rir_ref" in kwargs, "RIR reference input is required for enh_rir."
+            rir_ref = kwargs["rir_ref"]
+            rir_ref_lengths = kwargs.get("rir_ref_lengths", None)
+            if rir_ref_lengths is None:
+                rir_ref_lengths = torch.ones(rir_ref.shape[0]).int().fill_(
+                    rir_ref.shape[1]
+                )
+        elif self.rir_condition_type == "rir_ctf":
+            assert "rir_ctf" in kwargs, "RIR CTF input is required for enh_rir."
+            rir_ctf = kwargs["rir_ctf"]
+            rir_ctf_lengths = kwargs.get("rir_ctf_lengths", None)
+            if rir_ctf_lengths is None:
+                rir_ctf_lengths = torch.ones(rir_ctf.shape[0]).int().fill_(
+                    rir_ctf.shape[1]
+                )
 
         # reference speech signal of each speaker
         assert "speech_ref1" in kwargs, "At least 1 reference signal input is required."
@@ -229,11 +253,18 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
             speech_ref.shape,
             speech_lengths.shape,
         )
-        assert rir_ref.shape[0] == speech_mix.shape[0] == rir_ref_lengths.shape[0], (
-            rir_ref.shape,
-            speech_mix.shape,
-            rir_ref_lengths.shape,
-        )
+        if self.rir_condition_type == "rir_ref":
+            assert rir_ref.shape[0] == speech_mix.shape[0] == rir_ref_lengths.shape[0], (
+                rir_ref.shape,
+                speech_mix.shape,
+                rir_ref_lengths.shape,
+            )
+        elif self.rir_condition_type == "rir_ctf":
+            assert rir_ctf.shape[0] == speech_mix.shape[0] == rir_ctf_lengths.shape[0], (
+                rir_ctf.shape,
+                speech_mix.shape,
+                rir_ctf_lengths.shape,
+            )
 
         # for data-parallel
         speech_ref = speech_ref[:, :, : speech_lengths.max()].unbind(dim=1)
@@ -263,10 +294,16 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
         ):
             raise ValueError(f"Category '{category}' is not listed in self.categories")
 
-        additional = {
-            "rir_ref": rir_ref,
-            "rir_ref_lengths": rir_ref_lengths,
-        }
+        if self.rir_condition_type == "rir_ref":
+            additional = {
+                "rir_ref": rir_ref,
+                "rir_ref_lengths": rir_ref_lengths,
+            }
+        elif self.rir_condition_type == "rir_ctf":
+            additional = {
+                "rir_ctf": rir_ctf,
+                "rir_ctf_lengths": rir_ctf_lengths,
+            }
         # Additional data is required in Deep Attractor Network
         if isinstance(self.separator, DANSeparator):
             additional["feature_ref"] = [
@@ -342,17 +379,29 @@ class ESPnetEnhancementRIRModel(AbsESPnetModel):
         feature_mix, flens = self.encoder(speech_mix, speech_lengths, fs=fs)
         if additional is None:
             additional = {}
-        if "rir_ref" not in additional:
-            raise ValueError("rir_ref is required in additional for enh_rir.")
-        rir_ref = additional.pop("rir_ref")
-        rir_ref_lengths = additional.pop("rir_ref_lengths", None)
-        if rir_ref_lengths is None:
-            rir_ref_lengths = torch.ones(rir_ref.shape[0]).int().fill_(
-                rir_ref.shape[1]
-            )
-        rir_feat, rir_flens = self.encoder(rir_ref, rir_ref_lengths, fs=fs)
-        additional["rir_feat"] = rir_feat
-        additional["rir_feat_lengths"] = rir_flens
+        if self.rir_condition_type == "rir_ref":
+            if "rir_ref" not in additional:
+                raise ValueError("rir_ref is required in additional for enh_rir.")
+            rir_ref = additional.pop("rir_ref")
+            rir_ref_lengths = additional.pop("rir_ref_lengths", None)
+            if rir_ref_lengths is None:
+                rir_ref_lengths = torch.ones(rir_ref.shape[0]).int().fill_(
+                    rir_ref.shape[1]
+                )
+            rir_feat, rir_flens = self.encoder(rir_ref, rir_ref_lengths, fs=fs)
+            additional["rir_feat"] = rir_feat
+            additional["rir_feat_lengths"] = rir_flens
+        elif self.rir_condition_type == "rir_ctf":
+            if "rir_ctf" not in additional:
+                raise ValueError("rir_ctf is required in additional for enh_rir.")
+            rir_ctf = additional.pop("rir_ctf")
+            rir_ctf_lengths = additional.pop("rir_ctf_lengths", None)
+            if rir_ctf_lengths is None:
+                rir_ctf_lengths = torch.ones(rir_ctf.shape[0]).int().fill_(
+                    rir_ctf.shape[1]
+                )
+            additional["rir_ctf"] = rir_ctf
+            additional["rir_ctf_lengths"] = rir_ctf_lengths
 
         if self.mask_module is None:
             feature_pre, flens, others = self.separator(feature_mix, flens, additional)

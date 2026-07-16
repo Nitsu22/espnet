@@ -76,6 +76,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_all import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_all import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocasheRIRCMHAFiLMAll,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_all_ctf import (
+    TFLocoformerSeparator as TFLocoformerSeparatorNocasheRIRCMHAFiLMAllCTF,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_first import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocasheRIRCMHAFiLMFirst,
 )
@@ -163,6 +166,9 @@ separator_choices = ClassChoices(
         ),
         tflocoformer_nocashe_rir_cmha_film_all=(
             TFLocoformerSeparatorNocasheRIRCMHAFiLMAll
+        ),
+        tflocoformer_nocashe_rir_cmha_film_all_ctf=(
+            TFLocoformerSeparatorNocasheRIRCMHAFiLMAllCTF
         ),
         tflocoformer_nocashe_rir_tempomha=TFLocoformerSeparatorNocasheRIRTempOMHA,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
@@ -630,3 +636,13 @@ class EnhancementRIRTask(AbsTask):
             args.fold_length = args.fold_length[0:1]
 
         return super().build_iter_factory(args, distributed_option, mode, kwargs)
+
+
+class EnhancementRIRCTFTask(EnhancementRIRTask):
+    @classmethod
+    def required_data_names(
+        cls, train: bool = True, inference: bool = False
+    ) -> Tuple[str, ...]:
+        if not inference:
+            return ("speech_ref1", "rir_ctf")
+        return ("speech_mix", "rir_ctf")
