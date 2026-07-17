@@ -14,7 +14,7 @@ ctf_sample_rate=8000
 stage=5
 stop_stage=6
 src_dumpdir=dump_rir_clean
-ctf_dumpdir=dump_rec_rir_ctf_clean
+ctf_dumpdir=dump_rir_clean
 expdir=exp/rir_cmha_film_all_ctf_clean_1ch
 prepare_ctf=true
 ctf_device=cuda
@@ -88,7 +88,7 @@ CUDA_VISIBLE_DEVICES=${gpu} ./enh_rir.sh \
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --sample_rates ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_tflocoformer_small_rir_cmha_film_all_ctf.yaml \
-    --enh_args "--batch_size 4" \
+    --enh_args "--batch_size 16" \
     --expdir "${expdir}" \
     --enh_exp "${expdir}/enh_train_enh_tflocoformer_small_rir_cmha_film_all_ctf_clean_1ch" \
     --use_dereverb_ref false \
