@@ -1,0 +1,20 @@
+2026-07-02T14:39:41 (enh_sepreformer.sh:204:main) ./enh_sepreformer.sh --train_set tr_mix_clean_reverb_min_8k --valid_set cv_mix_clean_reverb_min_8k --test_sets tt_mix_clean_reverb_min_8k --fs 8k --ngpu 1 --ref_num 2 --local_data_opts --sample_rate 8k --min_or_max min --enh_config ./conf/tuning/train_enh_sepreformer_base.yaml --enh_exp exp/enh_train_enh_sepreformer_base_clean_reverb --use_dereverb_ref false --use_noise_ref false --inference_model valid.loss.best.pth --audio_format wav --dumpdir dump_rir_clean --stage 6 --stop_stage 8
+2026-07-02T14:39:41 (enh_sepreformer.sh:668:main) Stage 6: Enhancemnt Frontend Training: train_set=dump_rir_clean/raw/tr_mix_clean_reverb_min_8k, valid_set=dump_rir_clean/raw/cv_mix_clean_reverb_min_8k
+2026-07-02T14:39:41 (enh_sepreformer.sh:763:main) Generate 'exp/enh_train_enh_sepreformer_base_clean_reverb/run.sh'. You can resume the process from stage 6 using this script
+2026-07-02T14:39:41 (enh_sepreformer.sh:766:main) enh training started... log: 'exp/enh_train_enh_sepreformer_base_clean_reverb/train.log'
+2026-07-02 14:39:42,764 (launch:94) INFO: /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python3 /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/bin/launch.py --cmd 'run.pl --name exp/enh_train_enh_sepreformer_base_clean_reverb/train.log' --log exp/enh_train_enh_sepreformer_base_clean_reverb/train.log --ngpu 1 --num_nodes 1 --init_file_prefix exp/enh_train_enh_sepreformer_base_clean_reverb/.dist_init_ --multiprocessing_distributed true -- python3 -m espnet2.bin.enh_sepreformer_train --train_data_path_and_name_and_type dump_rir_clean/raw/tr_mix_clean_reverb_min_8k/wav.scp,speech_mix,sound --train_data_path_and_name_and_type dump_rir_clean/raw/tr_mix_clean_reverb_min_8k/spk1.scp,speech_ref1,sound --train_data_path_and_name_and_type dump_rir_clean/raw/tr_mix_clean_reverb_min_8k/spk2.scp,speech_ref2,sound --valid_data_path_and_name_and_type dump_rir_clean/raw/cv_mix_clean_reverb_min_8k/wav.scp,speech_mix,sound --valid_data_path_and_name_and_type dump_rir_clean/raw/cv_mix_clean_reverb_min_8k/spk1.scp,speech_ref1,sound --valid_data_path_and_name_and_type dump_rir_clean/raw/cv_mix_clean_reverb_min_8k/spk2.scp,speech_ref2,sound --train_shape_file exp/enh_stats_8k/train/speech_mix_shape --train_shape_file exp/enh_stats_8k/train/speech_ref1_shape --train_shape_file exp/enh_stats_8k/train/speech_ref2_shape --valid_shape_file exp/enh_stats_8k/valid/speech_mix_shape --valid_shape_file exp/enh_stats_8k/valid/speech_ref1_shape --valid_shape_file exp/enh_stats_8k/valid/speech_ref2_shape --fold_length 80000 --fold_length 80000 --fold_length 80000 --resume true --output_dir exp/enh_train_enh_sepreformer_base_clean_reverb --config ./conf/tuning/train_enh_sepreformer_base.yaml
+2026-07-02 14:39:43,042 (launch:348) INFO: log file: exp/enh_train_enh_sepreformer_base_clean_reverb/train.log
+Traceback (most recent call last):
+  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/bin/launch.py", line 384, in <module>
+    main()
+  File "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/bin/launch.py", line 358, in main
+    process.wait(0.5)
+  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/home/kslab/nitsu/.conda/envs/tf-locoformer/lib/python3.10/subprocess.py", line 1937, in _wait
+    time.sleep(delay)
+KeyboardInterrupt

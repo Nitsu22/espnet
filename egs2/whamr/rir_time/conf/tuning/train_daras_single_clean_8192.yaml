@@ -1,0 +1,81 @@
+init: null
+max_epoch: 1000
+use_amp: true
+grad_clip: 5.0
+batch_type: folded
+batch_size: 16
+num_workers: 4
+
+sample_rate: 8000
+force_single_channel: true
+rir_model_type: daras
+preprocessor: daras
+preprocessor_conf:
+    speech_segment: 40000
+    speech_sample_rate: 8000
+    rir_sample_rate: 8000
+    rir_length: 8192
+    force_single_channel: true
+    rir_normalize: peak
+    bp_window_ms: 20.0
+    bp_threshold: 0.95
+    bp_min_ms: 2.0
+    bp_max_ms: 250.0
+
+model_conf:
+    extract_feats_in_collect_stats: false
+    sample_rate: 8000
+    rir_length: 8192
+    audio_channels:
+        - 64
+        - 128
+        - 256
+        - 512
+    feature_dim: 128
+    room_feature_dim: 64
+    num_heads: 8
+    mamba_layers: 4
+    mamba_d_state: 16
+    mamba_d_conv: 4
+    num_gammatone_bands: 20
+    gammatone_f_min: 50.0
+    gammatone_f_max: 2000.0
+    gammatone_filter_length: 401
+    gammatone_hop_length: 160
+    gammatone_patch_size: 16
+    gammatone_max_patches: 1024
+    dat_init_length: 128
+    dat_num_late_filters: 8
+    dat_fir_length: 129
+    dropout: 0.0
+    stft_frame_lengths:
+        - 16
+        - 128
+        - 512
+        - 2048
+    stft_hop_lengths:
+        - 8
+        - 64
+        - 256
+        - 1024
+    param_loss_weight: 1.0
+    normalize_by_mix: true
+
+optim: adamw
+optim_conf:
+    lr: 5.5e-05
+    eps: 1.0e-08
+    weight_decay: 0.0
+patience: 1000
+val_scheduler_criterion:
+    - valid
+    - loss
+best_model_criterion:
+    -   - valid
+        - loss
+        - min
+keep_nbest_models: 5
+scheduler: steplr
+scheduler_conf:
+    step_size: 80
+    gamma: 0.8

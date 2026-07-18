@@ -4,8 +4,8 @@ set -e
 set -u
 set -o pipefail
 
-rir_config=conf/tuning/train_rec_rir_single_clean_8192.yaml
-rir_tag=train_rec_rir_single_clean_8192
+rir_config=conf/tuning/train_daras_single_clean_8192.yaml
+rir_tag=train_daras_single_clean_8192
 rir_exp=exp/rir_${rir_tag}
 rir_args=
 
@@ -20,18 +20,20 @@ num_nodes=1
 nj=32
 dumpdir=dump_rir_clean
 audio_format=wav
-speech_fold_length=32000
+speech_fold_length=40000
 rir_fold_length=8192
 skip_data_prep=true
-prepare_rec_rir_dump=true
+prepare_daras_dump=true
 enh_rir_data_dir=../enh_rir/data
+se_npz_data_dir=../se_npz/data
 
 . utils/parse_options.sh
 
-if "${prepare_rec_rir_dump}"; then
-  local/prepare_rec_rir_dump_rir_clean.sh \
+if "${prepare_daras_dump}"; then
+  local/prepare_daras_dump_rir_clean.sh \
     --dumpdir "${dumpdir}" \
     --enh_rir_data_dir "${enh_rir_data_dir}" \
+    --se_npz_data_dir "${se_npz_data_dir}" \
     --sets "${train_set} ${valid_set} ${test_sets}"
 fi
 
@@ -47,7 +49,7 @@ fi
   --num_nodes "${num_nodes}" \
   --nj "${nj}" \
   --dumpdir "${dumpdir}" \
-  --rir_model_type rec_rir \
+  --rir_model_type daras \
   --rir_config "${rir_config}" \
   --rir_tag "${rir_tag}" \
   --rir_exp "${rir_exp}" \

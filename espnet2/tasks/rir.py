@@ -38,6 +38,7 @@ from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import AbsPreprocessor
+from espnet2.train.preprocessor_daras import DARASPreprocessor
 from espnet2.train.preprocessor_rir import RIRPreprocessor
 from espnet2.train.preprocessor_rec_rir import RecRIRPreprocessor
 from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
@@ -97,6 +98,7 @@ preprocessor_choices = ClassChoices(
         rir=RIRPreprocessor,
         rec_rir=RecRIRPreprocessor,
         rec_rir_pit=RecRIRPITPreprocessor,
+        daras=DARASPreprocessor,
     ),
     type_check=AbsPreprocessor,
     default="rir",
@@ -143,10 +145,11 @@ class RIRTask(AbsTask):
             "--rir_model_type",
             type=str,
             default="direct",
-            choices=["direct", "rec_rir", "rec_rir_pit"],
+            choices=["direct", "rec_rir", "rec_rir_pit", "daras"],
             help="RIR model family. 'direct' predicts waveform RIR directly; "
             "'rec_rir' uses the official Rec-RIR CTF model; "
-            "'rec_rir_pit' trains a two-source Rec-RIR PIT baseline.",
+            "'rec_rir_pit' trains a two-source Rec-RIR PIT baseline; "
+            "'daras' trains a DARAS-style blind RIR estimator.",
         )
         group.add_argument(
             "--criterions",
@@ -239,6 +242,8 @@ class RIRTask(AbsTask):
             "speech_direct2",
             "speech_reverb1",
             "speech_reverb2",
+            "rir_ref",
+            "room_param",
             "category",
             "fs",
         )
@@ -262,6 +267,16 @@ class RIRTask(AbsTask):
             model_conf = dict(args.model_conf)
             model_conf.pop("normalize_variance", None)
             model = ESPnetRecRIRPITModel(**model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+
+        if getattr(args, "rir_model_type", "direct") == "daras":
+            from espnet2.rir.daras.espnet_model import ESPnetDARASModel
+
+            model_conf = dict(args.model_conf)
+            model_conf.pop("normalize_variance", None)
+            model = ESPnetDARASModel(**model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model

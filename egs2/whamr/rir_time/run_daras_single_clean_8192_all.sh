@@ -10,8 +10,8 @@ skip_train=false
 skip_inference=false
 skip_score=false
 
-rir_config=conf/tuning/train_rec_rir_single_clean_8192.yaml
-rir_tag=train_rec_rir_single_clean_8192
+rir_config=conf/tuning/train_daras_single_clean_8192.yaml
+rir_tag=train_daras_single_clean_8192
 rir_exp=exp/rir_${rir_tag}
 rir_args=
 
@@ -24,8 +24,9 @@ inference_model=valid.loss.best.pth
 sample_rate=8000
 rir_length=8192
 dumpdir=dump_rir_clean
-prepare_rec_rir_dump=true
+prepare_daras_dump=true
 enh_rir_data_dir=../enh_rir/data
+se_npz_data_dir=../se_npz/data
 
 train_set=tr_mix_clean_reverb_min_8k
 valid_set=cv_mix_clean_reverb_min_8k
@@ -37,10 +38,11 @@ score_dir=
 . utils/parse_options.sh
 . ./path.sh
 
-if "${prepare_rec_rir_dump}"; then
-  local/prepare_rec_rir_dump_rir_clean.sh \
+if "${prepare_daras_dump}"; then
+  local/prepare_daras_dump_rir_clean.sh \
     --dumpdir "${dumpdir}" \
     --enh_rir_data_dir "${enh_rir_data_dir}" \
+    --se_npz_data_dir "${se_npz_data_dir}" \
     --sets "${train_set} ${valid_set} ${test_set}"
 fi
 
@@ -57,7 +59,7 @@ if ! "${skip_train}" && [ "${stage}" -le 6 ] && [ "${stop_stage}" -ge 1 ]; then
     train_stop_stage=6
   fi
 
-  ./run_rec_rir_single_clean_8192.sh \
+  ./run_daras_single_clean_8192.sh \
     --stage "${train_stage}" \
     --stop_stage "${train_stop_stage}" \
     --train_set "${train_set}" \
@@ -67,7 +69,7 @@ if ! "${skip_train}" && [ "${stage}" -le 6 ] && [ "${stop_stage}" -ge 1 ]; then
     --num_nodes "${num_nodes}" \
     --nj "${nj}" \
     --dumpdir "${dumpdir}" \
-    --prepare_rec_rir_dump false \
+    --prepare_daras_dump false \
     --audio_format "${audio_format}" \
     --rir_config "${rir_config}" \
     --rir_tag "${rir_tag}" \
@@ -76,7 +78,7 @@ if ! "${skip_train}" && [ "${stage}" -le 6 ] && [ "${stop_stage}" -ge 1 ]; then
 fi
 
 if ! "${skip_inference}" && [ "${stage}" -le 7 ] && [ "${stop_stage}" -ge 7 ]; then
-  ./run_infer_rec_rir_single_clean_8192.sh \
+  ./run_infer_daras_single_clean_8192.sh \
     --rir_exp "${rir_exp}" \
     --train_config "${rir_exp}/config.yaml" \
     --model_file "${rir_exp}/${inference_model}" \
@@ -88,7 +90,7 @@ if ! "${skip_inference}" && [ "${stage}" -le 7 ] && [ "${stop_stage}" -ge 7 ]; t
 fi
 
 if ! "${skip_score}" && [ "${stage}" -le 8 ] && [ "${stop_stage}" -ge 8 ]; then
-  ./run_score_rir_single_clean_8192.sh \
+  ./run_score_daras_single_clean_8192.sh \
     --pred_scp "${inference_dir}/wav.scp" \
     --out_dir "${score_dir}" \
     --ref_rir_scp "${dumpdir}/raw/${test_set}/rir_ref.scp" \

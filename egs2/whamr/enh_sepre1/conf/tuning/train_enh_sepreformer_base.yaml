@@ -7,7 +7,7 @@ init: none
 max_epoch: 200
 use_amp: false
 batch_type: folded
-batch_size: 2
+batch_size: 8
 num_workers: 12
 grad_clip: 5
 

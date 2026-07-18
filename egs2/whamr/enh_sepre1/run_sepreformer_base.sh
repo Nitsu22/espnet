@@ -23,7 +23,7 @@ test_sets="tt_mix_clean_reverb_${min_or_max}_${sample_rate}"
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config ./conf/tuning/train_enh_sepreformer_base.yaml \
-    --enh_exp exp/enh_train_enh_sepreformer_base_clean_reverb \
+    --enh_exp exp/enh_train_enh_sepreformer_base_clean_reverb_bs8_scratch \
     --use_dereverb_ref false \
     --use_noise_ref false \
     --inference_model "valid.loss.best.pth" \

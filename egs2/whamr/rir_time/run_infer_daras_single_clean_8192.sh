@@ -4,7 +4,7 @@ set -e
 set -u
 set -o pipefail
 
-rir_exp=exp/rir_train_rec_rir_single_clean_8192
+rir_exp=exp/rir_train_daras_single_clean_8192
 train_config=
 model_file=
 wav_scp=dump_rir_clean/raw/tt_mix_clean_reverb_min_8k/speech_reverb.scp
@@ -25,7 +25,7 @@ if [ ! -f "${wav_scp}" ]; then
   wav_scp=dump_rir_clean/raw/tt_mix_clean_reverb_min_8k/wav.scp
 fi
 
-python -m espnet2.bin.rec_rir_inference \
+python -m espnet2.bin.daras_inference \
   --train_config "${train_config}" \
   --model_file "${model_file}" \
   --wav_scp "${wav_scp}" \
