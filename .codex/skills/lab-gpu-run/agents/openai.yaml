@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lab GPU Run"
+  short_description: "Run jobs on lab GPU servers"
+  default_prompt: "Use $lab-gpu-run to run this ESPnet workspace on lab GPU servers."

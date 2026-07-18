@@ -1,0 +1,4 @@
+interface:
+  display_name: "TSUBAME Run"
+  short_description: "Run ESPnet jobs on TSUBAME"
+  default_prompt: "Use $tsubame-run to prepare and submit an ESPnet qsub job on TSUBAME."

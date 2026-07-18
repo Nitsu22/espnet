@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lab GPU Hosts"
+  short_description: "Inventory of lab GPU SSH targets"
+  default_prompt: "Use $lab-gpu-hosts to choose a lab GPU SSH target."
