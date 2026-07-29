@@ -14,6 +14,8 @@ from espnet2.train.abs_espnet_model import AbsESPnetModel
 class ESPnetRecRIRPITModel(AbsESPnetModel):
     """Two-source Rec-RIR wrapper with PIT over source assignments."""
 
+    rec_rir_network_class = BiSpatialNetPIT
+
     @typechecked
     def __init__(
         self,
@@ -72,7 +74,7 @@ class ESPnetRecRIRPITModel(AbsESPnetModel):
             win_type=win_type,
             win_len=win_len,
         )
-        self.rec_rir = BiSpatialNetPIT(
+        self.rec_rir = self.rec_rir_network_class(
             dim_input=dim_input,
             dim_output_spch=dim_output_spch,
             dim_output_CTF=dim_output_CTF,

@@ -103,10 +103,11 @@ if ! "${skip_data_prep}"; then
             "${data_feats}${suf}/${dset}/data/${name}"
           utt_extra_files="${utt_extra_files} ${name}.scp"
         done
-      elif [ "${rir_model_type}" = rec_rir_pit ]; then
+      elif [ "${rir_model_type}" = rec_rir_pit ] \
+        || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
         for name in speech_direct1 speech_direct2 speech_reverb1 speech_reverb2; do
           if [ ! -f "data/${dset}/${name}.scp" ]; then
-            echo "Missing data/${dset}/${name}.scp for --rir_model_type rec_rir_pit" >&2
+            echo "Missing data/${dset}/${name}.scp for --rir_model_type ${rir_model_type}" >&2
             exit 1
           fi
           scripts/audio/format_wav_scp.sh --nj "${nj}" --cmd "${train_cmd}" \
@@ -144,7 +145,8 @@ if ! "${skip_data_prep}"; then
             "${data_feats}/${dset}/${name}.scp"
           utt_extra_files="${utt_extra_files} ${name}.scp"
         done
-      elif [ "${rir_model_type}" = rec_rir_pit ]; then
+      elif [ "${rir_model_type}" = rec_rir_pit ] \
+        || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
         for name in speech_direct1 speech_direct2 speech_reverb1 speech_reverb2; do
           cp "${data_feats}/org/${dset}/${name}.scp" \
             "${data_feats}/${dset}/${name}.scp"
@@ -181,7 +183,8 @@ if ! "${skip_train}"; then
 
     train_speech_mix_scp=wav.scp
     valid_speech_mix_scp=wav.scp
-    if [ "${rir_model_type}" = rec_rir_pit ]; then
+    if [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       if [ -f "${train_dir}/speech_mix_pit.scp" ]; then
         train_speech_mix_scp=speech_mix_pit.scp
       fi
@@ -220,7 +223,8 @@ if ! "${skip_train}"; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb.scp,speech_reverb,sound "
       valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct.scp,speech_direct,sound "
       valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb.scp,speech_reverb,sound "
-    elif [ "${rir_model_type}" = rec_rir_pit ]; then
+    elif [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "
@@ -264,7 +268,8 @@ if ! "${skip_train}"; then
 
     train_speech_mix_scp=wav.scp
     valid_speech_mix_scp=wav.scp
-    if [ "${rir_model_type}" = rec_rir_pit ]; then
+    if [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       if [ -f "${train_dir}/speech_mix_pit.scp" ]; then
         train_speech_mix_scp=speech_mix_pit.scp
       fi
@@ -296,7 +301,8 @@ if ! "${skip_train}"; then
       fold_length_param="--fold_length ${speech_fold_length} "
       fold_length_param+="--fold_length ${speech_fold_length} "
       fold_length_param+="--fold_length ${speech_fold_length} "
-    elif [ "${rir_model_type}" = rec_rir_pit ]; then
+    elif [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "

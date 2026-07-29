@@ -145,10 +145,17 @@ class RIRTask(AbsTask):
             "--rir_model_type",
             type=str,
             default="direct",
-            choices=["direct", "rec_rir", "rec_rir_pit", "daras"],
+            choices=[
+                "direct",
+                "rec_rir",
+                "rec_rir_pit",
+                "rec_rir_pit_ctf_split",
+                "daras",
+            ],
             help="RIR model family. 'direct' predicts waveform RIR directly; "
             "'rec_rir' uses the official Rec-RIR CTF model; "
             "'rec_rir_pit' trains a two-source Rec-RIR PIT baseline; "
+            "'rec_rir_pit_ctf_split' splits only the two-source CTF path; "
             "'daras' trains a DARAS-style blind RIR estimator.",
         )
         group.add_argument(
@@ -267,6 +274,18 @@ class RIRTask(AbsTask):
             model_conf = dict(args.model_conf)
             model_conf.pop("normalize_variance", None)
             model = ESPnetRecRIRPITModel(**model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_pit_ctf_split":
+            from espnet2.rir.rec_rir.espnet_model_pit_ctf_split import (
+                ESPnetRecRIRPITCTFSplitModel,
+            )
+
+            model_conf = dict(args.model_conf)
+            model_conf.pop("normalize_variance", None)
+            model = ESPnetRecRIRPITCTFSplitModel(**model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model
