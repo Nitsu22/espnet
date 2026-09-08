@@ -86,6 +86,9 @@ IEEE/ACM TASLP, 2016. Original RIRs and generated data are kept out of Git.
 
 ## Released Rec-RIR checkpoint evaluation
 
+Completed parity checks and the 6000-utterance evaluation are documented in
+[RESULTS_ACE_OFFICIAL.md](RESULTS_ACE_OFFICIAL.md).
+
 `local/evaluate_official_rec_rir_ace.sh` uses the `recrir` environment on an
 available lab GPU. It first compares ESPnet's existing network, transforms and
 PIM with the official implementation on one utterance per ACE RIR, in both
