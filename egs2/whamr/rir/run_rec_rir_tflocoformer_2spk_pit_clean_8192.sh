@@ -22,7 +22,12 @@ nj=32
 dumpdir=dump_rir_clean
 audio_format=wav
 speech_fold_length=32000
+# Keep the auxiliary RIR inputs from reducing the batch size.  The baseline
+# batches are determined by its speech inputs with the same fold length.
+rir_fold_length=32000
 prepare_rec_rir_pit_dump=true
+use_sweep_target=false
+use_room_param=false
 enh_rir_data_dir=../enh_rir/data
 rir_stats_dir=
 
@@ -40,7 +45,15 @@ if "${prepare_rec_rir_pit_dump}"; then
 fi
 
 data_feats=${dumpdir}/raw
-[ -z "${rir_stats_dir}" ] && rir_stats_dir=exp/rir_stats_${fs}_rec_rir_pit
+if [ -z "${rir_stats_dir}" ]; then
+  if "${use_sweep_target}"; then
+    rir_stats_dir=exp/rir_stats_${fs}_rec_rir_pit_sweep
+  elif "${use_room_param}"; then
+    rir_stats_dir=exp/rir_stats_${fs}_rec_rir_pit_rt60
+  else
+    rir_stats_dir=exp/rir_stats_${fs}_rec_rir_pit
+  fi
+fi
 
 if ! "${skip_train}"; then
   if [ "${stage}" -le 5 ] && [ "${stop_stage}" -ge 5 ]; then
@@ -71,15 +84,44 @@ if ! "${skip_train}"; then
     utils/split_scp.pl "${valid_dir}/${valid_speech_mix_scp}" ${split_scps}
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb2.scp,speech_reverb2,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct1.scp,speech_direct1,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct2.scp,speech_direct2,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb1.scp,speech_reverb1,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb2.scp,speech_reverb2,sound "
+    if "${use_sweep_target}"; then
+      for rir_ref_scp in \
+        "${train_dir}/rir_ref1.scp" \
+        "${train_dir}/rir_ref2.scp" \
+        "${valid_dir}/rir_ref1.scp" \
+        "${valid_dir}/rir_ref2.scp"; do
+        if [ ! -f "${rir_ref_scp}" ]; then
+          echo "Missing required RIR reference scp: ${rir_ref_scp}" >&2
+          exit 1
+        fi
+      done
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref1.scp,rir_ref1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref2.scp,rir_ref2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref1.scp,rir_ref1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref2.scp,rir_ref2,sound "
+    else
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb2.scp,speech_reverb2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct1.scp,speech_direct1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct2.scp,speech_direct2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb1.scp,speech_reverb1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb2.scp,speech_reverb2,sound "
+    fi
+    if "${use_room_param}"; then
+      for room_param_scp in \
+        "${train_dir}/room_param_npz.scp" \
+        "${valid_dir}/room_param_npz.scp"; do
+        if [ ! -f "${room_param_scp}" ]; then
+          echo "Missing required room parameter scp: ${room_param_scp}" >&2
+          exit 1
+        fi
+      done
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
+    fi
 
     mkdir -p "${rir_stats_dir}"
     ${train_cmd} JOB=1:"${nj_stats}" "${logdir}"/stats.JOB.log \
@@ -114,31 +156,59 @@ if ! "${skip_train}"; then
     fi
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "
-    train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb2.scp,speech_reverb2,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct1.scp,speech_direct1,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct2.scp,speech_direct2,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb1.scp,speech_reverb1,sound "
-    valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb2.scp,speech_reverb2,sound "
+    if "${use_sweep_target}"; then
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref1.scp,rir_ref1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref2.scp,rir_ref2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref1.scp,rir_ref1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref2.scp,rir_ref2,sound "
+    else
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb1.scp,speech_reverb1,sound "
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb2.scp,speech_reverb2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct1.scp,speech_direct1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_direct2.scp,speech_direct2,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb1.scp,speech_reverb1,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb2.scp,speech_reverb2,sound "
+    fi
+    if "${use_room_param}"; then
+      for room_param_scp in \
+        "${train_dir}/room_param_npz.scp" \
+        "${valid_dir}/room_param_npz.scp"; do
+        if [ ! -f "${room_param_scp}" ]; then
+          echo "Missing required room parameter scp: ${room_param_scp}" >&2
+          exit 1
+        fi
+      done
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/room_param_npz.scp,room_param_path,text "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/room_param_npz.scp,room_param_path,text "
+    fi
 
     train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape "
-    train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_direct1_shape "
-    train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_direct2_shape "
-    train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_reverb1_shape "
-    train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_reverb2_shape "
     valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
-    valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_direct1_shape "
-    valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_direct2_shape "
-    valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_reverb1_shape "
-    valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_reverb2_shape "
     fold_length_param="--fold_length ${speech_fold_length} "
-    fold_length_param+="--fold_length ${speech_fold_length} "
-    fold_length_param+="--fold_length ${speech_fold_length} "
-    fold_length_param+="--fold_length ${speech_fold_length} "
-    fold_length_param+="--fold_length ${speech_fold_length} "
+    if "${use_sweep_target}"; then
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/rir_ref1_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/rir_ref2_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/rir_ref1_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/rir_ref2_shape "
+      fold_length_param+="--fold_length ${rir_fold_length} "
+      fold_length_param+="--fold_length ${rir_fold_length} "
+    else
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_direct1_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_direct2_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_reverb1_shape "
+      train_shape_param+="--train_shape_file ${rir_stats_dir}/train/speech_reverb2_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_direct1_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_direct2_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_reverb1_shape "
+      valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/speech_reverb2_shape "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+      fold_length_param+="--fold_length ${speech_fold_length} "
+    fi
 
     mkdir -p "${rir_exp}"
     ${python} -m espnet2.bin.launch \

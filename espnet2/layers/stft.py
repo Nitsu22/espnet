@@ -36,7 +36,11 @@ class Stft(torch.nn.Module, InversibleInterface):
         self.center = center
         self.normalized = normalized
         self.onesided = onesided
-        if window is not None and not hasattr(torch, f"{window}_window"):
+        if (
+            window is not None
+            and window != "sqrt_hann"
+            and not hasattr(torch, f"{window}_window")
+        ):
             raise ValueError(f"{window} window is not implemented")
         self.window = window
 
@@ -78,10 +82,13 @@ class Stft(torch.nn.Module, InversibleInterface):
         # output: (Batch, Freq, Frames, 2=real_imag)
         # or (Batch, Channel, Freq, Frames, 2=real_imag)
         if self.window is not None:
-            window_func = getattr(torch, f"{self.window}_window")
+            window_name = "hann" if self.window == "sqrt_hann" else self.window
+            window_func = getattr(torch, f"{window_name}_window")
             window = window_func(
                 self.win_length, dtype=input.dtype, device=input.device
             )
+            if self.window == "sqrt_hann":
+                window = window.sqrt()
         else:
             window = None
 
@@ -189,9 +196,12 @@ class Stft(torch.nn.Module, InversibleInterface):
         input = to_complex(input)
 
         if self.window is not None:
-            window_func = getattr(torch, f"{self.window}_window")
+            window_name = "hann" if self.window == "sqrt_hann" else self.window
+            window_func = getattr(torch, f"{window_name}_window")
             datatype = input.real.dtype
             window = window_func(self.win_length, dtype=datatype, device=input.device)
+            if self.window == "sqrt_hann":
+                window = window.sqrt()
         else:
             window = None
 

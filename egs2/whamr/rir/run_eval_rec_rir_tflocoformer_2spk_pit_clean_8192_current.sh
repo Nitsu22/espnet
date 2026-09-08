@@ -9,6 +9,7 @@ train_config=
 model_file=
 test_set=tt_mix_clean_reverb_min_8k
 wav_scp=
+room_param_scp=
 output_dir=
 score_dir=
 device=cuda
@@ -31,6 +32,8 @@ snapshot_tag=
 if [ ! -f "${wav_scp}" ]; then
   wav_scp="dump_rir_clean/raw/${test_set}/wav.scp"
 fi
+[ -z "${room_param_scp}" ] && \
+  room_param_scp="dump_rir_clean/raw/${test_set}/room_param_npz.scp"
 
 if [ ! -f "${train_config}" ]; then
   echo "Missing train config: ${train_config}" >&2
@@ -78,4 +81,14 @@ if ! "${skip_score}" && [ "${stage}" -le 8 ] && [ "${stop_stage}" -ge 8 ]; then
     --out_dir "${score_dir}" \
     --sample_rate "${sample_rate}" \
     --rir_length "${rir_length}"
+  if [ -f "${output_dir}/rt60_pred.scp" ]; then
+    if [ ! -f "${room_param_scp}" ]; then
+      echo "Missing RT60 reference scp: ${room_param_scp}" >&2
+      exit 1
+    fi
+    python local/score_rt60_direct.py \
+      --prediction_scp "${output_dir}/rt60_pred.scp" \
+      --room_param_scp "${room_param_scp}" \
+      --output_dir "${score_dir}/rt60_direct"
+  fi
 fi

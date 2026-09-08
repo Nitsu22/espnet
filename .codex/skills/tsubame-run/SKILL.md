@@ -15,7 +15,7 @@ Do not add broad TSUBAME documentation, unused scheduler notes, one-off experime
 
 - midgar workspace: `/net/midgar/work2/nitsu/learning/tf-locoformer/espnet`
 - TSUBAME repository: `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet`
-- Existing qsub examples: `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh_rir/qsub*.sh`
+- Existing qsub examples: `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh_rir/qsub/*.sh`
 - Main TSUBAME run directory for current work: `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh_rir`
 
 ## Workflow
@@ -37,9 +37,12 @@ Do not add broad TSUBAME documentation, unused scheduler notes, one-off experime
 3. Move to the recipe directory for the run.
    - For current `enh_rir` work, use `cd /gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh_rir`.
    - If the user targets another ESPnet recipe, use that recipe's directory but still use the closest working qsub example.
+   - Submit qsub scripts from the recipe directory, not from inside its `qsub/` directory.
 
 4. Create a qsub script from a nearby working example.
-   - Prefer copying an existing `qsub*.sh` from the same recipe and same GPU scale.
+   - Store qsub scripts in the recipe's `qsub/` directory, creating it when needed.
+   - Before creating one, inspect existing qsub scripts and reuse one for the same experiment's continuation or rerun instead of adding unnecessary duplicates.
+   - Prefer copying an existing qsub script from the same recipe and same GPU scale.
    - Do not overwrite an existing qsub script without checking its contents.
    - Limit TSUBAME-side edits to qsub scripts and run-only artifacts unless the user explicitly asks otherwise.
    - Match the `run*.sh` command, `--ngpu`, `--stage`, `--stop_stage`, and optional args to the requested run.
@@ -47,8 +50,8 @@ Do not add broad TSUBAME documentation, unused scheduler notes, one-off experime
    - Existing examples use `module load cuda/11.8.0`, `conda activate tf-locoformer`, and conda under `/gs/bs/tga-shinoda/nitsu/anaconda3`.
 
 5. Submit the job.
-   - Test run: set `#$ -l h_rt=00:03:00` or less, then run `qsub qsub...sh`.
-   - Production run: use the intended walltime and run `qsub -g tga-shinoda qsub...sh`.
+   - Test run: set `#$ -l h_rt=00:03:00` or less, then run `qsub qsub/<script>.sh`.
+   - Production run: use the intended walltime and run `qsub -g tga-shinoda qsub/<script>.sh`.
    - Do not add `-g tga-shinoda` for the short test run unless the user explicitly requests it.
    - If asked to continue after another job finishes, check `qstat`, identify the correct job id, and submit with `qsub -hold_jid <job_id> ...`.
    - Do not guess `hold_jid`; confirm the dependency job id before submitting.

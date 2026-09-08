@@ -23,6 +23,10 @@ from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
+from espnet2.enh.loss.criterions.tfgridnet_wav_mag_mc import (
+    TFGridNetWavMag,
+    TFGridNetWavMagMCPIT,
+)
 from espnet2.enh.loss.criterions.sepreformer import (
     SepReformerMagnitudeLoss,
     SepReformerTimeLoss,
@@ -178,6 +182,7 @@ loss_wrapper_choices = ClassChoices(
     name="loss_wrappers",
     classes=dict(
         pit=PITSolver,
+        tfgridnet_wav_mag_mc_pit=TFGridNetWavMagMCPIT,
         fixed_order=FixedOrderSolver,
         multilayer_pit=MultiLayerPITSolver,
         sepreformer_pit=SepReformerPITSolver,
@@ -192,6 +197,7 @@ criterion_choices = ClassChoices(
     name="criterions",
     classes=dict(
         ci_sdr=CISDRLoss,
+        tfgridnet_wav_mag=TFGridNetWavMag,
         coh=FrequencyDomainAbsCoherence,
         sdr=SDRLoss,
         si_snr=SISNRLoss,

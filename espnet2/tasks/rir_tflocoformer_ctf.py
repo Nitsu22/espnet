@@ -129,6 +129,10 @@ class RIRTFLocoformerCTFTask(AbsTask):
             "speech_direct2",
             "speech_reverb1",
             "speech_reverb2",
+            "rir_ref1",
+            "rir_ref2",
+            "room_param_path",
+            "t60",
             "category",
             "fs",
         )

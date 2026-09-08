@@ -1,0 +1,86 @@
+init: xavier_uniform
+max_epoch: 150
+use_amp: false
+batch_type: folded
+batch_size: 4
+num_workers: 4
+
+preprocessor: rir
+preprocessor_conf:
+    speech_sample_rate: 8000
+    rir_sample_rate: 8000
+    rir_length: &rir_length 8192
+    rir_target: reverberant
+    rir_source_index: 0
+    rir_mic_index: 0
+    predict_all_sources: true
+    predict_all_mics: false
+    force_single_channel: true
+    speech_segment: 32000
+    rir_normalize: none
+    rir_crop_mode: right
+    rir_pad_mode: right
+
+model_conf:
+    normalize_variance: true
+
+optim: adamw
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 1.0e-02
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+    warmup_steps: 4000
+    mode: min
+    factor: 0.5
+    patience: 3
+
+encoder: &encoder stft
+encoder_conf:
+    n_fft: &n_fft 256
+    hop_length: &hop_length 64
+decoder: *encoder
+decoder_conf:
+    n_fft: *n_fft
+    hop_length: *hop_length
+separator: tflocoformer
+separator_conf:
+    num_spk: 2
+    n_layers: 2
+    emb_dim: 96
+    norm_type: rmsgroupnorm
+    num_groups: 4
+    tf_order: ft
+    n_heads: 4
+    flash_attention: false
+    attention_dim: 128
+    pos_enc: rope
+    ffn_type:
+        - swiglu_conv1d
+        - swiglu_conv1d
+    ffn_hidden_dim:
+        - 128
+        - 128
+    conv1d_kernel: 8
+    conv1d_shift: 1
+    dropout: 0.0
+    eps: 1.0e-5
+
+criterions:
+  - name: mse
+    conf:
+        name: rir_mse_loss
+    wrapper: pit
+    wrapper_conf:
+        weight: 1.0
+        independent_perm: true

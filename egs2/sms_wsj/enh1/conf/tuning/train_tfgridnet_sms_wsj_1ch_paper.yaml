@@ -1,0 +1,68 @@
+# TF-GridNet TASLP 2023, SMS-WSJ DNN1: Sections III-E, V-G, VI-B.
+# Paper-unspecified settings follow Roland's final run (user instruction).
+seed: 0
+num_workers: 4
+iterator_type: sequence
+batch_type: unsorted
+batch_size: 4
+# Keep every DDP step at exactly one utterance per GPU.
+drop_last_iter: true
+max_epoch: 100
+patience: 5
+val_scheduler_criterion: [valid, loss]
+early_stopping_criterion: [valid, loss, min]
+best_model_criterion: [[valid, loss, min]]
+keep_nbest_models: 5
+grad_clip: 1.0
+accum_grad: 1
+train_dtype: float32
+use_amp: false
+cudnn_deterministic: true
+cudnn_benchmark: false
+init: xavier_uniform
+init_param: []
+optim: adam
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.0
+scheduler: reducelronplateau
+scheduler_conf:
+  mode: min
+  factor: 0.5
+  patience: 3
+log_interval: 100
+use_tensorboard: true
+encoder: same
+decoder: same
+separator: tfgridnet
+separator_conf:
+  n_srcs: 2
+  n_fft: 256
+  stride: 64
+  window: sqrt_hann
+  n_imics: 1
+  n_layers: 4
+  lstm_hidden_units: 192
+  attn_n_head: 4
+  attn_approx_qk_dim: 512
+  emb_dim: 48
+  emb_ks: 4
+  emb_hs: 1
+  activation: prelu
+  eps: 1.0e-05
+  ref_channel: 0
+  return_loss_metadata: true
+criterions:
+  - name: tfgridnet_wav_mag
+    conf: {n_fft: 256, stride: 64, window: sqrt_hann}
+    wrapper: tfgridnet_wav_mag_mc_pit
+    wrapper_conf: {weight: 1.0}
+preprocessor: enh
+preprocessor_conf:
+  speech_segment: 32000
+  avoid_allzero_segment: false
+num_spk: 2
+sample_rate: 8000
+force_single_channel: true
+speech_volume_normalize: null

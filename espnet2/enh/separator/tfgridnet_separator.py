@@ -72,6 +72,7 @@ class TFGridNet(AbsSeparator):
         eps=1.0e-5,
         use_builtin_complex=False,
         ref_channel=-1,
+        return_loss_metadata=False,
     ):
         super().__init__()
         self.n_srcs = n_srcs
@@ -80,6 +81,7 @@ class TFGridNet(AbsSeparator):
         assert n_fft % 2 == 0
         n_freqs = n_fft // 2 + 1
         self.ref_channel = ref_channel
+        self.return_loss_metadata = return_loss_metadata
 
         self.enc = STFTEncoder(
             n_fft, n_fft, stride, window=window, use_builtin_complex=use_builtin_complex
@@ -156,6 +158,12 @@ class TFGridNet(AbsSeparator):
         batch = batch.view([n_batch, self.n_srcs, 2, n_frames, n_freqs])
         batch = new_complex_like(batch0, (batch[:, :, 0], batch[:, :, 1]))
 
+        others = OrderedDict()
+        if self.return_loss_metadata:
+            # The paper evaluates waveform losses in mixture-normalized units.
+            others["tfgridnet_mix_std"] = mix_std_.squeeze(-1)
+            others["tfgridnet_lengths"] = ilens
+
         batch = self.dec(batch.view(-1, n_frames, n_freqs), ilens)[0]  # [B, n_srcs, -1]
 
         batch = self.pad2(batch.view([n_batch, self.num_spk, -1]), n_samples)
@@ -164,7 +172,7 @@ class TFGridNet(AbsSeparator):
 
         batch = [batch[:, src] for src in range(self.num_spk)]
 
-        return batch, ilens, OrderedDict()
+        return batch, ilens, others
 
     @property
     def num_spk(self):

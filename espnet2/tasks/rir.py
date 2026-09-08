@@ -148,12 +148,15 @@ class RIRTask(AbsTask):
             choices=[
                 "direct",
                 "rec_rir",
+                "rec_rir_lag_narrow",
                 "rec_rir_pit",
                 "rec_rir_pit_ctf_split",
                 "daras",
             ],
             help="RIR model family. 'direct' predicts waveform RIR directly; "
             "'rec_rir' uses the official Rec-RIR CTF model; "
+            "'rec_rir_lag_narrow' uses explicit lag features followed by "
+            "narrow-band CTF blocks; "
             "'rec_rir_pit' trains a two-source Rec-RIR PIT baseline; "
             "'rec_rir_pit_ctf_split' splits only the two-source CTF path; "
             "'daras' trains a DARAS-style blind RIR estimator.",
@@ -264,6 +267,18 @@ class RIRTask(AbsTask):
             model_conf = dict(args.model_conf)
             model_conf.pop("normalize_variance", None)
             model = ESPnetRecRIRModel(**model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_lag_narrow":
+            from espnet2.rir.rec_rir.espnet_model_lag_narrow import (
+                ESPnetRecRIRLagNarrowModel,
+            )
+
+            model_conf = dict(args.model_conf)
+            model_conf.pop("normalize_variance", None)
+            model = ESPnetRecRIRLagNarrowModel(**model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model

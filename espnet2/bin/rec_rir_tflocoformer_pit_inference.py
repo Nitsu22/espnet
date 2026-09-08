@@ -38,10 +38,17 @@ def main(cmd=None):
     if not hasattr(model, "estimate_rir"):
         raise RuntimeError("The loaded model does not support estimate_rir()")
     model = model.to(dtype=dtype, device=device).eval()
+    predict_rt60 = bool(getattr(model, "rt60_auxiliary", False))
+    if predict_rt60 and not hasattr(model, "estimate_rir_with_rt60"):
+        raise RuntimeError(
+            "The RT60-enabled model does not support estimate_rir_with_rt60()"
+        )
 
     output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     reader = SoundScpReader(args.wav_scp, dtype=np.float32, always_2d=False)
     uids = list(reader.keys())
+    rt60_predictions = {}
     with SoundScpWriter(
         output_dir / "rir1", output_dir / "rir1" / "wav.scp"
     ) as writer1, SoundScpWriter(
@@ -57,7 +64,19 @@ def main(cmd=None):
                 wav = wav[:, 0]
             speech = torch.as_tensor(wav, dtype=dtype, device=device)
             with torch.no_grad():
-                rir = model.estimate_rir(speech, rir_length=args.rir_length)
+                if predict_rt60:
+                    rir, rt60_pred = model.estimate_rir_with_rt60(
+                        speech, rir_length=args.rir_length
+                    )
+                    rt60_values = rt60_pred.detach().cpu().float().reshape(-1)
+                    if rt60_values.numel() != 1:
+                        raise RuntimeError(
+                            f"{uid}: expected one RT60 prediction, "
+                            f"got shape {tuple(rt60_pred.shape)}"
+                        )
+                    rt60_predictions[uid] = float(rt60_values.item())
+                else:
+                    rir = model.estimate_rir(speech, rir_length=args.rir_length)
             rir = rir.detach().cpu().float().numpy()
             if rir.ndim == 3:
                 rir = rir[0]
@@ -71,6 +90,10 @@ def main(cmd=None):
         with (output_dir / "rir.scp").open("w", encoding="utf-8") as f:
             for uid in uids:
                 f.write(f"{uid} {writer1.get_path(uid)} {writer2.get_path(uid)}\n")
+        if predict_rt60:
+            with (output_dir / "rt60_pred.scp").open("w", encoding="utf-8") as f:
+                for uid in uids:
+                    f.write(f"{uid} {rt60_predictions[uid]:.10g}\n")
 
 
 if __name__ == "__main__":

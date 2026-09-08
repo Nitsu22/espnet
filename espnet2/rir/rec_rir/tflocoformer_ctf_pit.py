@@ -4,6 +4,7 @@ from typing import Dict, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from packaging.version import parse as V
 from rotary_embedding_torch import RotaryEmbedding
 from typeguard import typechecked
@@ -144,6 +145,244 @@ class TFLocoformerCTFPredictor(nn.Module):
         return self._num_spk
 
 
+class TFLocoformerSlotSplitCTFPredictor(TFLocoformerCTFPredictor):
+    """TF-Locoformer CTF predictor with slot-conditioned speaker branches.
+
+    The first blocks process one shared stream.  Learned slot embeddings then
+    create one activation stream per output speaker.  The remaining blocks are
+    applied after folding the speaker axis into the batch axis, so their weights
+    are shared while their activations are speaker-specific.  Time pooling and
+    CTF heads are independent for every output slot.
+    """
+
+    def __init__(
+        self,
+        *args,
+        num_shared_layers: int = 2,
+        slot_embedding_std: float = 0.02,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.num_shared_layers = int(num_shared_layers)
+        self.slot_embedding_std = float(slot_embedding_std)
+        if not 0 < self.num_shared_layers < self.n_layers:
+            raise ValueError(
+                "num_shared_layers must satisfy 0 < num_shared_layers < n_layers: "
+                f"num_shared_layers={self.num_shared_layers}, n_layers={self.n_layers}"
+            )
+        if self.slot_embedding_std <= 0.0:
+            raise ValueError(
+                "slot_embedding_std must be positive: "
+                f"{self.slot_embedding_std}"
+            )
+
+        emb_dim = int(self.conv[0].out_channels)
+        self.slot_embeddings = nn.Parameter(torch.empty(self._num_spk, emb_dim))
+        nn.init.normal_(self.slot_embeddings, mean=0.0, std=self.slot_embedding_std)
+
+        # Remove the joint baseline pooling/head.  The TF-Locoformer block list
+        # remains unchanged and is split only by its forward execution path.
+        del self.weight_layer
+        del self.ctf_head
+        self.weight_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(emb_dim, emb_dim),
+                    nn.LeakyReLU(),
+                    nn.Linear(emb_dim, 1),
+                    nn.Softmax(dim=2),
+                )
+                for _ in range(self._num_spk)
+            ]
+        )
+        self.ctf_heads = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(emb_dim, emb_dim),
+                    nn.LeakyReLU(),
+                    nn.Linear(emb_dim, 2 * self.ctf_taps),
+                )
+                for _ in range(self._num_spk)
+            ]
+        )
+
+    def _apply_slot_blocks(self, batch: torch.Tensor) -> torch.Tensor:
+        """Return slot-specific activations as [B, S, C, T, F]."""
+        for block in self.blocks[: self.num_shared_layers]:
+            batch = block(batch)
+
+        batch = batch.unsqueeze(1) + self.slot_embeddings.view(
+            1, self._num_spk, -1, 1, 1
+        )
+        n_batch, num_spk, channels, frames, freqs = batch.shape
+        batch = batch.reshape(n_batch * num_spk, channels, frames, freqs)
+        for block in self.blocks[self.num_shared_layers :]:
+            batch = block(batch)
+        return batch.reshape(n_batch, num_spk, channels, frames, freqs)
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        ilens: Optional[torch.Tensor] = None,
+        additional: Optional[Dict] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], OrderedDict]:
+        if input.ndim != 3:
+            raise ValueError(f"Expected complex input [B, T, F], got {input.shape}")
+        if not torch.is_complex(input):
+            raise TypeError(
+                "TFLocoformerSlotSplitCTFPredictor expects a complex tensor"
+            )
+        batch0 = input.unsqueeze(1)
+        batch = torch.cat((batch0.real, batch0.imag), dim=1)
+        n_batch, _, _, n_freqs = batch.shape
+        if n_freqs != self.input_dim:
+            raise ValueError(f"Expected {self.input_dim} frequency bins, got {n_freqs}")
+
+        with torch.cuda.amp.autocast(enabled=False):
+            batch = self.conv(batch.float())
+        slot_features = self._apply_slot_blocks(batch)
+
+        ctf_parts = []
+        for slot_idx in range(self._num_spk):
+            x = slot_features[:, slot_idx].permute(0, 3, 2, 1).contiguous()
+            x_ctf = (x * self.weight_layers[slot_idx](x)).sum(dim=2)
+            ctf_part = self.ctf_heads[slot_idx](x_ctf).reshape(
+                n_batch, n_freqs, 2, self.ctf_taps
+            )
+            ctf_parts.append(ctf_part)
+
+        ctf = torch.stack(ctf_parts, dim=1)
+        ctf = ctf.permute(0, 1, 3, 2, 4).contiguous().float()
+        ctf = torch.complex(ctf[:, :, 0], ctf[:, :, 1]).contiguous()
+        return ctf, ilens, OrderedDict()
+
+
+class TFLocoformerRoomPathCTFPredictor(TFLocoformerCTFPredictor):
+    """TF-Locoformer CTF predictor with room/path-factorized output heads.
+
+    All TF-Locoformer blocks form one shared mixture encoder.  The encoded
+    activation is pooled into one room code and two slot-conditioned path
+    codes.  A single decoder processes each room/path pair independently after
+    folding the slot axis into the batch axis.
+    """
+
+    def __init__(
+        self,
+        *args,
+        slot_embedding_std: float = 0.02,
+        predict_rt60: bool = False,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.slot_embedding_std = float(slot_embedding_std)
+        self.predict_rt60 = bool(predict_rt60)
+        if self.slot_embedding_std <= 0.0:
+            raise ValueError(
+                "slot_embedding_std must be positive: "
+                f"{self.slot_embedding_std}"
+            )
+
+        emb_dim = int(self.conv[0].out_channels)
+        self.slot_embeddings = nn.Parameter(torch.empty(self._num_spk, emb_dim))
+        nn.init.normal_(self.slot_embeddings, mean=0.0, std=self.slot_embedding_std)
+
+        # Replace the baseline joint pooling/head with separate room and path
+        # pooling followed by one decoder shared by both output slots.
+        del self.weight_layer
+        del self.ctf_head
+        self.room_weight_layer = nn.Sequential(
+            nn.Linear(emb_dim, emb_dim),
+            nn.LeakyReLU(),
+            nn.Linear(emb_dim, 1),
+            nn.Softmax(dim=2),
+        )
+        self.path_weight_layer = nn.Sequential(
+            nn.Linear(emb_dim, emb_dim),
+            nn.LeakyReLU(),
+            nn.Linear(emb_dim, 1),
+            nn.Softmax(dim=2),
+        )
+        self.ctf_decoder = nn.Sequential(
+            nn.Linear(2 * emb_dim, emb_dim),
+            nn.LeakyReLU(),
+            nn.Linear(emb_dim, 2 * self.ctf_taps),
+        )
+        if self.predict_rt60:
+            self.rt60_head = nn.Sequential(
+                nn.Linear(emb_dim, emb_dim),
+                nn.LeakyReLU(),
+                nn.Linear(emb_dim, 1),
+                nn.Softplus(),
+            )
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        ilens: Optional[torch.Tensor] = None,
+        additional: Optional[Dict] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], OrderedDict]:
+        if input.ndim != 3:
+            raise ValueError(f"Expected complex input [B, T, F], got {input.shape}")
+        if not torch.is_complex(input):
+            raise TypeError(
+                "TFLocoformerRoomPathCTFPredictor expects a complex tensor"
+            )
+        batch0 = input.unsqueeze(1)
+        batch = torch.cat((batch0.real, batch0.imag), dim=1)
+        n_batch, _, _, n_freqs = batch.shape
+        if n_freqs != self.input_dim:
+            raise ValueError(f"Expected {self.input_dim} frequency bins, got {n_freqs}")
+
+        with torch.cuda.amp.autocast(enabled=False):
+            batch = self.conv(batch.float())
+        for block in self.blocks:
+            batch = block(batch)
+
+        # [B, C, T, F] -> [B, F, T, C]
+        encoded = batch.permute(0, 3, 2, 1).contiguous()
+        room_code = (encoded * self.room_weight_layer(encoded)).sum(dim=2)
+
+        # The same path-pooling weights are used for both independently
+        # slot-conditioned streams.
+        slot_features = batch.unsqueeze(1) + self.slot_embeddings.view(
+            1, self._num_spk, -1, 1, 1
+        )
+        channels, frames, freqs = slot_features.shape[2:]
+        path_features = slot_features.reshape(
+            n_batch * self._num_spk, channels, frames, freqs
+        )
+        path_features = path_features.permute(0, 3, 2, 1).contiguous()
+        path_codes = (
+            path_features * self.path_weight_layer(path_features)
+        ).sum(dim=2)
+        path_codes = path_codes.reshape(
+            n_batch, self._num_spk, n_freqs, channels
+        )
+
+        room_codes = room_code.unsqueeze(1).expand(
+            -1, self._num_spk, -1, -1
+        )
+        decoder_input = torch.cat((room_codes, path_codes), dim=-1).reshape(
+            n_batch * self._num_spk, n_freqs, 2 * channels
+        )
+        ctf = self.ctf_decoder(decoder_input).reshape(
+            n_batch, self._num_spk, n_freqs, 2, self.ctf_taps
+        )
+        ctf = ctf.permute(0, 1, 3, 2, 4).contiguous().float()
+        ctf = torch.complex(ctf[:, :, 0], ctf[:, :, 1]).contiguous()
+
+        auxiliary = OrderedDict(
+            room_code=room_code,
+            path_codes=path_codes,
+        )
+        if self.predict_rt60:
+            # The room code is already time-invariant.  Average only over
+            # frequency so the auxiliary estimate cannot use either path code.
+            room_global = room_code.mean(dim=1)
+            auxiliary["rt60_pred"] = self.rt60_head(room_global).squeeze(-1)
+        return ctf, ilens, auxiliary
+
+
 class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
     """Two-source CTF-only Rec-RIR wrapper using TF-Locoformer blocks."""
 
@@ -159,6 +398,12 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         num_spk: int = 2,
         ctf_taps: int = 60,
         n_layers: int = 4,
+        slot_split: bool = False,
+        room_path_factorized: bool = False,
+        rt60_auxiliary: bool = False,
+        rt60_loss_weight: float = 0.1,
+        num_shared_layers: int = 2,
+        slot_embedding_std: float = 0.02,
         emb_dim: int = 96,
         norm_type: str = "rmsgroupnorm",
         num_groups: int = 4,
@@ -177,6 +422,7 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         normalize_by_mix: bool = True,
         extract_feats_in_collect_stats: bool = False,
         pim_sweep_duration: float = 8.192,
+        reconstruction_signal: str = "speech",
     ):
         super().__init__()
         self.sr = int(sr)
@@ -186,6 +432,12 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         self.loss_type = loss_type
         self.normalize_by_mix = normalize_by_mix
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
+        self.reconstruction_signal = reconstruction_signal.lower()
+        if self.reconstruction_signal not in ("speech", "sweep"):
+            raise ValueError(
+                "reconstruction_signal must be 'speech' or 'sweep': "
+                f"{reconstruction_signal}"
+            )
         self.transforms = RecRIRTransforms(
             sr=sr,
             n_fft=n_fft,
@@ -193,7 +445,25 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
             win_type=win_type,
             win_len=win_len,
         )
-        self.ctf_predictor = TFLocoformerCTFPredictor(
+        if slot_split and room_path_factorized:
+            raise ValueError(
+                "slot_split and room_path_factorized cannot both be enabled"
+            )
+        if rt60_auxiliary and not room_path_factorized:
+            raise ValueError(
+                "rt60_auxiliary requires room_path_factorized=true"
+            )
+        if rt60_loss_weight < 0.0:
+            raise ValueError(
+                f"rt60_loss_weight must be non-negative: {rt60_loss_weight}"
+            )
+        if slot_split:
+            predictor_class = TFLocoformerSlotSplitCTFPredictor
+        elif room_path_factorized:
+            predictor_class = TFLocoformerRoomPathCTFPredictor
+        else:
+            predictor_class = TFLocoformerCTFPredictor
+        predictor_kwargs = dict(
             input_dim=num_freqs,
             num_spk=self.num_spk,
             ctf_taps=ctf_taps,
@@ -213,14 +483,53 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
             dropout=dropout,
             eps=eps,
         )
+        if slot_split:
+            predictor_kwargs.update(
+                num_shared_layers=num_shared_layers,
+                slot_embedding_std=slot_embedding_std,
+            )
+        elif room_path_factorized:
+            predictor_kwargs.update(
+                slot_embedding_std=slot_embedding_std,
+                predict_rt60=rt60_auxiliary,
+            )
+        self.slot_split = bool(slot_split)
+        self.room_path_factorized = bool(room_path_factorized)
+        self.rt60_auxiliary = bool(rt60_auxiliary)
+        self.rt60_loss_weight = float(rt60_loss_weight)
+        self.ctf_predictor = predictor_class(**predictor_kwargs)
         self.pim = RecRIRPIM(sr=sr, sweep_duration=pim_sweep_duration)
+        if self.reconstruction_signal == "sweep":
+            reconstruction_sweep = self.pim.sinesweep.clone()
+            reconstruction_sweep_stft = self.transforms.stft(
+                reconstruction_sweep, "complex"
+            ).to(dtype=torch.complex64)
+            reconstruction_sweep_stft_real = reconstruction_sweep_stft.real
+            reconstruction_sweep_stft_imag = reconstruction_sweep_stft.imag
+        else:
+            reconstruction_sweep = torch.empty(0)
+            reconstruction_sweep_stft_real = torch.empty(0)
+            reconstruction_sweep_stft_imag = torch.empty(0)
+        self.register_buffer(
+            "reconstruction_sweep", reconstruction_sweep, persistent=False
+        )
+        self.register_buffer(
+            "reconstruction_sweep_stft_real",
+            reconstruction_sweep_stft_real,
+            persistent=False,
+        )
+        self.register_buffer(
+            "reconstruction_sweep_stft_imag",
+            reconstruction_sweep_stft_imag,
+            persistent=False,
+        )
         self.permutations = tuple(itertools.permutations(range(self.num_spk)))
 
     def forward(
         self,
         speech_mix: torch.Tensor,
         speech_mix_lengths: torch.Tensor,
-        speech_direct1: torch.Tensor,
+        speech_direct1: Optional[torch.Tensor] = None,
         speech_direct1_lengths: Optional[torch.Tensor] = None,
         speech_direct2: Optional[torch.Tensor] = None,
         speech_direct2_lengths: Optional[torch.Tensor] = None,
@@ -228,65 +537,148 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         speech_reverb1_lengths: Optional[torch.Tensor] = None,
         speech_reverb2: Optional[torch.Tensor] = None,
         speech_reverb2_lengths: Optional[torch.Tensor] = None,
+        rir_ref1: Optional[torch.Tensor] = None,
+        rir_ref1_lengths: Optional[torch.Tensor] = None,
+        rir_ref2: Optional[torch.Tensor] = None,
+        rir_ref2_lengths: Optional[torch.Tensor] = None,
+        t60: Optional[torch.Tensor] = None,
+        t60_lengths: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
-        if speech_direct2 is None or speech_reverb1 is None or speech_reverb2 is None:
-            raise ValueError(
-                "speech_direct1/2 and speech_reverb1/2 are required for "
-                "TF-Locoformer CTF PIT training"
-            )
-
         speech_mix = self._to_mono(speech_mix)
-        direct_signals = [self._to_mono(speech_direct1), self._to_mono(speech_direct2)]
-        reverb_signals = [self._to_mono(speech_reverb1), self._to_mono(speech_reverb2)]
-        all_signals = [speech_mix] + direct_signals + reverb_signals
-        all_lengths = [
-            speech_mix_lengths,
-            speech_direct1_lengths,
-            speech_direct2_lengths,
-            speech_reverb1_lengths,
-            speech_reverb2_lengths,
-        ]
-        all_signals = self._trim_common_length(all_signals, all_lengths)
-        speech_mix = all_signals[0]
-        direct = torch.stack(all_signals[1:3], dim=1)
-        reverb = torch.stack(all_signals[3:5], dim=1)
+        if self.reconstruction_signal == "speech":
+            if any(
+                signal is None
+                for signal in (
+                    speech_direct1,
+                    speech_direct2,
+                    speech_reverb1,
+                    speech_reverb2,
+                )
+            ):
+                raise ValueError(
+                    "speech_direct1/2 and speech_reverb1/2 are required when "
+                    "reconstruction_signal='speech'"
+                )
+            direct_signals = [
+                self._to_mono(speech_direct1),
+                self._to_mono(speech_direct2),
+            ]
+            reverb_signals = [
+                self._to_mono(speech_reverb1),
+                self._to_mono(speech_reverb2),
+            ]
+            all_signals = [speech_mix] + direct_signals + reverb_signals
+            all_lengths = [
+                speech_mix_lengths,
+                speech_direct1_lengths,
+                speech_direct2_lengths,
+                speech_reverb1_lengths,
+                speech_reverb2_lengths,
+            ]
+            all_signals = self._trim_common_length(all_signals, all_lengths)
+            speech_mix = all_signals[0]
+            direct = torch.stack(all_signals[1:3], dim=1)
+            reverb = torch.stack(all_signals[3:5], dim=1)
+        else:
+            if rir_ref1 is None or rir_ref2 is None:
+                raise ValueError(
+                    "rir_ref1/2 are required when reconstruction_signal='sweep'"
+                )
+            speech_mix = self._trim_common_length(
+                [speech_mix], [speech_mix_lengths]
+            )[0]
+            rir = torch.stack(
+                [self._to_mono(rir_ref1), self._to_mono(rir_ref2)], dim=1
+            )
 
         if self.normalize_by_mix:
             scale = speech_mix.abs().amax(dim=1, keepdim=True).clamp_min(1.0e-8)
             speech_mix = speech_mix / scale
-            direct = direct / scale.unsqueeze(1)
-            reverb = reverb / scale.unsqueeze(1)
+            if self.reconstruction_signal == "speech":
+                direct = direct / scale.unsqueeze(1)
+                reverb = reverb / scale.unsqueeze(1)
 
         input_complex = self.transforms.stft(speech_mix.unsqueeze(1), "complex").to(
             dtype=torch.complex64
         )
-        direct_complex = self.transforms.stft(direct, "complex").to(
-            dtype=torch.complex64
-        )
-        reverb_complex = self.transforms.stft(reverb, "complex").to(
-            dtype=torch.complex64
-        )
-
-        est_ctf = self._estimate_ctf_from_complex(input_complex)
-        loss, best_perm = self._pit_rec_loss(
-            est_ctf=est_ctf,
-            direct=direct_complex,
-            reverb=reverb_complex,
-        )
+        est_ctf, auxiliary = self._estimate_ctf_and_aux_from_complex(input_complex)
+        if self.reconstruction_signal == "speech":
+            direct_complex = self.transforms.stft(direct, "complex").to(
+                dtype=torch.complex64
+            )
+            reverb_complex = self.transforms.stft(reverb, "complex").to(
+                dtype=torch.complex64
+            )
+            loss_rec, best_perm = self._pit_rec_loss(
+                est_ctf=est_ctf,
+                direct=direct_complex,
+                reverb=reverb_complex,
+            )
+        else:
+            sweep_reference = self._sweep_reference_stft(rir)
+            loss_rec, best_perm = self._pit_sweep_rec_loss(
+                est_ctf=est_ctf,
+                sweep_reference=sweep_reference,
+            )
+        loss = loss_rec
         stats = {
-            "loss": loss.detach(),
-            "loss_rec": loss.detach(),
+            "loss_rec": loss_rec.detach(),
             "pit_perm0_ratio": (best_perm == 0).float().mean().detach(),
         }
+        if self.reconstruction_signal == "sweep":
+            stats["loss_sweep"] = loss_rec.detach()
         batch_size = speech_mix.shape[0]
+        if self.rt60_auxiliary:
+            if t60 is None:
+                raise ValueError(
+                    "t60 is required when rt60_auxiliary=true"
+                )
+            if t60.numel() != batch_size:
+                raise ValueError(
+                    "Expected one T60 target per mixture: "
+                    f"batch_size={batch_size}, t60_shape={tuple(t60.shape)}"
+                )
+            target_t60 = t60.reshape(batch_size).to(
+                device=loss_rec.device,
+                dtype=loss_rec.dtype,
+            )
+            if not bool(torch.isfinite(target_t60).all()):
+                raise ValueError("T60 targets must be finite")
+            if not bool((target_t60 > 0.0).all()):
+                raise ValueError("T60 targets must be positive seconds")
+
+            pred_t60 = auxiliary["rt60_pred"]
+            if pred_t60.shape != target_t60.shape:
+                raise RuntimeError(
+                    "RT60 prediction/target shape mismatch: "
+                    f"prediction={tuple(pred_t60.shape)}, "
+                    f"target={tuple(target_t60.shape)}"
+                )
+            loss_rt60 = F.mse_loss(pred_t60, target_t60)
+            rt60_error = pred_t60 - target_t60
+            loss = loss_rec + self.rt60_loss_weight * loss_rt60
+            stats.update(
+                loss_rt60=loss_rt60.detach(),
+                rt60_mse=loss_rt60.detach(),
+                rt60_rmse=loss_rt60.detach().sqrt(),
+                rt60_mae=rt60_error.abs().mean().detach(),
+                rt60_bias=rt60_error.mean().detach(),
+            )
+        stats["loss"] = loss.detach()
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
 
     def _estimate_ctf_from_complex(self, input_complex: torch.Tensor) -> torch.Tensor:
+        est_ctf, _ = self._estimate_ctf_and_aux_from_complex(input_complex)
+        return est_ctf
+
+    def _estimate_ctf_and_aux_from_complex(
+        self, input_complex: torch.Tensor
+    ) -> Tuple[torch.Tensor, OrderedDict]:
         input_tf = input_complex.squeeze(1).transpose(1, 2).contiguous()
-        est_ctf, _, _ = self.ctf_predictor(input_tf)
-        return est_ctf.to(dtype=torch.complex64)
+        est_ctf, _, auxiliary = self.ctf_predictor(input_tf)
+        return est_ctf.to(dtype=torch.complex64), auxiliary
 
     def _pit_rec_loss(
         self,
@@ -312,6 +704,81 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         best_perm = losses.argmin(dim=0)
         selected = losses.gather(0, best_perm.unsqueeze(0)).squeeze(0)
         return selected.mean(), best_perm
+
+    @torch.no_grad()
+    def _sweep_reference_stft(self, rir: torch.Tensor) -> torch.Tensor:
+        """Return STFT(Sweep * reference RIR), cropped like speech targets."""
+        if rir.ndim != 3 or rir.shape[1] != self.num_spk:
+            raise ValueError(
+                "Expected reference RIR [B, S, T] with "
+                f"S={self.num_spk}, got {rir.shape}"
+            )
+        sweep = self.reconstruction_sweep.to(
+            device=rir.device, dtype=torch.float32
+        )
+        sweep_batch = sweep.view(1, 1, -1)
+        response = self._fft_convolve_real(sweep_batch, rir.float())
+        # The existing speech loss compares equal-length direct/reverberant
+        # utterances and discards the convolution tail.  Apply the same rule to
+        # the sweep excitation.
+        response = response[..., : sweep.shape[-1]]
+        return self.transforms.stft(response, "complex").to(dtype=torch.complex64)
+
+    def _pit_sweep_rec_loss(
+        self,
+        est_ctf: torch.Tensor,
+        sweep_reference: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if sweep_reference.ndim != 4:
+            raise ValueError(
+                "Expected sweep reference STFT [B, S, F, T], got "
+                f"{sweep_reference.shape}"
+            )
+        batch, num_spk, num_freqs, _ = sweep_reference.shape
+        if est_ctf.shape[:3] != (batch, num_spk, num_freqs):
+            raise ValueError(
+                "Estimated CTF/reference shape mismatch: "
+                f"est_ctf={est_ctf.shape}, reference={sweep_reference.shape}"
+            )
+
+        sweep_stft = torch.complex(
+            self.reconstruction_sweep_stft_real.float(),
+            self.reconstruction_sweep_stft_imag.float(),
+        ).to(
+            device=est_ctf.device, dtype=est_ctf.dtype
+        )
+        sweep_stft = sweep_stft.view(1, 1, num_freqs, -1).expand(
+            batch, num_spk, -1, -1
+        )
+        estimated_response = self._complex_convolve(sweep_stft, est_ctf)
+        estimated_response = estimated_response[..., : sweep_reference.shape[-1]]
+
+        perm_losses = []
+        for perm in self.permutations:
+            loss_rec = 0.0
+            for pred_idx, ref_idx in enumerate(perm):
+                src_rec = self._complex_loss(
+                    estimated_response[:, pred_idx],
+                    sweep_reference[:, ref_idx],
+                    reduction="none",
+                )
+                loss_rec = loss_rec + src_rec
+            perm_losses.append(loss_rec / self.num_spk)
+
+        losses = torch.stack(perm_losses, dim=0)
+        best_perm = losses.argmin(dim=0)
+        selected = losses.gather(0, best_perm.unsqueeze(0)).squeeze(0)
+        return selected.mean(), best_perm
+
+    @staticmethod
+    def _fft_convolve_real(signal: torch.Tensor, filt: torch.Tensor) -> torch.Tensor:
+        """Full real convolution along the last axis using torch FFT."""
+        output_length = signal.shape[-1] + filt.shape[-1] - 1
+        fft_length = 1 << (output_length - 1).bit_length()
+        signal_ft = torch.fft.rfft(signal, n=fft_length)
+        filt_ft = torch.fft.rfft(filt, n=fft_length)
+        output = torch.fft.irfft(signal_ft * filt_ft, n=fft_length)
+        return output[..., :output_length]
 
     def _complex_loss(
         self,
@@ -389,6 +856,17 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         speech_mix: torch.Tensor,
         speech_mix_lengths: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        est_ctf, _ = self.estimate_ctf_with_auxiliary(
+            speech_mix, speech_mix_lengths
+        )
+        return est_ctf
+
+    @torch.no_grad()
+    def estimate_ctf_with_auxiliary(
+        self,
+        speech_mix: torch.Tensor,
+        speech_mix_lengths: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, OrderedDict]:
         was_1d = speech_mix.dim() == 1
         if was_1d:
             speech_mix = speech_mix.unsqueeze(0)
@@ -401,10 +879,14 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         input_complex = self.transforms.stft(speech_mix.unsqueeze(1), "complex").to(
             dtype=torch.complex64
         )
-        est_ctf = self._estimate_ctf_from_complex(input_complex).flip(-1)
+        est_ctf, auxiliary = self._estimate_ctf_and_aux_from_complex(input_complex)
+        est_ctf = est_ctf.flip(-1)
         if was_1d:
-            return est_ctf[0]
-        return est_ctf
+            est_ctf = est_ctf[0]
+            auxiliary = OrderedDict(
+                (key, value[0]) for key, value in auxiliary.items()
+            )
+        return est_ctf, auxiliary
 
     @torch.no_grad()
     def estimate_rir(
@@ -414,6 +896,26 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         rir_length: int = 8192,
     ) -> torch.Tensor:
         ctf = self.estimate_ctf(speech_mix, speech_mix_lengths)
+        return self._ctf_to_rir(ctf, rir_length)
+
+    @torch.no_grad()
+    def estimate_rir_with_rt60(
+        self,
+        speech_mix: torch.Tensor,
+        speech_mix_lengths: Optional[torch.Tensor] = None,
+        rir_length: int = 8192,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if not self.rt60_auxiliary:
+            raise RuntimeError(
+                "estimate_rir_with_rt60() requires rt60_auxiliary=true"
+            )
+        ctf, auxiliary = self.estimate_ctf_with_auxiliary(
+            speech_mix, speech_mix_lengths
+        )
+        rir = self._ctf_to_rir(ctf, rir_length)
+        return rir, auxiliary["rt60_pred"]
+
+    def _ctf_to_rir(self, ctf: torch.Tensor, rir_length: int) -> torch.Tensor:
         if ctf.dim() == 3:
             rirs = [
                 self.pim.ctf_to_rir(

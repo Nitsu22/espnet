@@ -22,3 +22,12 @@ Use this skill for lab GPU servers only. For TSUBAME/qsub jobs, use `.codex/skil
 - Treat lab GPU hosts as execution environments. Do not edit or commit tracked source/config files there unless the user explicitly asks.
 - If tracked code/config changes are needed, make them on midgar, commit, push, then pull on the lab GPU host.
 
+## Host Integrity
+
+- Treat the lab GPU server itself as immutable.
+- Never modify the server hardware, firmware, NVIDIA driver, kernel modules, system CUDA, system packages, module files, or host configuration.
+- Never use `sudo`, `apt`, `dnf`, `yum`, driver installers, CUDA system installers, or write under `/etc`, `/usr`, `/opt`, or `/usr/local` for a job.
+- Use `nvidia-smi` only for read-only inspection. Do not change MIG mode, persistence mode, power limits, clocks, or compute mode.
+- Restrict dependency changes to the explicitly requested user-owned conda or virtual environment. Do not modify the conda base environment.
+- Prefer environment-bundled CUDA runtime packages or wheels. Do not install a system CUDA toolkit to satisfy a project dependency.
+- If a task cannot run without a host-level change, stop and report the requirement; do not perform the change.
