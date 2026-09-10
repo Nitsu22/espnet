@@ -67,6 +67,7 @@ def main():
     parser.add_argument("--pred-scp", type=Path, required=True)
     parser.add_argument("--ref-scp", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--channel", type=int, default=0)
     args = parser.parse_args()
     preds, refs = read_2col(args.pred_scp), read_2col(args.ref_scp)
     if not preds or preds.keys() != refs.keys():
@@ -75,6 +76,12 @@ def main():
     for uid in sorted(preds):
         pred, psr = sf.read(preds[uid])
         ref, rsr = sf.read(refs[uid])
+        if args.channel < 0:
+            raise ValueError('channel must be nonnegative')
+        if pred.ndim == 2:
+            pred = pred[:, args.channel]
+        if ref.ndim == 2:
+            ref = ref[:, args.channel]
         if psr != 16000 or rsr != 16000:
             raise ValueError(f"{uid}: expected 16 kHz")
         rows.append({"uid": uid, "rir": Path(refs[uid]).stem, **metrics(pred, ref)})

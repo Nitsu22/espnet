@@ -8,6 +8,9 @@ stage=1
 stop_stage=6
 skip_data_prep=false
 skip_train=false
+resume=true
+rir_stats_dir=
+python=${python:-python3}
 
 train_set=
 valid_set=
@@ -50,7 +53,7 @@ rir_stats_tag="${fs}"
 if [ -n "${rir_model_type}" ] && [ "${rir_model_type}" != direct ]; then
   rir_stats_tag="${fs}_${rir_model_type}"
 fi
-rir_stats_dir="${expdir}/rir_stats_${rir_stats_tag}"
+[ -n "${rir_stats_dir}" ] || rir_stats_dir="${expdir}/rir_stats_${rir_stats_tag}"
 
 if [ -z "${rir_tag}" ]; then
   if [ -n "${rir_config}" ]; then
@@ -358,7 +361,7 @@ if ! "${skip_train}"; then
         ${train_shape_param} \
         ${valid_shape_param} \
         ${fold_length_param} \
-        --resume true \
+        --resume "${resume}" \
         --output_dir "${rir_exp}" \
         ${opts} ${rir_args}
   fi
