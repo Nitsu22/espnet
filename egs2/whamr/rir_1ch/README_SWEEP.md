@@ -47,3 +47,13 @@ bash run_eval_rec_rir_single_nf_16k.sh \
 Use `whamr`, `ace_clean`, or `ace_noisy`. Inference needs only input speech.
 The same channel, peak alignment/normalization, output length and metrics are
 used for both models. Absolute gain and propagation delay are not scored.
+
+Validation (2026-09-10): CPU checks passed for long-delay peak alignment,
+SciPy time-convolution/STFT agreement, an impulse CTF, and convolution gradients.
+ESPnet statistics collection passed on two train and two validation utterances,
+producing both speech and RIR shape files. On aurum GPU 0 (RTX 3090), one real
+four-second training example passed a scratch FP32 optimizer update with finite
+gradients (loss 32.588703), followed by finite 32000-sample RIR inference.
+The check also asserts that both speech decoder heads are absent. Report:
+`exp/sweep_training_check/check.json`. These are smoke checks; full sweep training
+has not been started and batch-size-four memory use is not validated on RTX 3090.
