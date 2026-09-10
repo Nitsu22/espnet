@@ -63,3 +63,14 @@ configurable. Scores are this repository's protocol, not official SimACE scores.
 For a bounded GPU check, `local/check_rec_rir_training.py` performs one random
 initialization, forward/backward at the configured precision and optimizer step, then RIR inference.
 It does not start a full training experiment or load a pretrained checkpoint.
+
+Verified on 2026-09-10: all 28,000 selected entries passed header/ID checks;
+repeat preparation verified the saved index hashes. Statistics collection on
+two train and two validation entries passed (local sandbox check used zero
+workers). On aurum RTX 3090 / PyTorch 2.1.0+cu118, the scratch FP32 check used
+64,000 input samples, produced finite loss 15.3129959 and finite gradients,
+updated parameters and inferred 32,000 RIR samples. The report is
+`exp/scratch_training_check/check.json`. Initial AMP testing produced nonfinite
+gradients, so the default is FP32. A stereo-reference/mono-prediction identity
+test yielded zero RMSE and zero acoustic-parameter errors with channel 0.
+Full training has not been started by these checks.
