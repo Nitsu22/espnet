@@ -33,7 +33,7 @@ The YAML explicitly has `init_param: []`; the launcher defaults to
 explicit. No released weights are loaded. The model uses FFT/window 512,
 hop 256, 257 frequency bins, 60 CTF taps and 6/2/6 speech/noise/CTF layers.
 Training crops aligned audio triples to at most 4 seconds; validation uses
-full utterances, as in the existing ESPnet preprocessor. Batch size 4, AMP,
+full utterances, as in the existing ESPnet preprocessor. Batch size 4, FP32,
 AdamW lr=0.001, all three loss weights 1, max 100 epochs, early stopping
 patience 10. Scheduler first period is 5,000 optimizer updates. These are
 the stated ESPnet experiment settings, not an exact official training reproduction.
@@ -61,5 +61,5 @@ are refused. `--model_file`, `--rir_exp`, `--output_dir` and `--device` are
 configurable. Scores are this repository's protocol, not official SimACE scores.
 
 For a bounded GPU check, `local/check_rec_rir_training.py` performs one random
-initialization, AMP forward/backward and optimizer step, then RIR inference.
+initialization, forward/backward at the configured precision and optimizer step, then RIR inference.
 It does not start a full training experiment or load a pretrained checkpoint.

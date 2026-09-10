@@ -3,7 +3,7 @@ seed: 0
 init_param: []
 init: null
 max_epoch: 100
-use_amp: true
+use_amp: false  # FP32: avoids nonfinite initial gradients observed with AMP
 grad_clip: 1.0
 batch_type: folded
 batch_size: 4

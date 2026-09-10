@@ -25,6 +25,7 @@ export NUMBA_CACHE_DIR=${NUMBA_CACHE_DIR:-/tmp/nitsu-rir1ch-numba}
 "${python}" -m espnet2.bin.rec_rir_inference \
     --train_config "${rir_exp}/config.yaml" --model_file "${model_file}" \
     --wav_scp "${data_dir}/wav.scp" --output_dir "${output_dir}/rir" \
-    --sample_rate 16000 --rir_length 32000 --device "${device}"
+    --sample_rate 16000 --rir_length 32000 --device "${device}" \
+    --output_subtype FLOAT --peak_normalize
 "${python}" local/score_ace_rir.py --pred-scp "${output_dir}/rir/wav.scp" \
     --ref-scp "${data_dir}/rir_ref.scp" --output-dir "${output_dir}/score" --channel 0

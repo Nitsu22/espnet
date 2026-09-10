@@ -93,6 +93,7 @@ def main():
     per_rir = {name: summarize([r for r in rows if r["rir"] == name]) for name in sorted({r["rir"] for r in rows})}
     summary = {"protocol": {
         "sample_rate": 16000, "window_samples": 32000, "pre_peak_samples": 40,
+        "channel": args.channel,
         "alignment": "absolute peak before cropping; zero-pad unavailable samples",
         "amplitude": "independent absolute peak normalization; polarity preserved",
         "rt60": "Schroeder regression -5 to -35 dB; fallback -5 to -25 dB; extrapolate to -60 dB",
