@@ -14,6 +14,7 @@ rir_config=conf/tuning/train_rec_rir_single_nf_16k.yaml
 rir_tag=train_rec_rir_single_nf_16k
 rir_exp=
 rir_args=
+rir_model_type=rec_rir
 . utils/parse_options.sh
 [[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
 [[ -n ${rir_exp} ]] || rir_exp="exp/rir_${rir_tag}"
@@ -37,6 +38,6 @@ bash ./rir.sh --stage "${stage}" --stop_stage "${stop_stage}" \
     --fs 16k --ngpu "${ngpu}" --num_nodes "${num_nodes}" --nj "${nj}" \
     --dumpdir "${dumpdir}" --train_set tr_rir_single_nf_min_16k \
     --valid_set cv_rir_single_nf_min_16k --test_sets tt_rir_single_nf_min_16k \
-    --rir_model_type rec_rir --rir_config "${rir_config}" --rir_tag "${rir_tag}" \
+    --rir_model_type "${rir_model_type}" --rir_config "${rir_config}" --rir_tag "${rir_tag}" \
     --rir_exp "${rir_exp}" --rir_stats_dir "exp/rir_stats_${rir_tag}" \
     --speech_fold_length 64000 --rir_fold_length 32000 --rir_args "${rir_args}"

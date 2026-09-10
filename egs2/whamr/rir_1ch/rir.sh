@@ -224,7 +224,10 @@ if ! "${skip_train}"; then
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    if [ "${rir_model_type}" = rec_rir ] \
+    if [ "${rir_model_type}" = rec_rir_sweep ]; then
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref.scp,rir_ref,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref.scp,rir_ref,sound "
+    elif [ "${rir_model_type}" = rec_rir ] \
       || [ "${rir_model_type}" = rec_rir_lag_narrow ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct.scp,speech_direct,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb.scp,speech_reverb,sound "
@@ -295,7 +298,13 @@ if ! "${skip_train}"; then
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    if [ "${rir_model_type}" = rec_rir ] \
+    if [ "${rir_model_type}" = rec_rir_sweep ]; then
+      train_data_param+="--train_data_path_and_name_and_type ${train_dir}/rir_ref.scp,rir_ref,sound "
+      valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/rir_ref.scp,rir_ref,sound "
+      train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape --train_shape_file ${rir_stats_dir}/train/rir_ref_shape "
+      valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape --valid_shape_file ${rir_stats_dir}/valid/rir_ref_shape "
+      fold_length_param="--fold_length ${speech_fold_length} --fold_length ${rir_fold_length} "
+    elif [ "${rir_model_type}" = rec_rir ] \
       || [ "${rir_model_type}" = rec_rir_lag_narrow ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct.scp,speech_direct,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_reverb.scp,speech_reverb,sound "

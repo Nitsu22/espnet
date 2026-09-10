@@ -24,7 +24,12 @@ def main():
     processor = RIRTask.build_preprocess_fn(task_args, train=True)
     data = {}
     ids = []
-    for name in ('speech_mix', 'speech_direct', 'speech_reverb'):
+    sweep_only = task_args.rir_model_type == 'rec_rir_sweep'
+    names = ('speech_mix', 'rir_ref') if sweep_only else ('speech_mix', 'speech_direct', 'speech_reverb')
+    if sweep_only:
+        assert not hasattr(model.rec_rir, 'decoder_spch')
+        assert not hasattr(model.rec_rir, 'decoder_rev')
+    for name in names:
         uid, path = (args.data_dir / f'{name}.scp').read_text().splitlines()[0].split(maxsplit=1)
         ids.append(uid)
         wav, sr = sf.read(path)
@@ -58,7 +63,7 @@ def main():
     assert rir.shape == (32000,) and torch.isfinite(rir).all()
     args.output_dir.mkdir(parents=True, exist_ok=False)
     report = dict(uid=ids[0], loss=float(loss.detach()), samples=int(batch['speech_mix'].shape[1]),
-                  scratch=True, amp=task_args.use_amp, finite_gradients=True,
+                  scratch=True, sweep_only=sweep_only, amp=task_args.use_amp, finite_gradients=True,
                   parameters_updated=True, rir_samples=len(rir), torch=torch.__version__)
     (args.output_dir / 'check.json').write_text(json.dumps(report, indent=2))
     sf.write(args.output_dir / 'rir.wav', rir.cpu().numpy(), 16000, subtype='FLOAT')
