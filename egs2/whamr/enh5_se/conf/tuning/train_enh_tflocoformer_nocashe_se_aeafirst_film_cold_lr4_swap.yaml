@@ -25,7 +25,7 @@ model_conf:
 # optimizer and scheduler
 optim: adamw
 optim_conf:
-    lr: 1.0e-03
+    lr: 1.0e-04
     eps: 1.0e-08
     weight_decay: 1.0e-02
 patience: 10
@@ -39,7 +39,7 @@ best_model_criterion:
 -   - valid
     - loss
     - min
-keep_nbest_models: 50
+keep_nbest_models: 5
 scheduler: warmupreducelronplateau
 scheduler_conf:
     warmup_steps: 4000
@@ -56,9 +56,11 @@ decoder: *encoder
 decoder_conf:
     n_fft: *n_fft
     hop_length: *hop_length
-separator: tflocoformer
+separator: tflocoformer_nocashe_aeafusion_film_first
 separator_conf:
     num_spk: *num_spk
+    use_spatial_encoder: true
+    film_init_identity: true
     n_layers: 6
     # general setup
     emb_dim: 128
@@ -80,6 +82,24 @@ separator_conf:
     dropout: 0.0
     # others
     eps: 1.0e-5
+spatial_encoder_encoder: stft
+spatial_encoder_encoder_conf:
+    n_fft: *n_fft
+    hop_length: *hop_length
+spatial_encoder: mc_conformer_div
+spatial_encoder_conf:
+    path: ../../../se_npz/exp_swap/enh_train_se_mc_conformer_triplet_noise_noseg/valid.loss.ave_5best.pth
+    trainable: false
+    embed_dim: 256
+    num_channels_mc: 2
+    freq_bins: 129   # n_fft 256, onesided -> 256//2+1
+    attention_heads: 4
+    num_blocks: 3
+    ffn_expansion: 4
+    conv_kernel_size: 31
+    dropout_rate: 0.1
+    eps: 1.0e-8
+    l2_norm_eps: 1.0e-8
 
 criterions:
     # The first criterion

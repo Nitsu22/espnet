@@ -25,7 +25,7 @@ model_conf:
 # optimizer and scheduler
 optim: adamw
 optim_conf:
-    lr: 1.0e-03
+    lr: 1.0e-04
     eps: 1.0e-08
     weight_decay: 1.0e-02
 patience: 10
@@ -39,7 +39,7 @@ best_model_criterion:
 -   - valid
     - loss
     - min
-keep_nbest_models: 50
+keep_nbest_models: 5
 scheduler: warmupreducelronplateau
 scheduler_conf:
     warmup_steps: 4000
@@ -56,7 +56,7 @@ decoder: *encoder
 decoder_conf:
     n_fft: *n_fft
     hop_length: *hop_length
-separator: tflocoformer
+separator: tflocoformer_nocashe
 separator_conf:
     num_spk: *num_spk
     n_layers: 6

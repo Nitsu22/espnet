@@ -40,6 +40,10 @@ class RIRCMHAFiLMBlock(nn.Module):
         nn.init.zeros_(self.beta_proj.weight)
         nn.init.zeros_(self.beta_proj.bias)
 
+    def espnet_initialization_fn(self):
+        """Restore identity FiLM after ESPnet-wide initialization."""
+        self.init_film_identity()
+
     def forward(self, speech: torch.Tensor, rir: torch.Tensor) -> torch.Tensor:
         """Modulate speech features with RIR context.
 
