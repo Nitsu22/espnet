@@ -54,3 +54,13 @@ bash run_eval_rec_rir_single_nf_16k.sh --dataset ace_noisy \
 
 Both dataset choices can be used with either model (also dataset whamr).
 Evaluation uses the existing common RIR scoring protocol.
+
+Verification on 2026-09-13: both configurations build through RIRTask and each
+has 2,592,281 parameters. Four new single-source checks and six existing
+2-source sweep/speech regression checks passed by direct test-function execution.
+On shannon GPU 4 (A100 80GB), each variant passed a real 64,000-sample FP32
+forward/backward step, finite-gradient checks, parameter update, and finite
+32,000-sample RIR inference. Initial losses were 4.6647358 (CTF) and 13.0279474
+(sweep); these are smoke-check values, not trained evaluation results.
+Reports are exp/tflocoformer_single_checks/{ctf,sweep}/check.json (exit status 0).
+Only bounded checks were run; full training has not been launched.
