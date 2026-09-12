@@ -120,3 +120,20 @@ production checkpoint. The qsub script is prepared on midgar and remains
 Git-ignored under `qsub/`. Production uses all utterances and a separate output.
 For quality comparison, evaluate both systems using the same checkpoint policy;
 do not compare one system's best checkpoint against the other's average.
+
+### TSUBAME launch (2026-09-13)
+
+The 3-minute 4-GPU startup check is job **8656778**. Production is submitted
+with `-hold_jid 8656778` and an additional success-marker/commit check, so a
+failed smoke job does not start training. GPU validation is pending while the
+smoke job waits in the queue; the six CPU tests have passed.
+
+The initial production slot is **24 hours**, matching the existing Small job
+script. Baseline logs show about 14 minutes training + 2.5 minutes validation
+per epoch and early stopping at epoch 114; a single 24-hour slot is not a promise
+to complete 150 epochs. The experiment resumes from its checkpoint on rerun.
+GPU speed/memory for the new backend remain unmeasured until the smoke starts.
+Production output: `exp/enh_train_enh_tflocoformer_small_nocashe_bigdeltanet_4gpu`.
+After training returns normally, the job evaluates both best and averaged-five
+checkpoints into separate `enhanced_best_*` and `enhanced_ave5_*` directories.
+The qsub files remain ignored and are copied from midgar to TSUBAME explicitly.

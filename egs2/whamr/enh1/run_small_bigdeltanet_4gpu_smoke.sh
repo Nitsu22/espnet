@@ -21,4 +21,4 @@ python -m espnet2.bin.launch \
     --fold_length 80000 --fold_length 80000 --fold_length 80000 \
     --max_epoch 1 --num_workers 0 --num_att_plot 0 --log_interval 1 \
     "${args[@]}"
-touch "${smoke_exp}/SUCCESS"
+git rev-parse HEAD > "${smoke_exp}/SUCCESS"
