@@ -19,7 +19,7 @@ is_torch_2_0_plus = V(torch.__version__) >= V("2.0.0")
 
 
 class TFLocoformerCTFPredictor(nn.Module):
-    """TF-Locoformer encoder with a two-source CTF output head."""
+    """TF-Locoformer encoder with a one- or two-source CTF output head."""
 
     def __init__(
         self,
@@ -48,8 +48,8 @@ class TFLocoformerCTFPredictor(nn.Module):
         self.ctf_taps = int(ctf_taps)
         self.input_dim = int(input_dim)
         self.n_layers = int(n_layers)
-        if self._num_spk != 2:
-            raise ValueError("TFLocoformerCTFPredictor currently supports num_spk=2")
+        if self._num_spk not in (1, 2):
+            raise ValueError("TFLocoformerCTFPredictor supports num_spk=1 or 2")
         if ffn_type is None:
             ffn_type = ["swiglu_conv1d", "swiglu_conv1d"]
         elif isinstance(ffn_type, tuple):

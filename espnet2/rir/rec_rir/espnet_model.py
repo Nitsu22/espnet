@@ -53,6 +53,8 @@ class ESPnetRecRIRModel(AbsESPnetModel):
         normalize_by_mix: bool = True,
         extract_feats_in_collect_stats: bool = False,
         pim_sweep_duration: float = 8.192,
+        network_type: str = "bispatialnet",
+        network_conf: Optional[Dict] = None,
     ):
         super().__init__()
         self.sr = int(sr)
@@ -69,7 +71,7 @@ class ESPnetRecRIRModel(AbsESPnetModel):
             win_type=win_type,
             win_len=win_len,
         )
-        self.rec_rir = self.rec_rir_network_class(
+        network_kwargs = dict(
             dim_input=dim_input,
             dim_output_spch=dim_output_spch,
             dim_output_CTF=dim_output_CTF,
@@ -87,6 +89,22 @@ class ESPnetRecRIRModel(AbsESPnetModel):
             full_share=full_share,
             attention=attention,
         )
+        if network_type == "bispatialnet":
+            if network_conf:
+                raise ValueError("network_conf is only supported for tflocoformer")
+            self.rec_rir = self.rec_rir_network_class(**network_kwargs)
+        elif network_type == "tflocoformer":
+            from espnet2.rir.rec_rir.tflocoformer_single import SingleSourceTFLocoformer
+
+            if dim_output_CTF <= 0 or dim_output_CTF % 2:
+                raise ValueError("dim_output_CTF must be positive and even")
+            self.rec_rir = SingleSourceTFLocoformer(
+                num_freqs=num_freqs,
+                ctf_taps=dim_output_CTF // 2,
+                **(network_conf or {}),
+            )
+        else:
+            raise ValueError(f"Unknown Rec-RIR network_type: {network_type}")
         self.pim = RecRIRPIM(sr=sr, sweep_duration=pim_sweep_duration)
 
     def forward(
@@ -131,16 +149,21 @@ class ESPnetRecRIRModel(AbsESPnetModel):
 
         input_ft = self.transforms.preprocess(input_complex)
         est_spch_ft, est_ctf_ft, est_reverb_ft = self.rec_rir(input_ft)
-        est_spch = self.transforms.postprocess(est_spch_ft).to(dtype=torch.complex64)
         est_ctf = self.transforms.postprocess(est_ctf_ft).to(dtype=torch.complex64)
-        est_reverb = self.transforms.postprocess(est_reverb_ft).to(
-            dtype=torch.complex64
-        )
         recon = self._complex_convolve(direct_complex, est_ctf)
         recon = recon[..., : direct_complex.shape[-1]]
 
-        loss_cln = self._complex_loss(est_spch, direct_complex)
-        loss_rvb = self._complex_loss(est_reverb, reverb_complex)
+        def auxiliary_loss(features, reference, weight):
+            if features is None:
+                if weight != 0:
+                    raise ValueError("CTF-only networks require zero auxiliary weights")
+                return reference.real.new_zeros(())
+            return self._complex_loss(
+                self.transforms.postprocess(features).to(torch.complex64), reference
+            )
+
+        loss_cln = auxiliary_loss(est_spch_ft, direct_complex, self.loss_w_cln)
+        loss_rvb = auxiliary_loss(est_reverb_ft, reverb_complex, self.loss_w_rvb)
         loss_rec = self._complex_loss(recon, reverb_complex)
         loss = (
             self.loss_w_cln * loss_cln
