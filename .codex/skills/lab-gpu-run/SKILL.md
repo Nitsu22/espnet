@@ -15,12 +15,18 @@ Use this skill for lab GPU servers only. For TSUBAME/qsub jobs, use `.codex/skil
 - If the user does not specify a host or GPU, choose based on task size and live availability.
 - For clearly light jobs, prefer weaker or single-GPU hosts before high-end multi-GPU servers.
 
+## Sync Before Execution
+
+A request to run on a lab GPU host includes pushing the required midgar commits and pulling them on the execution host. Read-only availability or log checks do not trigger synchronization.
+
+1. On midgar, inspect the diff, validate and commit only changes needed for the run, then push the target branch. Leave unrelated changes out.
+2. On the execution host, first check the repository status and branch. Use the same target branch and `git pull --ff-only` from its corresponding remote branch before run preparation. Verify that HEAD matches the intended midgar commit.
+3. If local changes, branch divergence, or an unclear repository/branch mapping prevents safe synchronization, report the blocker without overwriting changes or force-pushing.
+
 ## Run Policy
 
-- Run potentially long jobs inside `tmux` or an equivalent persistent session.
-- Clean up tmux sessions created for the run after the job finishes, if they are no longer needed.
-- Treat lab GPU hosts as execution environments. Do not edit or commit tracked source/config files there unless the user explicitly asks.
-- If tracked code/config changes are needed, make them on midgar, commit, push, then pull on the lab GPU host.
+- Edit version-controlled code, configuration, and run scripts on midgar, then repeat the sync above. Lab hosts are for execution and run artifacts unless the user explicitly requests otherwise.
+- Run potentially long jobs inside `tmux` or an equivalent persistent session; clean up sessions created for the run when finished and no longer needed.
 
 ## Host Integrity
 
