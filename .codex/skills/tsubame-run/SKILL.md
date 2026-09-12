@@ -33,8 +33,8 @@ Edit version-controlled code, configuration, and qsub scripts on midgar. If furt
 ## Submit and Inspect
 
 - After synchronization, submit from the recipe directory, not from inside `qsub/`.
-- Test run: `#$ -l h_rt=00:03:00` or less; `qsub qsub/<script>.sh`. Do not add `-g tga-shinoda` unless explicitly requested.
-- Production run: use the intended walltime and `qsub -g tga-shinoda qsub/<script>.sh`.
+- Use short test jobs for startup/configuration checks before costly runs: omit `-g tga-shinoda`, set `#$ -l h_rt=00:03:00` or less, and submit with `qsub qsub/<script>.sh`.
+- Production run: estimate runtime from prior logs or measured progress and set `h_rt` with a modest margin; avoid unnecessarily long limits to keep resource consumption low. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
 - When asked to wait for another job, identify its actual job ID with `qstat` and use `qsub -hold_jid <job_id> ...`; never guess the dependency.
 - Report the submitted command, job ID when available, and synchronized commit. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
 
