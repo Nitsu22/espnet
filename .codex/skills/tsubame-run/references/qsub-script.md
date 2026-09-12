@@ -2,13 +2,13 @@
 
 Use this fallback only when no suitable existing qsub script is available. Verify resource and environment settings before use.
 
-Keep qsub scripts close to the existing examples. The stable structure is:
+This is a group-charged 4-GPU example: submit with `qsub -g tga-shinoda qsub/<script>.sh`. Replace `HH:MM:SS` with a runtime estimate plus a modest margin; 3 minutes is not a default for 4-GPU checks.
 
 ```bash
 #!/usr/bin/env bash
 #$ -cwd
-#$ -l node_f=1        # or node_q=1, following the closest working example
-#$ -l h_rt=00:03:00   # test; use the requested longer time for production
+#$ -l node_f=1        # 4 GPUs
+#$ -l h_rt=HH:MM:SS   # replace with the required walltime
 #$ -N short_job_name
 #$ -m abe
 #$ -M daichi2ni2two@icloud.com

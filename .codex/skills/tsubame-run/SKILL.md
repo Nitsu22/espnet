@@ -33,7 +33,8 @@ Edit version-controlled code, configuration, and qsub scripts on midgar. If furt
 ## Submit and Inspect
 
 - After synchronization, submit from the recipe directory, not from inside `qsub/`.
-- Use short test jobs for startup/configuration checks before costly runs: omit `-g tga-shinoda`, set `#$ -l h_rt=00:03:00` or less, and submit with `qsub qsub/<script>.sh`.
+- Use uncharged trials only for pre-charge compatibility checks, not research/training/benchmarking: submit without a TSUBAME group (`-g`/`newgrp`), request at most 2 resource units, `h_rt=00:03:00` or less, priority `-5`, and only one running trial. [Official trial limits](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#523).
+- The limit counts resource units, not GPUs: `node_f=1` has 4 GPUs and fits the published resource limit; `node_q=4` exceeds it. Check actual rejection messages. If a check (including multi-GPU initialization) needs more than 3 minutes, use a group-charged job with sufficient time instead of forcing a trial.
 - Production run: estimate runtime from prior logs or measured progress and set `h_rt` with a modest margin; avoid unnecessarily long limits to keep resource consumption low. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
 - When asked to wait for another job, identify its actual job ID with `qstat` and use `qsub -hold_jid <job_id> ...`; never guess the dependency.
 - Report the submitted command, job ID when available, and synchronized commit. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
