@@ -2,7 +2,7 @@
 set -euo pipefail
 . ./path.sh
 python local/prepare_small_bigdeltanet_smoke.py
-smoke_exp=exp/enh_train_enh_tflocoformer_small_nocashe_bigdeltanet_4gpu_smoke
+smoke_exp=${SMOKE_EXP:-exp/enh_train_enh_tflocoformer_small_nocashe_bigdeltanet_4gpu_smoke}
 mkdir -p "${smoke_exp}"
 args=()
 for split in train valid; do

@@ -137,3 +137,15 @@ Production output: `exp/enh_train_enh_tflocoformer_small_nocashe_bigdeltanet_4gp
 After training returns normally, the job evaluates both best and averaged-five
 checkpoints into separate `enhanced_best_*` and `enhanced_ave5_*` directories.
 The qsub files remain ignored and are copied from midgar to TSUBAME explicitly.
+
+### Revised initial run (2026-09-14)
+
+The first trial (8656778) hit its walltime limit during startup, without a
+completed optimization step. The held 24-hour production job (8656784) was
+cancelled on request. Replace it with one group-charged 4-GPU, 3-hour initial
+job: `qsub/qsub_small_bigdeltanet_4gpu_initial_3h.sh`.
+It performs the real-data DDP smoke in an isolated per-job directory, then
+runs Stage 6 on the full dataset with the matched baseline training settings.
+It does not submit follow-up jobs or start evaluation. At the 3-hour limit,
+only checkpoints already saved by ESPnet are available for future resumption;
+incomplete-epoch progress is not guaranteed to be saved.
