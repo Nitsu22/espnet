@@ -32,3 +32,14 @@ stopped at user request. Last complete epochs were 41 and 40 respectively;
 partial epochs 42 and 41 are not saved. Existing checkpoint/model/log files
 and `exp/evaluation_snapshot_20260913` remain available. The separate
 `rec_rir_ctf_only_16k_train` job was not a stop target.
+
+Validation: shell syntax and diff checks passed; launcher argument capture
+confirmed a single input shape per split, fold length 160000, validation batch
+size 1, and intact speech/RIR teacher inputs. All train/validation batch UID
+lists matched across models using the actual saved shape files.
+On shannon A100 80GB, both models passed FP32 forward/backward, finite-gradient
+checks, one optimizer update, and finite 32000-sample RIR inference with four
+copies of a real four-second example. Peak allocated memory was 61.857 GB (NF)
+and 61.259 GB (sweep). This is a memory/gradient smoke check, not a training
+quality or throughput benchmark. Reports: `exp/input_batch_check/{nf,sweep}/check.json`.
+New production training has not been started.
