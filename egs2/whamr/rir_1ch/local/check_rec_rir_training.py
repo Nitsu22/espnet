@@ -15,7 +15,9 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--batch-size', type=int, default=1)
     args = parser.parse_args()
+    assert args.batch_size > 0
     task_args = RIRTask.get_parser().parse_args(['--config', args.config, '--output_dir', str(args.output_dir)])
     assert not task_args.init_param
     torch.manual_seed(task_args.seed)
@@ -42,6 +44,8 @@ def main():
         assert wav.ndim == 1
         batch[name] = torch.tensor(wav, dtype=torch.float32, device='cuda')[None]
         batch[name + '_lengths'] = torch.tensor([len(wav)], device='cuda')
+    batch = {name: value.repeat(args.batch_size, *([1] * (value.ndim - 1)))
+             for name, value in batch.items()}
     optimizer = torch.optim.AdamW(model.parameters(), **task_args.optim_conf)
     first = next(model.parameters())
     before = first.detach().clone()
@@ -63,6 +67,7 @@ def main():
     assert rir.shape == (32000,) and torch.isfinite(rir).all()
     args.output_dir.mkdir(parents=True, exist_ok=False)
     report = dict(uid=ids[0], loss=float(loss.detach()), samples=int(batch['speech_mix'].shape[1]),
+                  batch_size=args.batch_size, max_allocated_gb=torch.cuda.max_memory_allocated() / 1e9,
                   scratch=True, sweep_only=sweep_only, amp=task_args.use_amp, finite_gradients=True,
                   parameters_updated=True, rir_samples=len(rir), torch=torch.__version__)
     (args.output_dir / 'check.json').write_text(json.dumps(report, indent=2))

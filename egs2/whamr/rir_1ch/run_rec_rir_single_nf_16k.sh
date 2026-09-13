@@ -15,6 +15,8 @@ rir_tag=train_rec_rir_single_nf_16k
 rir_exp=
 rir_args=
 rir_model_type=rec_rir
+batch_by_input_only=false
+speech_fold_length=64000
 . utils/parse_options.sh
 [[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
 [[ -n ${rir_exp} ]] || rir_exp="exp/rir_${rir_tag}"
@@ -40,4 +42,4 @@ bash ./rir.sh --stage "${stage}" --stop_stage "${stop_stage}" \
     --valid_set cv_rir_single_nf_min_16k --test_sets tt_rir_single_nf_min_16k \
     --rir_model_type "${rir_model_type}" --rir_config "${rir_config}" --rir_tag "${rir_tag}" \
     --rir_exp "${rir_exp}" --rir_stats_dir "exp/rir_stats_${rir_tag}" \
-    --speech_fold_length 64000 --rir_fold_length 32000 --rir_args "${rir_args}"
+    --batch_by_input_only "${batch_by_input_only}" --speech_fold_length "${speech_fold_length}" --rir_fold_length 32000 --rir_args "${rir_args}"

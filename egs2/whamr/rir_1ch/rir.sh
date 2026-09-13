@@ -10,6 +10,7 @@ skip_data_prep=false
 skip_train=false
 resume=true
 rir_stats_dir=
+batch_by_input_only=false
 python=${python:-python3}
 
 train_set=
@@ -354,6 +355,12 @@ if ! "${skip_train}"; then
       valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
       valid_shape_param+="--valid_shape_file ${rir_stats_dir}/valid/rir_ref_shape "
       fold_length_param="--fold_length ${speech_fold_length} --fold_length ${rir_fold_length} "
+    fi
+
+    if [ "${batch_by_input_only}" = true ]; then
+      train_shape_param="--train_shape_file ${rir_stats_dir}/train/speech_mix_shape "
+      valid_shape_param="--valid_shape_file ${rir_stats_dir}/valid/speech_mix_shape "
+      fold_length_param="--fold_length ${speech_fold_length} "
     fi
 
     mkdir -p "${rir_exp}"
