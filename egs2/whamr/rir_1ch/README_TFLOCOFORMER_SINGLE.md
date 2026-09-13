@@ -35,8 +35,8 @@ Do not run both on the same GPU without checking capacity. These scripts do
 not select a GPU; set CUDA_VISIBLE_DEVICES in the execution environment.
 They reuse prepared audio and create independent statistics/checkpoints:
 
-- exp/rir_train_tflocoformer_single_nf_16k_ctf
-- exp/rir_train_tflocoformer_single_nf_16k_sweep
+- exp/rir_train_tflocoformer_single_nf_16k_ctf_input_batch
+- exp/rir_train_tflocoformer_single_nf_16k_sweep_input_batch
 
 Statistics use the matching exp/rir_stats_train_* directories.
 Resume with --stage 6 --resume true; defaults start from scratch and refuse
@@ -47,9 +47,9 @@ The existing inference/evaluation runner loads the saved network configuration:
 
 ```bash
 bash run_eval_rec_rir_single_nf_16k.sh --dataset ace_clean \
-  --rir_exp exp/rir_train_tflocoformer_single_nf_16k_ctf
+  --rir_exp exp/rir_train_tflocoformer_single_nf_16k_ctf_input_batch
 bash run_eval_rec_rir_single_nf_16k.sh --dataset ace_noisy \
-  --rir_exp exp/rir_train_tflocoformer_single_nf_16k_sweep
+  --rir_exp exp/rir_train_tflocoformer_single_nf_16k_sweep_input_batch
 ```
 
 Both dataset choices can be used with either model (also dataset whamr).
@@ -64,3 +64,12 @@ forward/backward step, finite-gradient checks, parameter update, and finite
 (sweep); these are smoke-check values, not trained evaluation results.
 Reports are exp/tflocoformer_single_checks/{ctf,sweep}/check.json (exit status 0).
 Only bounded checks were run; full training has not been launched.
+
+The launchers now apply the matched Rec-RIR input-only batching settings:
+`--batch_by_input_only true --speech_fold_length 160000` and
+`--rir_args "--valid_batch_size 1"`. Only original input utterance lengths
+control folded batches (10-second threshold, maximum four examples).
+Training still crops randomly to at most four seconds; validation uses full
+utterances, one per batch. All speech/RIR supervision remains loaded.
+The new `_input_batch` output/statistics tags isolate these settings from
+previous runs. Do not resume an old experiment with different batching.
