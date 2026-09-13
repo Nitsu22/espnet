@@ -89,10 +89,15 @@ class ESPnetRecRIRModel(AbsESPnetModel):
             full_share=full_share,
             attention=attention,
         )
-        if network_type == "bispatialnet":
+        if network_type in ("bispatialnet", "bispatialnet_ctf_only"):
             if network_conf:
                 raise ValueError("network_conf is only supported for tflocoformer")
-            self.rec_rir = self.rec_rir_network_class(**network_kwargs)
+            network_class = self.rec_rir_network_class
+            if network_type == "bispatialnet_ctf_only":
+                from espnet2.rir.rec_rir.ctf_only import CTFOnlyBiSpatialNet
+
+                network_class = CTFOnlyBiSpatialNet
+            self.rec_rir = network_class(**network_kwargs)
         elif network_type == "tflocoformer":
             from espnet2.rir.rec_rir.tflocoformer_single import SingleSourceTFLocoformer
 

@@ -1,4 +1,4 @@
-# CTF loss only; auxiliary heads retained. T_0 is optimizer updates.
+# CTF loss only; auxiliary heads removed. T_0 is optimizer updates.
 seed: 0
 init_param: []
 init: null
@@ -18,6 +18,7 @@ preprocessor_conf:
     force_single_channel: true
 
 model_conf:
+    network_type: bispatialnet_ctf_only
     extract_feats_in_collect_stats: false
     sr: 16000
     n_fft: 512
