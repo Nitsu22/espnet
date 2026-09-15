@@ -15,7 +15,9 @@ case ${dataset} in
     whamr) data_dir="${dumpdir}/raw/tt_rir_single_nf_min_16k" ;;
     ace_clean) data_dir=dump_ace/raw/tt_ace_single_clean_reverb_min_16k ;;
     ace_noisy) data_dir=dump_ace/raw/tt_ace_single_noisy_reverb_min_16k ;;
-    *) echo '--dataset must be whamr, ace_clean or ace_noisy' >&2; exit 2 ;;
+    but_clean) data_dir=dump_but/raw/tt_but_single_clean_reverb_min_16k ;;
+    but_noisy) data_dir=dump_but/raw/tt_but_single_noisy_reverb_min_16k ;;
+    *) echo '--dataset must be whamr, ace_clean, ace_noisy, but_clean or but_noisy' >&2; exit 2 ;;
 esac
 [[ -n ${model_file} ]] || model_file="${rir_exp}/valid.loss.best.pth"
 [[ -n ${output_dir} ]] || output_dir="${rir_exp}/evaluation/${dataset}"
