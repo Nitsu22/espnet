@@ -42,6 +42,7 @@ from espnet2.train.preprocessor_daras import DARASPreprocessor
 from espnet2.train.preprocessor_rir import RIRPreprocessor
 from espnet2.train.preprocessor_rec_rir import RecRIRPreprocessor
 from espnet2.train.preprocessor_rec_rir_sweep import RecRIRSweepPreprocessor
+from espnet2.train.preprocessor_rec_rir_sweep_v2 import RecRIRSweepV2Preprocessor
 from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
@@ -99,6 +100,7 @@ preprocessor_choices = ClassChoices(
         rir=RIRPreprocessor,
         rec_rir=RecRIRPreprocessor,
         rec_rir_sweep=RecRIRSweepPreprocessor,
+        rec_rir_sweep_v2=RecRIRSweepV2Preprocessor,
         rec_rir_pit=RecRIRPITPreprocessor,
         daras=DARASPreprocessor,
     ),
@@ -151,6 +153,7 @@ class RIRTask(AbsTask):
                 "direct",
                 "rec_rir",
                 "rec_rir_sweep",
+                "rec_rir_sweep_v2",
                 "rec_rir_lag_narrow",
                 "rec_rir_pit",
                 "rec_rir_pit_ctf_split",
@@ -256,6 +259,7 @@ class RIRTask(AbsTask):
             "speech_reverb1",
             "speech_reverb2",
             "rir_ref",
+            "rir_direct",
             "room_param",
             "category",
             "fs",
@@ -264,6 +268,13 @@ class RIRTask(AbsTask):
     @classmethod
     @typechecked
     def build_model(cls, args: argparse.Namespace) -> AbsESPnetModel:
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_sweep_v2":
+            from espnet2.rir.rec_rir.espnet_model_sweep_v2 import ESPnetRecRIRSweepV2Model
+
+            model = ESPnetRecRIRSweepV2Model(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
         if getattr(args, "rir_model_type", "direct") == "rec_rir_sweep":
             from espnet2.rir.rec_rir.espnet_model_sweep import ESPnetRecRIRSweepModel
             model = ESPnetRecRIRSweepModel(**args.model_conf)
