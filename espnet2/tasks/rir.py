@@ -44,6 +44,7 @@ from espnet2.train.preprocessor_rec_rir import RecRIRPreprocessor
 from espnet2.train.preprocessor_rec_rir_sweep import RecRIRSweepPreprocessor
 from espnet2.train.preprocessor_rec_rir_sweep_v2 import RecRIRSweepV2Preprocessor
 from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
+from espnet2.train.preprocessor_rec_rir_sweep_v2_pit import RecRIRSweepV2PITPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -102,6 +103,7 @@ preprocessor_choices = ClassChoices(
         rec_rir_sweep=RecRIRSweepPreprocessor,
         rec_rir_sweep_v2=RecRIRSweepV2Preprocessor,
         rec_rir_pit=RecRIRPITPreprocessor,
+        rec_rir_sweep_v2_pit=RecRIRSweepV2PITPreprocessor,
         daras=DARASPreprocessor,
     ),
     type_check=AbsPreprocessor,
@@ -156,6 +158,8 @@ class RIRTask(AbsTask):
                 "rec_rir_sweep_v2",
                 "rec_rir_lag_narrow",
                 "rec_rir_pit",
+                "tflocoformer_ctf_pit",
+                "tflocoformer_sweep_v2_pit",
                 "rec_rir_pit_ctf_split",
                 "daras",
             ],
@@ -260,6 +264,10 @@ class RIRTask(AbsTask):
             "speech_reverb2",
             "rir_ref",
             "rir_direct",
+            "rir_ref1",
+            "rir_ref2",
+            "rir_direct1",
+            "rir_direct2",
             "room_param",
             "category",
             "fs",
@@ -268,6 +276,19 @@ class RIRTask(AbsTask):
     @classmethod
     @typechecked
     def build_model(cls, args: argparse.Namespace) -> AbsESPnetModel:
+        if getattr(args, "rir_model_type", "direct") in (
+            "tflocoformer_ctf_pit", "tflocoformer_sweep_v2_pit"
+        ):
+            from espnet2.rir.rec_rir.tflocoformer_ctf_pit import ESPnetRecRIRTFLocoformerPITModel
+            from espnet2.rir.rec_rir.tflocoformer_sweep_v2_pit import ESPnetTFLocoformerSweepV2PITModel
+
+            model_class = (ESPnetTFLocoformerSweepV2PITModel
+                           if args.rir_model_type == "tflocoformer_sweep_v2_pit"
+                           else ESPnetRecRIRTFLocoformerPITModel)
+            model = model_class(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
         if getattr(args, "rir_model_type", "direct") == "rec_rir_sweep_v2":
             from espnet2.rir.rec_rir.espnet_model_sweep_v2 import ESPnetRecRIRSweepV2Model
 
