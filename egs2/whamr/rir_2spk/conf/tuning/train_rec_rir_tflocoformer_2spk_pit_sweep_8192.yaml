@@ -1,0 +1,71 @@
+init: null
+max_epoch: 100
+use_amp: true
+grad_clip: 1.0
+batch_type: folded
+batch_size: 4
+num_workers: 4
+
+sample_rate: 8000
+force_single_channel: true
+preprocessor: rec_rir_pit
+preprocessor_conf:
+    num_spk: 2
+    speech_segment: 32000
+    force_single_channel: true
+    use_sweep_target: true
+    rir_length: 8192
+
+model_conf:
+    extract_feats_in_collect_stats: false
+    sr: 8000
+    n_fft: 256
+    win_len: 256
+    hop_len: 128
+    win_type: sqrthann
+    num_spk: 2
+    num_freqs: 129
+    ctf_taps: 60
+    n_layers: 4
+    emb_dim: 96
+    norm_type: rmsgroupnorm
+    num_groups: 4
+    tf_order: ft
+    n_heads: 4
+    flash_attention: false
+    attention_dim: 128
+    pos_enc: rope
+    ffn_type:
+        - swiglu_conv1d
+        - swiglu_conv1d
+    ffn_hidden_dim:
+        - 128
+        - 128
+    conv1d_kernel: 8
+    conv1d_shift: 1
+    dropout: 0.0
+    eps: 1.0e-5
+    loss_type: RIMag
+    normalize_by_mix: true
+    pim_sweep_duration: 8.192
+    reconstruction_signal: sweep
+
+optim: adamw
+optim_conf:
+    lr: 1.0e-03
+    eps: 1.0e-08
+    weight_decay: 0.0
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+-   - valid
+    - loss
+    - min
+keep_nbest_models: 5
+scheduler: cosineannealingwarmrestarts
+scheduler_conf:
+    T_0: 10124
+    T_mult: 1
+    eta_min: 0.0
