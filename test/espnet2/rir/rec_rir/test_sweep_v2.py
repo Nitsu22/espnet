@@ -76,6 +76,64 @@ def test_preprocessor_preserves_pair_and_rejects_truncation():
         proc('example', data)
 
 
+def combined_model(sw=1.0, rw=1.0):
+    return ESPnetRecRIRSweepV2Model(
+        sr=16000, n_fft=64, win_len=64, hop_len=32, num_freqs=33,
+        dim_output_CTF=10, network_type='tflocoformer',
+        network_conf=dict(n_layers=1, emb_dim=8, num_groups=2, n_heads=2,
+                          attention_dim=8, pos_enc='nope',
+                          ffn_hidden_dim=[8, 8], conv1d_kernel=3),
+        loss_w_cln=0., loss_w_rvb=0., pim_sweep_duration=0.2,
+        sweep_loss_weight=sw, rir_loss_weight=rw)
+
+
+def test_inverse_delay_gain_and_gradient_against_scipy():
+    from scipy.signal import fftconvolve
+    m = combined_model()
+    h = torch.zeros(1, 512)
+    h[0, 101] = -0.4
+    spec = m.response_spectrum(h).detach().requires_grad_()
+    actual = m.response_to_rir(spec, 512)[0, 0]
+    # Independent waveform-domain reference, including both guards.
+    waveform = np.pad(fftconvolve(m.sweep.numpy(), h[0].numpy()), (64, 64))
+    expected = fftconvolve(waveform, m.inverse_sweep.numpy())
+    start = len(m.sweep) - 1 + 64
+    torch.testing.assert_close(actual, torch.tensor(expected[start:start+512]),
+                               atol=2e-6, rtol=2e-4)
+    assert actual.abs().argmax() == 101
+    assert abs(actual[101].item() + .4) < 2e-5
+    twice = m.response_to_rir(spec * 2, 512)[0, 0]
+    torch.testing.assert_close(twice, actual * 2)
+    actual.abs().mean().backward()
+    assert torch.isfinite(spec.grad).all() and spec.grad.abs().sum() > 0
+
+
+def test_combined_weights_network_gradients_and_zero_weight_compatibility():
+    torch.manual_seed(2)
+    data = dict(speech_mix=torch.randn(2, 256),
+                speech_mix_lengths=torch.tensor([256, 256]))
+    direct = torch.zeros(2, 256)
+    direct[:, 50] = 1
+    reverb = direct.clone()
+    reverb[:, 114] = .3
+    data.update(rir_direct=direct, rir_ref=reverb)
+    for sw, rw in ((1., 0.), (1., 1.), (.2, 3.), (0., 1.)):
+        m = combined_model(sw, rw)
+        loss, stats, _ = m(**data)
+        torch.testing.assert_close(loss, sw * stats['loss_sweep'] + rw * stats['loss_rir_l1'])
+        if rw == 0:
+            speech = data['speech_mix'] / data['speech_mix'].abs().amax(1, keepdim=True)
+            _, features, _ = m.rec_rir(m.transforms.preprocess(m.transforms.stft(speech[:, None])))
+            ctf = m.transforms.postprocess(features)
+            torch.testing.assert_close(loss.squeeze(), m.sweep_loss(ctf, direct, reverb))
+        loss.backward()
+        grads = [p.grad for p in m.parameters() if p.grad is not None]
+        assert grads and all(torch.isfinite(g).all() for g in grads)
+        assert sum(g.abs().sum() for g in grads) > 0
+    with unittest.TestCase().assertRaises(ValueError):
+        combined_model(0, 0)
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(
         unittest.FunctionTestCase(value)
