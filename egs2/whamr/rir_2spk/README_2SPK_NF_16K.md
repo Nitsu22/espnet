@@ -62,3 +62,13 @@ Each entry point has its own experiment/statistics directory under `exp/`.
 GPU FP32 scratch update, finite gradients, teacher-permutation invariance and
 inference of two 32000-sample RIRs. The synthetic unit test is
 `test/espnet2/rir/rec_rir/test_sweep_v2_pit.py` (runnable without pytest).
+
+Stage 5 with input-only batching uses `local/prepare_input_shapes.py` to write
+input shapes directly from header-verified `utt2num_samples`, checking the
+preparation manifest hashes and all IDs. No feature means/variances are used
+in these configurations. The resulting lengths were verified identical for
+all 20000 train and 5000 valid utterances to ESPnet-collected lengths on the
+corresponding WHAMR min examples. This avoids rereading all teacher waveforms
+three times just to obtain the same batch partition. Full GPU update checks
+including PIT permutation invariance and two-RIR inference passed for all three
+models.

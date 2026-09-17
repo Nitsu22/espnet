@@ -17,6 +17,7 @@ rir_args="--valid_batch_size 1"
 rir_model_type=rec_rir_pit
 batch_by_input_only=true
 speech_fold_length=160000
+rir_stats_dir=
 . utils/parse_options.sh
 [[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
 [[ -n ${rir_exp} ]] || rir_exp="exp/rir_${rir_tag}"
@@ -35,11 +36,16 @@ if [[ ${stage} -le 6 && ${stop_stage} -ge 6 ]]; then
     fi
 fi
 export NUMBA_CACHE_DIR=${NUMBA_CACHE_DIR:-/tmp/nitsu-rir1ch-numba}
+[[ -n ${rir_stats_dir} ]] || rir_stats_dir="exp/rir_stats_${rir_tag}"
+if [[ ${batch_by_input_only} == true && ${stage} -le 5 && ${stop_stage} -ge 5 ]]; then
+    "${python}" local/prepare_input_shapes.py --config "${rir_config}" --dump "${dumpdir}" --output "${rir_stats_dir}"
+    stage=6
+fi
 bash ./rir.sh --stage "${stage}" --stop_stage "${stop_stage}" \
     --skip_data_prep true --resume "${resume}" --python "${python}" \
     --fs 16k --ngpu "${ngpu}" --num_nodes "${num_nodes}" --nj "${nj}" \
     --dumpdir "${dumpdir}" --train_set tr_rir_2spk_nf_min_16k \
     --valid_set cv_rir_2spk_nf_min_16k --test_sets tt_rir_2spk_nf_min_16k \
     --rir_model_type "${rir_model_type}" --rir_config "${rir_config}" --rir_tag "${rir_tag}" \
-    --rir_exp "${rir_exp}" --rir_stats_dir "exp/rir_stats_${rir_tag}" \
+    --rir_exp "${rir_exp}" --rir_stats_dir "${rir_stats_dir}" \
     --batch_by_input_only "${batch_by_input_only}" --speech_fold_length "${speech_fold_length}" --rir_fold_length 32000 --rir_args "${rir_args}"
