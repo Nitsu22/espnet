@@ -39,6 +39,8 @@ def main():
     processor = RIRTask.build_preprocess_fn(config, train=True)
     names = (['speech_mix', 'rir_ref'] if config.rir_model_type == 'rec_rir_sweep'
              else ['speech_mix', 'speech_direct', 'speech_reverb'])
+    if config.rir_model_type == 'rec_rir_sweep_v2':
+        names = ['speech_mix', 'rir_ref', 'rir_direct']
     maps = {n: dict(line.split(maxsplit=1) for line in
                    (args.data_dir / (n + '.scp')).read_text().splitlines()) for n in names}
     ids = list(maps['speech_mix'])[:args.batch_size]
