@@ -16,6 +16,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model_file", required=True)
     parser.add_argument("--wav_scp", required=True)
     parser.add_argument("--output_dir", required=True)
+    parser.add_argument("--direct_rir_scp", help="Oracle evaluation using known clean-to-direct RIRs")
     parser.add_argument("--sample_rate", type=int, default=8000)
     parser.add_argument("--rir_length", type=int, default=8192)
     parser.add_argument("--device", default="cpu")
@@ -41,6 +42,10 @@ def main(cmd=None):
 
     output_dir = Path(args.output_dir)
     reader = SoundScpReader(args.wav_scp, dtype=np.float32, always_2d=False)
+    direct_reader = (SoundScpReader(args.direct_rir_scp, dtype=np.float32, always_2d=False)
+                     if args.direct_rir_scp else None)
+    if direct_reader is not None and set(reader) != set(direct_reader):
+        raise ValueError("Speech and direct RIR SCP keys must match exactly")
     with SoundScpWriter(output_dir, output_dir / "wav.scp", subtype=args.output_subtype) as writer:
         for uid in reader:
             sample_rate, wav = reader[uid]
@@ -52,7 +57,18 @@ def main(cmd=None):
                 wav = wav[:, 0]
             speech = torch.as_tensor(wav, dtype=dtype, device=device)
             with torch.no_grad():
-                rir = model.estimate_rir(speech, rir_length=args.rir_length)
+                if direct_reader is None:
+                    rir = model.estimate_rir(speech, rir_length=args.rir_length)
+                else:
+                    direct_sr, direct = direct_reader[uid]
+                    if direct_sr != args.sample_rate:
+                        raise ValueError(f"{uid}: direct RIR sample rate mismatch")
+                    if direct.ndim == 2:
+                        direct = direct[:, 0]
+                    ctf = model.estimate_ctf(speech)
+                    rir = model.pim.ctf_to_rir(
+                        ctf, model.transforms, ctf.device, rir_length=args.rir_length,
+                        direct_rir=torch.as_tensor(direct, dtype=dtype, device=device))
             if args.peak_normalize:
                 peak = rir.abs().max()
                 if not torch.isfinite(rir).all() or peak == 0:

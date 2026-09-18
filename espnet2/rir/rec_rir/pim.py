@@ -58,6 +58,7 @@ class RecRIRPIM:
         transform,
         device: torch.device,
         rir_length: Optional[int] = None,
+        direct_rir: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         try:
             import torchaudio
@@ -69,6 +70,20 @@ class RecRIRPIM:
 
         sinesweep = self.sinesweep.to(device)
         invfilter = self.invfilter.to(device)
+        if direct_rir is not None:
+            # Oracle evaluation: the original inverse is retained, while the
+            # excitation includes the known clean-to-direct propagation filter.
+            direct_rir = direct_rir.to(device=device, dtype=sinesweep.dtype)
+            if (direct_rir.ndim != 1 or direct_rir.numel() == 0
+                    or not torch.isfinite(direct_rir).all()
+                    or not torch.any(direct_rir != 0)):
+                raise ValueError("direct_rir must be a finite nonzero mono RIR")
+            total = sinesweep.numel() + direct_rir.numel() - 1
+            nfft = 1 << (total - 1).bit_length()
+            sinesweep = torch.fft.irfft(
+                torch.fft.rfft(sinesweep, n=nfft)
+                * torch.fft.rfft(direct_rir, n=nfft), n=nfft
+            )[:total]
         sinesweep_spec = transform.stft(sinesweep, "complex")
         ctf_ret = ctf.unsqueeze(2)
         taps = ctf.shape[-1]

@@ -80,3 +80,17 @@ inference sweep was shortened to 0.1 s for the CPU smoke test; full-duration
 GPU inference/performance has not been validated here. One-example ESPnet
 train/valid statistics collection also passed. No long training is launched
 as part of this change.
+
+## WHAMR direct-sweep oracle evaluation
+
+`run_eval_rec_rir_single_nf_16k.sh --direct_sweep true --dataset whamr` uses the
+known `rir_direct.scp` to convolve the excitation before applying the estimated
+CTF. The original sweep inverse, PIM tap ordering, peak alignment, normalization
+and scorer are retained. The output name receives `_direct_sweep_oracle`.
+The default `--direct_sweep false` is unchanged. ACE/BUT direct-sweep mode is
+rejected because their dumps do not provide the same known direct-path filter.
+
+This is an oracle diagnostic against clean-to-reverberant RIR, not ordinary
+blind inference. It is meaningful for direct-to-reverberant CTF models such as
+v2; it should not be interpreted as a correction for the old clean-to-reverberant
+sweep v1. Compare both modes on the SAME checkpoint and utterances.
