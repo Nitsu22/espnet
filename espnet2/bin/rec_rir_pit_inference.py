@@ -20,6 +20,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rir_length", type=int, default=8192)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--dtype", default="float32", choices=["float16", "float32"])
+    parser.add_argument("--output_subtype", default=None, choices=["FLOAT", "PCM_16", "PCM_24"])
     return parser
 
 
@@ -40,8 +41,8 @@ def main(cmd=None):
     output_dir = Path(args.output_dir)
     reader = SoundScpReader(args.wav_scp, dtype=np.float32, always_2d=False)
     uids = list(reader.keys())
-    with SoundScpWriter(output_dir / "rir1", output_dir / "rir1" / "wav.scp") as writer1, \
-            SoundScpWriter(output_dir / "rir2", output_dir / "rir2" / "wav.scp") as writer2:
+    with SoundScpWriter(output_dir / "rir1", output_dir / "rir1" / "wav.scp", subtype=args.output_subtype) as writer1, \
+            SoundScpWriter(output_dir / "rir2", output_dir / "rir2" / "wav.scp", subtype=args.output_subtype) as writer2:
         for uid in uids:
             sample_rate, wav = reader[uid]
             if sample_rate != args.sample_rate:
@@ -58,8 +59,12 @@ def main(cmd=None):
                 rir = rir[0]
             if rir.ndim != 2 or rir.shape[0] != 2:
                 raise RuntimeError(f"{uid}: expected estimated RIR shape [2, T], got {rir.shape}")
+            if not np.isfinite(rir).all():
+                raise RuntimeError(f"{uid}: nonfinite RIR prediction")
             writer1[uid] = (args.sample_rate, rir[0])
             writer2[uid] = (args.sample_rate, rir[1])
+            if len(writer1.data) % 100 == 0:
+                print(f"Inferred {len(writer1.data)}/{len(uids)} utterances", flush=True)
 
         with (output_dir / "rir.scp").open("w", encoding="utf-8") as f:
             for uid in uids:
