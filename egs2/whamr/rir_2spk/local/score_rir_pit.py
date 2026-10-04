@@ -87,6 +87,7 @@ def score_pair(
     scale_mode: str,
     direct_window_ms: float,
     direct_index: Optional[int] = None,
+    polarity_align: bool = False,
 ) -> Dict[str, float]:
     pred = fix_length(pred, rir_length)
     ref = fix_length(ref, rir_length)
@@ -97,6 +98,11 @@ def score_pair(
         pred = peak_align(pred, ref)
     elif align == "direct":
         pred = align_pred_to_index(pred, direct_index)
+    if polarity_align and pred.size and ref.size:
+        pred_peak = int(np.argmax(np.abs(pred)))
+        ref_peak = int(np.argmax(np.abs(ref)))
+        if pred[pred_peak] * ref[ref_peak] < 0:
+            pred = -pred
     pred_s, ref_s = scale_signals(pred, ref, scale_mode)
     n50 = min(rir_length, int(round(0.050 * sample_rate)))
     direct_end = min(rir_length, direct_index + n50)
@@ -202,6 +208,11 @@ def main():
     )
     parser.add_argument("--direct_window_ms", type=float, default=2.5)
     parser.add_argument(
+        "--polarity_align",
+        action="store_true",
+        help="Flip each prediction when its absolute peak has opposite polarity to the reference",
+    )
+    parser.add_argument(
         "--pit_metric",
         choices=[
             "rmse",
@@ -268,6 +279,7 @@ def main():
                     args.scale_mode,
                     args.direct_window_ms,
                     direct_indices[ref_index],
+                    args.polarity_align,
                 )
                 pair_rows.append((pred_index, ref_index, metrics))
             agg = aggregate_pair_metrics(metrics for _, _, metrics in pair_rows)
@@ -319,6 +331,7 @@ def main():
             "room_geometry" if room_param_map is not None else "reference_peak"
         ),
         "scale_mode": args.scale_mode,
+        "polarity_align": args.polarity_align,
         "pit_metric": args.pit_metric,
         "perm0_ratio": finite_mean(
             1.0 if row["perm_index"] == 0 else 0.0 for row in per_utt_rows
