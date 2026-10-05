@@ -22,6 +22,7 @@ from espnet2.enh.encoder.conv_encoder import ConvEncoder
 from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
+from espnet2.enh.espnet_model_ctf import ESPnetEnhancementCTFModel
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tfgridnet_wav_mag_mc import (
     TFGridNetWavMag,
@@ -80,6 +81,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_bigdeltanet import (
     TFLocoformerBiGatedDeltaNetSeparator,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf import (
+    TFLocoformerCTFSeparator,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_aeafusion import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocasheAEAFusion,
 )
@@ -115,6 +119,7 @@ from espnet2.train.preprocessor import (
     DynamicMixingPreprocessor,
     EnhPreprocessor,
 )
+from espnet2.train.preprocessor_enh_ctf import EnhCTFPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -154,6 +159,7 @@ separator_choices = ClassChoices(
         uses=USESSeparator,
         tflocoformer=TFLocoformerSeparator,
         tflocoformer_nocashe=TFLocoformerSeparatorNocashe,
+        tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
         tflocoformer_nocashe_aeafusion_first=TFLocoformerSeparatorNocasheAEAFusionFirst,
@@ -515,9 +521,12 @@ class EnhancementTask(AbsTask):
                     flexible_numspk=getattr(args, "flexible_numspk", False),
                 )
                 kwargs.update(args.preprocessor_conf)
-                retval = preprocessor_choices.get_class(args.preprocessor)(
-                    train=train, **kwargs
+                preprocessor_class = (
+                    EnhCTFPreprocessor
+                    if args.separator == "tflocoformer_nocashe_ctf"
+                    else preprocessor_choices.get_class(args.preprocessor)
                 )
+                retval = preprocessor_class(train=train, **kwargs)
             else:
                 raise ValueError(
                     f"Preprocessor type {args.preprocessor} is not supported."
@@ -546,6 +555,7 @@ class EnhancementTask(AbsTask):
         retval += ["speech_ref{}".format(n) for n in range(2, MAX_REFERENCE_NUM + 1)]
         retval += ["noise_ref{}".format(n) for n in range(1, MAX_REFERENCE_NUM + 1)]
         retval += ["category"]
+        retval += ["speech_reverb1", "speech_reverb2", "reverb_crop_start"]
         retval = tuple(retval)
         return retval
 
@@ -594,7 +604,12 @@ class EnhancementTask(AbsTask):
             )
 
         else:
-            model = ESPnetEnhancementModel(
+            model_class = (
+                ESPnetEnhancementCTFModel
+                if args.separator == "tflocoformer_nocashe_ctf"
+                else ESPnetEnhancementModel
+            )
+            model = model_class(
                 encoder=encoder,
                 separator=separator,
                 decoder=decoder,
