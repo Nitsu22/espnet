@@ -23,11 +23,19 @@ A request to run on TSUBAME includes pushing the required midgar commits and pul
 
 Edit version-controlled code, configuration, and qsub scripts on midgar. If further changes are needed after synchronization, repeat the sync above. TSUBAME is for execution and run artifacts unless the user explicitly requests otherwise.
 
+## Resource Selection and Point Minimization
+
+- Before sizing a job, read [resource types and point costs](references/resources-and-points.md). Inspect the requested stages for CPU parallelism, peak host memory, GPU count, and GPU memory needs; do not inherit a resource request just because an example uses it.
+- Minimize the expected total TSUBAME points needed to complete the requested computation correctly. Compare resource coefficients and expected runtimes from prior logs or measurements; the smallest allocation is not always the cheapest if it runs much longer. Preserve the requested experiment and results.
+- For CPU-only work, choose `cpu_*` whenever it meets the job's requirements; explain any verified resource constraint that requires a GPU-bearing allocation. Split substantial CPU-only preparation or scoring from GPU computation when this reduces points and preserves data dependencies; reuse verified artifacts where appropriate. Do not move heavy computation onto login nodes to avoid charges.
+- For GPU work, request only the GPUs, CPU cores, and memory the job needs. Match `--ngpu`, worker counts, and thread settings to the allocation. Use fractional GPU resources only after verifying sufficient GPU memory and application compatibility.
+- Default to priority `-5`. Estimate `h_rt` with a modest margin and account for both actual runtime and requested walltime in the point estimate. Avoid limits that cause premature termination and repeated work; report the selected resources, walltime, and reason for the choice.
+
 ## Prepare qsub Scripts on midgar
 
 - Inspect existing scripts in the recipe's `qsub/` directory. Reuse the same experiment's script for continuation/reruns where suitable; inspect before overwriting. Create new scripts there only when needed.
 - Follow the closest successful example for the same recipe and GPU scale. Match `run*.sh`, `--ngpu`, `--stage`, `--stop_stage`, and optional arguments to the request.
-- Verify `node_f` versus `node_q` from successful examples; do not guess resource names. Existing examples use `module load cuda/11.8.0`, `conda activate tf-locoformer`, and conda under `/gs/bs/tga-shinoda/nitsu/anaconda3`.
+- Apply the resource selection above, then verify the environment against successful examples. Existing examples use `module load cuda/11.8.0`, `conda activate tf-locoformer`, and conda under `/gs/bs/tga-shinoda/nitsu/anaconda3`.
 - If no suitable example exists, read [the qsub pattern](references/qsub-script.md) as a fallback. If resources, environment, paths, or requested run conditions remain unverified, ask before submission.
 
 ## Submit and Inspect
@@ -35,7 +43,7 @@ Edit version-controlled code, configuration, and qsub scripts on midgar. If furt
 - After synchronization, submit from the recipe directory, not from inside `qsub/`.
 - Use uncharged trials only for pre-charge compatibility checks, not research/training/benchmarking: submit without a TSUBAME group (`-g`/`newgrp`), request at most 2 resource units, `h_rt=00:03:00` or less, priority `-5`, and only one running trial. [Official trial limits](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#523).
 - The limit counts resource units, not GPUs: `node_f=1` has 4 GPUs and fits the published resource limit; `node_q=4` exceeds it. Check actual rejection messages. If a check (including multi-GPU initialization) needs more than 3 minutes, use a group-charged job with sufficient time instead of forcing a trial.
-- Production run: estimate runtime from prior logs or measured progress and set `h_rt` with a modest margin; avoid unnecessarily long limits to keep resource consumption low. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
+- Production run: use the selected resources, priority, and estimated `h_rt` above. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
 - When asked to wait for another job, identify its actual job ID with `qstat` and use `qsub -hold_jid <job_id> ...`; never guess the dependency.
 - Report the submitted command, job ID when available, and synchronized commit. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
 
