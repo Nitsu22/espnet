@@ -22,8 +22,11 @@ def load_batch(dataset, key, limit=None):
     ):
         filename = read_scp(Path("dump/raw") / dataset / scp)[key]
         audio, rate = sf.read(filename, dtype="float32", always_2d=False)
-        if rate != 8000 or audio.ndim != 1:
-            raise ValueError(f"Expected mono 8 kHz audio: {filename}")
+        if rate != 8000 or audio.ndim not in (1, 2):
+            raise ValueError(f"Expected 8 kHz audio: {filename}")
+        # Match EnhPreprocessor(force_single_channel=True): select channel 0.
+        if audio.ndim == 2:
+            audio = audio[:, 0].copy()
         if limit is not None:
             audio = audio[:limit]
         batch[name] = torch.from_numpy(audio).unsqueeze(0).cuda()
