@@ -63,15 +63,18 @@ mkdir -p qsub_logs
 qsub -g tga-shinoda qsub/koudaisai_1ch_prepare.sh
 ```
 
-Preparation allocates `node_f=1`, checks a disposable random model with a
-4-GPU forward/backward (zero optimizer steps, no model checkpoint), then runs
-only Stage 5 (statistics). The default `run_tfgridnet_koudaisai_1ch.sh` also stops
-at Stage 5. Inspect `exp_tfgridnet_koudaisai_1ch/prepare.status`, `smoke_ddp.log`,
+Preparation allocates `cpu_16=1` for at most 30 minutes and runs only Stage 5
+(statistics), with four jobs and one data worker each. No GPU is reserved.
+The default `run_tfgridnet_koudaisai_1ch.sh` also stops
+at Stage 5. Inspect `exp_tfgridnet_koudaisai_1ch/prepare.status`,
 `stats.log`, and `enh_stats_8k/{train,valid}/speech_mix_shape` before training.
 
 Training is a SEPARATE, user-authorized submission of
 `qsub/koudaisai_1ch_train.sh` with an appropriate `qsub -l h_rt=...` walltime.
-It uses `node_f=1`, four GPUs, and Stage 6 only. It is not automatically submitted
+It uses `node_f=1`, checks a disposable random model with a 4-GPU
+forward/backward (zero optimizer steps, no checkpoint), then runs Stage 6.
+This GPU compatibility check is deferred until training is authorized, to avoid
+reserving four GPUs solely for CPU statistics. Training is not automatically submitted
 by any preparation or transfer script. Models will be saved under
 `exp_tfgridnet_koudaisai_1ch/tfgridnet_2block_1ch`.
 

@@ -10,7 +10,13 @@ source /etc/profile.d/modules.sh
 module load cuda/11.8.0
 source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
+export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1
+export PYTHONPATH="$(cd ../../.. && pwd)${PYTHONPATH:+:${PYTHONPATH}}"
 for split in train valid; do
     test -s "exp_tfgridnet_koudaisai_1ch/enh_stats_8k/${split}/speech_mix_shape"
 done
+# Check the four-GPU path immediately before the separately authorized training.
+python -m torch.distributed.run --standalone --nproc_per_node=4 \
+    local/check_tfgridnet_koudaisai.py --ddp \
+    > exp_tfgridnet_koudaisai_1ch/smoke_ddp.log 2>&1
 bash run_tfgridnet_koudaisai_1ch.sh --stage 6 --stop_stage 6
