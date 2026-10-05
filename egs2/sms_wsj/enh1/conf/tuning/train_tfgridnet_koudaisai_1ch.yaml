@@ -1,0 +1,60 @@
+# Match Roland's Koudaisai config; only input channels and DOA are ablated.
+seed: 0
+num_workers: 4
+iterator_type: chunk
+batch_type: folded
+batch_size: 4
+chunk_length: 32000
+chunk_shift_ratio: 0.5
+num_cache_chunks: 1024
+max_epoch: 50
+patience: 5
+val_scheduler_criterion: [valid, loss]
+early_stopping_criterion: [valid, loss, min]
+best_model_criterion: [[valid, loss, min]]
+keep_nbest_models: 50
+grad_clip: 5.0
+accum_grad: 1
+train_dtype: float32
+use_amp: false
+cudnn_deterministic: true
+cudnn_benchmark: false
+init: xavier_uniform
+init_param: []
+optim: adam
+optim_conf: {lr: 0.001, eps: 1.0e-08, weight_decay: 0.0}
+scheduler: reducelronplateau
+scheduler_conf: {mode: min, factor: 0.5, patience: 3}
+log_interval: 100
+use_tensorboard: true
+encoder: same
+decoder: same
+separator: tfgridnet
+separator_conf:
+  n_srcs: 2
+  n_fft: 256
+  stride: 64
+  window: hann
+  n_imics: 1
+  n_layers: 2
+  lstm_hidden_units: 192
+  attn_n_head: 4
+  attn_approx_qk_dim: 512
+  emb_dim: 48
+  emb_ks: 4
+  emb_hs: 1
+  activation: prelu
+  eps: 1.0e-05
+  ref_channel: 0
+  return_loss_metadata: true
+criterions:
+  - name: roland_tf_l1
+    conf: {n_fft: 256, stride: 64, window: hann}
+    wrapper: roland_tf_mc_pit
+    wrapper_conf: {weight: 0.95}
+preprocessor: enh
+num_spk: 2
+sample_rate: 8000
+force_single_channel: true
+speech_volume_normalize: null
+dynamic_mixing: false

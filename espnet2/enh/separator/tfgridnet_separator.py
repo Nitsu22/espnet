@@ -163,6 +163,8 @@ class TFGridNet(AbsSeparator):
             # The paper evaluates waveform losses in mixture-normalized units.
             others["tfgridnet_mix_std"] = mix_std_.squeeze(-1)
             others["tfgridnet_lengths"] = ilens
+            # Raw decoder input: Roland's RI loss is evaluated before iSTFT.
+            others["tfgridnet_spectra"] = batch.unbind(dim=1)
 
         batch = self.dec(batch.view(-1, n_frames, n_freqs), ilens)[0]  # [B, n_srcs, -1]
 
