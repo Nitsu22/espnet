@@ -108,17 +108,31 @@ class TestBiGatedDeltaNet(unittest.TestCase):
             self.assertTrue(torch.isfinite(p.grad).all(), name)
 
     def test_small_espnet_waveform_training_and_reload(self):
+        self._check_waveform_training_and_reload("small", 4)
+
+    def test_medium_espnet_waveform_training_and_reload(self):
+        self._check_waveform_training_and_reload("medium", 6)
+
+    def _check_waveform_training_and_reload(self, size, blocks):
         from espnet2.tasks.enh import EnhancementTask
 
+        filename = (
+            "train_enh_tflocoformer_medium_nocashe_bigdeltanet_1gpu.yaml"
+            if size == "medium" else
+            "train_enh_tflocoformer_small_nocashe_bigdeltanet.yaml"
+        )
         config = (Path(__file__).resolve().parents[4] /
-                  "egs2/whamr/enh1/conf/tuning/"
-                  "train_enh_tflocoformer_small_nocashe_bigdeltanet.yaml")
+                  "egs2/whamr/enh1/conf/tuning" / filename)
         with tempfile.TemporaryDirectory() as directory:
             args = EnhancementTask.get_parser().parse_args([
                 "--config", str(config), "--output_dir", directory,
             ])
             model = EnhancementTask.build_model(args)
-            self.assertEqual(len(model.separator.blocks), 4)
+            self.assertEqual(len(model.separator.blocks), blocks)
+            if size == "medium":
+                self.assertEqual(args.batch_size * args.accum_grad, 4)
+                self.assertEqual(args.separator_conf["emb_dim"], 128)
+                self.assertEqual(args.separator_conf["ffn_hidden_dim"], [192, 192])
             refs = [torch.randn(1, 1024) for _ in range(2)]
             mixture = refs[0] + refs[1] + 0.01 * torch.randn(1, 1024)
             lengths = torch.tensor([1024])
