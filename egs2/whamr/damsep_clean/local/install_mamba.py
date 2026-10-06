@@ -15,8 +15,6 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-import torch
-
 WHEELS = [
     (
         "https://github.com/state-spaces/mamba/releases/download/v1.2.0.post1/",
@@ -46,6 +44,8 @@ print('Imported Mamba/causal-conv1d/DAMSEP using the isolated dependency folder'
 
 def verify(target, root):
     env = os.environ.copy()
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        env[name] = "1"
     env["PYTHONPATH"] = os.pathsep.join(
         [str(root), str(target), env.get("PYTHONPATH", "")]
     )
@@ -59,6 +59,12 @@ def main():
         "--target", type=Path, default=Path(".deps/mamba-cu118-torch21-py310")
     )
     args = parser.parse_args()
+    # Login nodes have a strict process/thread limit. Import probing does not
+    # need BLAS parallelism, and this does not change the parent shell's env.
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ[name] = "1"
+    import torch
+
     if (
         sys.version_info[:2] != (3, 10)
         or not torch.__version__.startswith("2.1.")
