@@ -227,7 +227,7 @@ if ! "${skip_train}"; then
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    if [ "${rir_model_type}" = tflocoformer_sweep_v2_pit ]; then
+    if [ "${rir_model_type}" = tflocoformer_sweep_v2_pit ] || [ "${rir_model_type}" = pooled_bimamba_sweep_v2_pit ]; then
       for key in rir_ref1 rir_ref2 rir_direct1 rir_direct2; do
         train_data_param+="--train_data_path_and_name_and_type ${train_dir}/${key}.scp,${key},sound "
         valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/${key}.scp,${key},sound "
@@ -314,7 +314,7 @@ if ! "${skip_train}"; then
 
     train_data_param="--train_data_path_and_name_and_type ${train_dir}/${train_speech_mix_scp},speech_mix,sound "
     valid_data_param="--valid_data_path_and_name_and_type ${valid_dir}/${valid_speech_mix_scp},speech_mix,sound "
-    if [ "${rir_model_type}" = tflocoformer_sweep_v2_pit ]; then
+    if [ "${rir_model_type}" = tflocoformer_sweep_v2_pit ] || [ "${rir_model_type}" = pooled_bimamba_sweep_v2_pit ]; then
       for key in rir_ref1 rir_ref2 rir_direct1 rir_direct2; do
         train_data_param+="--train_data_path_and_name_and_type ${train_dir}/${key}.scp,${key},sound "
         valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/${key}.scp,${key},sound "

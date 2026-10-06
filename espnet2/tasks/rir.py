@@ -160,6 +160,7 @@ class RIRTask(AbsTask):
                 "rec_rir_pit",
                 "tflocoformer_ctf_pit",
                 "tflocoformer_sweep_v2_pit",
+                "pooled_bimamba_sweep_v2_pit",
                 "rec_rir_pit_ctf_split",
                 "daras",
             ],
@@ -276,6 +277,13 @@ class RIRTask(AbsTask):
     @classmethod
     @typechecked
     def build_model(cls, args: argparse.Namespace) -> AbsESPnetModel:
+        if getattr(args, "rir_model_type", "direct") == "pooled_bimamba_sweep_v2_pit":
+            from espnet2.rir.rec_rir.pooled_bimamba_sweep_v2_pit import ESPnetPooledBiMambaSweepV2PITModel
+
+            model = ESPnetPooledBiMambaSweepV2PITModel(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
         if getattr(args, "rir_model_type", "direct") in (
             "tflocoformer_ctf_pit", "tflocoformer_sweep_v2_pit"
         ):

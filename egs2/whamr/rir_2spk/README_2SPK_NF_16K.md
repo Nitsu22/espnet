@@ -72,3 +72,35 @@ corresponding WHAMR min examples. This avoids rereading all teacher waveforms
 three times just to obtain the same batch partition. Full GPU update checks
 including PIT permutation invariance and two-RIR inference passed for all three
 models.
+
+## Pooled BiMamba Sweep v2 predictor
+
+`run_pooled_bimamba_2spk_nf_16k_sweep_v2.sh` selects
+`pooled_bimamba_sweep_v2_pit`. Its config uses the same dump, preprocessor,
+4-second crop, batch/fold lengths, optimizer, scheduler, stopping criteria,
+60 CTF taps and full direct-sweep/reverb-sweep RIMag PIT loss as the
+TF-Locoformer Sweep v2 baseline. The inherited loss averages the two speakers
+and retains the complete response and prediction tails. Ordinary-sweep PIM,
+CTF tap ordering and `local/evaluate_two_speaker.py` are reused unchanged.
+
+The predictor is Conv2D(2 -> 64, 3x3), then four blocks of independent
+forward/backward Mamba-1 (state 16, convolution 4, expand 2) plus lightweight
+frequency processing (depthwise kernel 5 and 64 -> 16 channel compression,
+257 -> 16 -> 257 frequency MLP shared across compressed channels). A
+64 -> 32 -> 128 MLP provides two-slot, channel-specific temporal weights.
+Softmax over time, a weighted sum and learned [2, 64] slot embeddings produce
+the pooled representation. Two shared frequency blocks use 4-head Attention
+with RoPE and a GLU/depthwise-convolution FFN, followed by the shared
+LayerNorm/64 -> 128 -> 120 CTF head. Parameter count: 456428 total,
+456412 trainable; the remaining 16 are fixed RoPE frequencies.
+
+Padding follows the current baseline: full batched STFT, no sequence masking
+in the predictor or pooling, and whole-sequence reversal in backward Mamba.
+This is a matched-condition architecture comparison, not a padding fix.
+Post-pooling blocks can be disabled with `predictor_conf.post_layers: 0` for
+an ablation. The model has no speech heads, RIR L1 loss, or auxiliary losses.
+Implementation checks are in
+`test/espnet2/rir/rec_rir/test_pooled_bimamba_sweep_v2.py`; the recipe's existing
+`local/check_two_speaker_training.py` also supports this model for a real GPU
+update and two-RIR inference. Implementing this entry point does not start
+a training run.

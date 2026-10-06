@@ -13,7 +13,7 @@ def main():
     p.add_argument('--output',type=Path,required=True)
     args=p.parse_args()
     config=yaml.safe_load(args.config.read_text())
-    assert config['rir_model_type'] in ('rec_rir_pit','tflocoformer_ctf_pit','tflocoformer_sweep_v2_pit')
+    assert config['rir_model_type'] in ('rec_rir_pit','tflocoformer_ctf_pit','tflocoformer_sweep_v2_pit','pooled_bimamba_sweep_v2_pit')
     assert config['model_conf']['extract_feats_in_collect_stats'] is False
     assert config['force_single_channel'] is True
     assert config['preprocessor_conf']['force_single_channel'] is True

@@ -423,6 +423,7 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         extract_feats_in_collect_stats: bool = False,
         pim_sweep_duration: float = 8.192,
         reconstruction_signal: str = "speech",
+        ctf_predictor: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.sr = int(sr)
@@ -497,7 +498,8 @@ class ESPnetRecRIRTFLocoformerPITModel(AbsESPnetModel):
         self.room_path_factorized = bool(room_path_factorized)
         self.rt60_auxiliary = bool(rt60_auxiliary)
         self.rt60_loss_weight = float(rt60_loss_weight)
-        self.ctf_predictor = predictor_class(**predictor_kwargs)
+        self.ctf_predictor = (predictor_class(**predictor_kwargs)
+                              if ctf_predictor is None else ctf_predictor)
         self.pim = RecRIRPIM(sr=sr, sweep_duration=pim_sweep_duration)
         if self.reconstruction_signal == "sweep":
             reconstruction_sweep = self.pim.sinesweep.clone()
