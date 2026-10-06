@@ -67,8 +67,14 @@ and every objective. Test data is not monitored during training.
   As in the release, random crops have no preceding clean-speech context;
   reconstruction at the start of a mid-utterance crop is an approximation.
 - Adam lr 0.001, no weight decay, clip 5; ReduceLROnPlateau factor 0.5,
-  patience 5; early-stop patience 5, maximum 500 epochs. FP32 is explicit
+  patience 5; stop after five consecutive non-improving epochs, maximum 500
+  epochs. ESPnet's strict `epochs_since_best > patience` comparison requires
+  `patience: 4` to match Lightning's `patience: 5`. FP32 is explicit
   (the released Lightning runner can default to mixed BF16 on CUDA).
+
+The pre-submission paper/code audit is recorded in
+[IMPLEMENTATION_CHECK.md](IMPLEMENTATION_CHECK.md), including the distinctions
+between the manuscript, released code and this NF-WHAMR experiment.
 
 ## Run
 
@@ -120,6 +126,8 @@ mkdir -p qsub_logs
 qsub -g tga-shinoda qsub/stats_cpu.sh
 # After Stage 5 and Mamba setup, on an allocated CUDA host.
 bash run.sh --stage 6 --stop_stage 6 --ngpu 1
+# TSUBAME production: one full GPU, effective batch one, Stage 6 only.
+qsub -g tga-shinoda qsub/train_1gpu.sh
 # Resume on four allocated GPUs: global batch 4, per-rank batch 1.
 bash run.sh --stage 6 --stop_stage 6 --ngpu 4
 # Preserve effective global batch 4 on one GPU with gradient accumulation.
@@ -134,6 +142,21 @@ and no loader workers each, priority -5 and a 30-minute walltime. It uses the
 existing tf-locoformer environment; no CUDA module or Mamba installation is
 required for this CPU stage. Shape files are stored under
 `exp/damsep_stats_8k/{train,valid}/` and consumed by Stage 6.
+
+`qsub/train_1gpu.sh` uses `gpu_1=1` (one full H100, eight CPU cores, 96 GB host
+RAM), four loader workers, one thread per process and priority -5. It first
+checks the Stage 5 source-list hashes and all five shape files, then performs
+an FP32 CUDA forward without gradients on the longest real validation example.
+The check is part of the charged job, with its report stored in
+`exp/damsep_nf_8k/input_check.json`. It then starts Stage 6 with batch one and
+no gradient accumulation; inference/scoring are separate stages.
+
+The initial allocation is 24 hours, the published TSUBAME job limit, rather
+than a claim that training will finish within a day. Epoch duration has not
+yet been measured. ESPnet saves training state after each complete training
+and validation epoch. After a time-limit termination, resubmitting the same
+script resumes from the last completed epoch; the interrupted epoch repeats.
+Use the observed epoch times to size subsequent allocations.
 
 `run.sh` does not overwrite `CUDA_VISIBLE_DEVICES`. GPU host choice and TSUBAME
 allocation/submission are separate. The CPU statistics job is independent

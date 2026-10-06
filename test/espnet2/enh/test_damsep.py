@@ -65,6 +65,28 @@ def test_negative_snr_differs_from_scale_invariant():
     assert (negative_sdr(estimate, target, True) < -80).all()
 
 
+def test_recipe_stops_after_five_non_improving_epochs():
+    import yaml
+
+    from espnet2.train.reporter import Reporter
+
+    config = yaml.safe_load(
+        (
+            Path(__file__).resolve().parents[3]
+            / "egs2/whamr/damsep_clean/conf/tuning/train_damsep_nf_8k.yaml"
+        ).read_text()
+    )
+    reporter = Reporter()
+    for epoch, loss in enumerate([0.0, 1.0, 1.0, 1.0, 1.0, 1.0], 1):
+        reporter.set_epoch(epoch)
+        with reporter.observe("valid") as sub:
+            sub.register({"loss": loss})
+            sub.next()
+        assert reporter.check_early_stopping(
+            config["patience"], *config["early_stopping_criterion"]
+        ) == (epoch == 6)
+
+
 def test_shared_pit_reorders_all_three_outputs(cpu_model):
     torch.manual_seed(5)
     clean = torch.randn(2, 2, 640)
@@ -245,6 +267,7 @@ def test_existing_dump_links_are_readonly(tmp_path, monkeypatch):
 
 def test_cpu_statistics_skip_network_and_mamba(tmp_path, monkeypatch):
     import yaml
+
     from espnet2.tasks.damsep import DAMSEPTask
 
     def forbidden(*args, **kwargs):

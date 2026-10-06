@@ -7,6 +7,8 @@ batch_type: unsorted
 batch_size: 1  # run.sh sets global batch = ngpu, preserving one example/rank.
 valid_batch_size: 1
 num_workers: 4
+num_att_plot: 0
+log_interval: 50
 preprocessor_conf:
   speech_segment: 32000
   force_single_channel: true
@@ -46,7 +48,9 @@ scheduler: reducelronplateau
 scheduler_conf:
   factor: 0.5
   patience: 5
-patience: 5
+# ESPnet stops when epochs_since_best > patience. Four therefore stops on
+# the fifth consecutive non-improving epoch, matching Lightning patience=5.
+patience: 4
 early_stopping_criterion: [valid, loss, min]
 val_scheduler_criterion: [valid, loss]
 best_model_criterion:
