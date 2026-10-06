@@ -32,6 +32,14 @@ Use `--waveform-checks 20000` for waveform checks on every example in every spli
 Paths in output SCPs are relative to this recipe, for shared layout on another
 host. The old absolute paths in the reverb lists are not used as-is.
 
+TSUBAME already has the matching source images under
+`../enh_rir/dump_ctf_joint`, while its original `data/` directories are absent.
+Use `--reverb_dump ../enh_rir/dump_ctf_joint` for Stage 1 there. Only the two
+isolated reverberant sources are read from that dump; the mixture and clean
+teachers remain the exact NF-WHAMR baseline files. ID, audio-header and
+mixture-summation checks still apply. In this mode, a comparison of clean
+references to removed original raw files cannot run; `max_clean_error` is null.
+
 Unlike the released HETMIXR loader, this recipe keeps short utterances and the
 complete baseline test set; it does not require/load RIR waveforms when direct
 RIR supervision is disabled. Full validation/test utterances are used. Training
@@ -74,6 +82,8 @@ Do not change an existing environment's dependencies without checking them.
 ```bash
 # Only build/verify data indexes; no training.
 bash run.sh --stage 1 --stop_stage 1
+# TSUBAME: prepare indexes in a CPU allocation, using existing reverb teachers.
+bash run.sh --stage 1 --stop_stage 1 --reverb_dump ../enh_rir/dump_ctf_joint
 # On an allocated CUDA host. Default: one GPU, one example per GPU.
 bash run.sh --stage 2 --stop_stage 2 --ngpu 1
 # Resume on four allocated GPUs: global batch is 4, per-rank batch is 1.

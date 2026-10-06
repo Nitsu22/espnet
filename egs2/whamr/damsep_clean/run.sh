@@ -12,6 +12,7 @@ dumpdir=dump_nf_8k_min
 expdir=exp/damsep_nf_8k
 source_recipe=../enh4_clean
 whamr_root=../enh1/data/whamr/2speakers/wav8k/min
+reverb_dump=
 inference_model=valid.loss.best.pth
 resume=true
 
@@ -29,8 +30,10 @@ valid_dir=${dumpdir}/raw/cv_mix_clean_reverb_min_8k
 test_dir=${dumpdir}/raw/tt_mix_clean_reverb_min_8k
 
 if (( stage <= 1 && stop_stage >= 1 )); then
+    prep_args=()
+    if [[ -n ${reverb_dump} ]]; then prep_args+=(--reverb-dump "${reverb_dump}"); fi
     "${python}" local/prepare_nf_dump.py --source "${source_recipe}" \
-        --whamr-root "${whamr_root}" --output "${dumpdir}" --verify-existing
+        --whamr-root "${whamr_root}" --output "${dumpdir}" --verify-existing "${prep_args[@]}"
 fi
 
 if (( stage <= 2 && stop_stage >= 2 )); then

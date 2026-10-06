@@ -29,9 +29,13 @@ def read_scp(path):
     return result
 
 
-def prepare(source, whamr_root, output, workers=4, waveform_checks=8):
+def prepare(source, whamr_root, output, workers=4, waveform_checks=8, reverb_dump=None):
     source = source.resolve(strict=True)
-    whamr_root = whamr_root.resolve(strict=True)
+    if reverb_dump is None:
+        whamr_root = whamr_root.resolve(strict=True)
+    else:
+        reverb_dump = reverb_dump.resolve(strict=True)
+        whamr_root = None
     output = output.absolute()
     recipe = Path(__file__).resolve().parents[1]
     if output.exists():
@@ -40,7 +44,8 @@ def prepare(source, whamr_root, output, workers=4, waveform_checks=8):
     temporary = Path(tempfile.mkdtemp(prefix=".damsep_prepare_", dir=output.parent))
     report = dict(
         source=str(source),
-        whamr_root=str(whamr_root),
+        whamr_root=str(whamr_root) if whamr_root is not None else None,
+        reverb_dump=str(reverb_dump) if reverb_dump is not None else None,
         sample_rate=8000,
         channel=0,
         noise=False,
@@ -66,19 +71,37 @@ def prepare(source, whamr_root, output, workers=4, waveform_checks=8):
                 }
             ids = sorted(maps["wav"])
             for speaker in (1, 2):
-                scp = source / "data" / dataset / f"spk{speaker}_reverb.scp"
+                if reverb_dump is None:
+                    scp = source / "data" / dataset / f"spk{speaker}_reverb.scp"
+                else:
+                    scp = (
+                        reverb_dump
+                        / "raw"
+                        / f"{split}_mix_both_reverb_min_8k"
+                        / f"spk{speaker}_reverb.scp"
+                    )
                 report["input_hashes"][str(scp)] = digest(scp)
                 values = read_scp(scp)
                 if not set(ids).issubset(values):
                     raise ValueError(f"Missing reverberant sources in {scp}")
-                # Old absolute /net/midgar/work/... paths in these lists are
-                # deliberately resolved against the explicit WHAMR audio root.
-                maps[f"spk{speaker}_reverb"] = {
-                    u: (
-                        whamr_root / split / f"s{speaker}_reverb" / Path(values[u]).name
-                    ).resolve(strict=True)
-                    for u in ids
-                }
+                if reverb_dump is None:
+                    # Resolve legacy paths against the explicit original root.
+                    maps[f"spk{speaker}_reverb"] = {
+                        u: (
+                            whamr_root
+                            / split
+                            / f"s{speaker}_reverb"
+                            / Path(values[u]).name
+                        ).resolve(strict=True)
+                        for u in ids
+                    }
+                else:
+                    # These are isolated source images from WHAMR; noise in the
+                    # other recipe's mixture does not enter this recipe.
+                    maps[f"spk{speaker}_reverb"] = {
+                        u: (reverb_dump.parent / values[u]).resolve(strict=True)
+                        for u in ids
+                    }
             if not ids or any(set(m) != set(ids) for m in maps.values()):
                 raise ValueError(f"Mixture/source ID mismatch: {dataset}")
 
@@ -101,7 +124,7 @@ def prepare(source, whamr_root, output, workers=4, waveform_checks=8):
                 else []
             )
             worst_sum_error = 0.0
-            worst_clean_error = 0.0
+            worst_clean_error = 0.0 if whamr_root is not None else None
             for uid in checks:
                 audio = {
                     k: sf.read(p[uid], dtype="float32", always_2d=True)[0][:, 0]
@@ -123,6 +146,10 @@ def prepare(source, whamr_root, output, workers=4, waveform_checks=8):
                         f"{uid}: mixture is not the sum of reverb sources ({error})"
                     )
                 worst_sum_error = max(worst_sum_error, error)
+                if whamr_root is None:
+                    # Clean teachers still reference the exact baseline files.
+                    # A second comparison to removed raw audio is unavailable.
+                    continue
                 for speaker in (1, 2):
                     name = maps[f"spk{speaker}_reverb"][uid].name
                     direct_path = whamr_root / split / f"s{speaker}_anechoic" / name
@@ -181,6 +208,11 @@ def main():
         default=Path("../enh1/data/whamr/2speakers/wav8k/min"),
     )
     parser.add_argument("--output", type=Path, default=Path("dump_nf_8k_min"))
+    parser.add_argument(
+        "--reverb-dump",
+        type=Path,
+        help="Use source-image SCPs from a CTF joint dump " "when raw WHAMR is absent",
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--waveform-checks", type=int, default=8)
     parser.add_argument("--verify-existing", action="store_true")
@@ -191,9 +223,17 @@ def main():
         report = json.loads((args.output / "preparation.json").read_text())
         if report["script_sha256"] != digest(Path(__file__)):
             raise ValueError("Preparation code changed; use a new output dump")
-        if report["source"] != str(args.source.resolve()) or report[
-            "whamr_root"
-        ] != str(args.whamr_root.resolve()):
+        expected_root = (
+            str(args.whamr_root.resolve()) if args.reverb_dump is None else None
+        )
+        expected_reverb = (
+            str(args.reverb_dump.resolve()) if args.reverb_dump is not None else None
+        )
+        if (
+            report["source"] != str(args.source.resolve())
+            or report["whamr_root"] != expected_root
+            or report.get("reverb_dump") != expected_reverb
+        ):
             raise ValueError("Existing dump uses different audio roots")
         for path, expected in report["input_hashes"].items():
             if digest(Path(path)) != expected:
@@ -204,7 +244,12 @@ def main():
         print("Existing dump verified:", args.output)
         return
     prepare(
-        args.source, args.whamr_root, args.output, args.workers, args.waveform_checks
+        args.source,
+        args.whamr_root,
+        args.output,
+        args.workers,
+        args.waveform_checks,
+        args.reverb_dump,
     )
 
 

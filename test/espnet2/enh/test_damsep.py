@@ -234,6 +234,29 @@ def test_dump_reuses_baseline_and_rejects_bad_reverb(tmp_path):
     report = json.loads((output / "preparation.json").read_text())
     assert all(v["count"] == 1 for v in report["splits"].values())
     assert not list(output.rglob("*.wav"))
+    teachers = tmp_path / "ctf_joint"
+    for split in ("tr", "cv", "tt"):
+        folder = teachers / "raw" / f"{split}_mix_both_reverb_min_8k"
+        folder.mkdir(parents=True)
+        for speaker in (1, 2):
+            wav = audio_root / split / f"s{speaker}_reverb/example.wav"
+            (folder / f"spk{speaker}_reverb.scp").write_text(f"example {wav}\n")
+    alternate = tmp_path / "dump_from_teachers"
+    preparer.prepare(
+        source,
+        tmp_path / "missing_raw_audio",
+        alternate,
+        workers=1,
+        reverb_dump=teachers,
+    )
+    alternate_report = json.loads((alternate / "preparation.json").read_text())
+    assert alternate_report["whamr_root"] is None
+    assert all(
+        v["max_clean_error"] is None for v in alternate_report["splits"].values()
+    )
+    assert (alternate / "raw/tr_mix_clean_reverb_min_8k/wav.scp").read_text() == (
+        output / "raw/tr_mix_clean_reverb_min_8k/wav.scp"
+    ).read_text()
     reverb = audio_root / "tr/s1_reverb/example.wav"
     sf.write(reverb, np.zeros((640, 2)), 8000, subtype="FLOAT")
     with pytest.raises(ValueError, match="sum of reverb"):
