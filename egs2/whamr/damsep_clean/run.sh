@@ -14,13 +14,19 @@ statsdir=exp/damsep_stats_8k
 expdir=exp/damsep_nf_8k
 inference_model=valid.loss.best.pth
 resume=true
+mamba_deps=.deps/mamba-cu118-torch21-py310
+accum_grad=1
 
 . utils/parse_options.sh
 . ./path.sh
 . ./cmd.sh
 export PYTHONPATH="${MAIN_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+if [[ -d ${mamba_deps} ]]; then
+    if [[ ${mamba_deps} != /* ]]; then mamba_deps=${PWD}/${mamba_deps}; fi
+    export PYTHONPATH="${MAIN_ROOT}:${mamba_deps}${PYTHONPATH:+:${PYTHONPATH}}"
+fi
 export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${statsdir}/.cache/numba}"
-if (( stage < 5 || stop_stage > 8 || stage > stop_stage || ngpu < 0 || nj < 1 )); then
+if (( stage < 5 || stop_stage > 8 || stage > stop_stage || ngpu < 0 || nj < 1 || accum_grad < 1 )); then
     echo "Use Stages 5-8, ngpu >= 0 and nj >= 1" >&2
     exit 2
 fi
@@ -82,7 +88,7 @@ if (( stage <= 6 && stop_stage >= 6 )); then
         --multiprocessing_distributed true -- \
         "${python}" -m espnet2.bin.damsep_train --config "${config}" \
         --output_dir "${expdir}" --resume "${resume}" \
-        --batch_size "${ngpu}" --valid_batch_size "${ngpu}" \
+        --batch_size "${ngpu}" --valid_batch_size "${ngpu}" --accum_grad "${accum_grad}" \
         --train_shape_file "${statsdir}/train/speech_mix_shape" \
         --valid_shape_file "${statsdir}/valid/speech_mix_shape" "${args[@]}"
 fi

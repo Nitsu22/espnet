@@ -77,6 +77,28 @@ released Mamba 1 API (`mamba-ssm==1.2.0.post1`), PyTorch with CUDA, `einops`,
 `torch-complex` and normal ESPnet dependencies. Lightning is not required.
 Do not change an existing environment's dependencies without checking them.
 
+On TSUBAME, install matching official prebuilt wheels without changing the
+shared conda environment:
+
+```bash
+python local/install_mamba.py
+```
+
+This requires the verified Python 3.10 / PyTorch 2.1+cu118 / C++ ABI=False
+environment. It installs Mamba 1.2.0.post1, causal-conv1d 1.2.0.post2 and pinned
+Python import dependencies into `.deps/mamba-cu118-torch21-py310`. `run.sh`
+adds that directory to its Python path when present. The installer uses
+`--no-deps` and never upgrades the active environment's PyTorch or packages;
+download URLs and wheel SHA256 values are recorded in `installation.json`.
+No CUDA compilation is performed on the login node.
+
+`qsub/check_cuda_trial.sh` performs one synthetic four-second FP32
+forward/backward/Adam compatibility check on a full GPU, without dataset
+training or speed measurements. Submit without `-g`/`newgrp`, with no other
+compatibility trial running. It requests one resource unit and at most three
+minutes; CUDA compatibility results are saved to `exp/cuda_check/report.json`.
+GPU timing/scaling experiments require a separate group-charged job.
+
 Stages follow the usual enhancement recipe: **5 statistics (CPU), 6 training
 (GPU), 7 inference (GPU), 8 scoring (CPU)**. Start from Stage 5 because the
 formatted dumps already exist.
@@ -91,6 +113,8 @@ qsub -g tga-shinoda qsub/stats_cpu.sh
 bash run.sh --stage 6 --stop_stage 6 --ngpu 1
 # Resume on four allocated GPUs: global batch 4, per-rank batch 1.
 bash run.sh --stage 6 --stop_stage 6 --ngpu 4
+# Preserve effective global batch 4 on one GPU with gradient accumulation.
+bash run.sh --stage 6 --stop_stage 6 --ngpu 1 --accum_grad 4
 # Full test inference on a GPU, followed by a separate CPU scoring job.
 bash run.sh --stage 7 --stop_stage 7 --ngpu 1
 bash run.sh --stage 8 --stop_stage 8 --ngpu 0
@@ -109,6 +133,11 @@ Checkpoints/logs/config are under `exp/damsep_nf_8k`, with the default inference
 checkpoint `valid.loss.best.pth`. Changing architecture or data requires a new
 `--expdir`. To start a new run, choose a new output directory; default resume
 preserves existing training state.
+
+GPU count, per-rank batch and accumulation are distinct: `run.sh` keeps one
+example per GPU, so effective global batch is `ngpu * accum_grad`. Decide that
+experimental setting before training; switching GPU count without compensating
+accumulation changes the optimizer's batch size.
 
 Inference writes `enhanced_tt/{clean,reverb}/spk{1,2}.scp` and complex CTF NPZs
 under `enhanced_tt/ctf/`. The default 0.9 peak normalization and PCM16 WAVs
