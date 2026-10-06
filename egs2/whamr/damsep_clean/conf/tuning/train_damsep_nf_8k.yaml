@@ -1,0 +1,53 @@
+# Released DAMSEP architecture/objectives; NF-WHAMR source assignment uses PIT.
+seed: 0
+max_epoch: 500
+use_amp: false
+grad_clip: 5.0
+batch_type: unsorted
+batch_size: 1  # run.sh sets global batch = ngpu, preserving one example/rank.
+valid_batch_size: 1
+num_workers: 4
+preprocessor_conf:
+  speech_segment: 32000
+  force_single_channel: true
+  avoid_allzero_segment: true
+model_conf:
+  network_conf:
+    sample_rate: 8000
+    input_dim: 64
+    n_srcs: 2
+    n_fft: 256
+    stride: 64
+    window: hann
+    n_imics: 1
+    n_layers: 6
+    lstm_hidden_units: 256
+    attn_n_head: 4
+    attn_approx_qk_dim: 512
+    emb_dim: 16
+    emb_ks: 8
+    emb_hs: 1
+    activation: prelu
+    eps: 1.0e-5
+    use_builtin_complex: false
+  loss_w_reverb: 0.1
+  loss_w_reconstruction: 0.5
+  validation_scale_invariant: true
+  loss_n_fft: 512
+  loss_win_length: 256
+  loss_hop_length: 128
+  loss_window: sqrthann
+optim: adam
+optim_conf:
+  lr: 0.001
+  weight_decay: 0.0
+scheduler: reducelronplateau
+scheduler_conf:
+  factor: 0.5
+  patience: 5
+patience: 5
+early_stopping_criterion: [valid, loss, min]
+val_scheduler_criterion: [valid, loss]
+best_model_criterion:
+- [valid, loss, min]
+keep_nbest_models: 1
