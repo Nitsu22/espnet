@@ -13,6 +13,7 @@ set -e
 conda activate tf-locoformer
 module load cuda/11.8.0
 set -euo pipefail
+export PATH="${PATH}:/usr/sbin:/sbin"
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1

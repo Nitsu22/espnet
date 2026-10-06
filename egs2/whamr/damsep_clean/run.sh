@@ -20,6 +20,8 @@ accum_grad=1
 . utils/parse_options.sh
 . ./path.sh
 . ./cmd.sh
+# Triton 2.1 discovers the NVIDIA driver with ldconfig on TSUBAME.
+export PATH="${PATH}:/usr/sbin:/sbin"
 export PYTHONPATH="${MAIN_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 if [[ -d ${mamba_deps} ]]; then
     if [[ ${mamba_deps} != /* ]]; then mamba_deps=${PWD}/${mamba_deps}; fi
