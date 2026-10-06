@@ -69,8 +69,10 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
         loss_win_length: int = 256,
         loss_hop_length: int = 128,
         loss_window: str = "sqrthann",
+        extract_feats_in_collect_stats: bool = False,
     ):
         super().__init__()
+        self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
         # Lazy import: task help/data utilities do not require Mamba CUDA packages.
         from espnet2.enh.damsep.vendor.models.SPMamba import SPMamba
 

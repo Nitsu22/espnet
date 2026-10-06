@@ -1,7 +1,6 @@
 """Check shared PIT, complex convolution, the real network and zero-copy data."""
 
 import importlib.util
-import json
 from pathlib import Path
 
 import numpy as np
@@ -192,76 +191,116 @@ def test_batched_network_and_released_configuration(cpu_model):
         assert all(torch.isfinite(x).all() for x in output.values())
 
 
-def _load_preparer():
+def _load_dump_checker():
     path = (
         Path(__file__).resolve().parents[3]
-        / "egs2/whamr/damsep_clean/local/prepare_nf_dump.py"
+        / "egs2/whamr/damsep_clean/local/check_linked_dump.py"
     )
-    spec = importlib.util.spec_from_file_location("damsep_prepare_test", path)
+    spec = importlib.util.spec_from_file_location("damsep_check_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_dump_reuses_baseline_and_rejects_bad_reverb(tmp_path):
-    preparer = _load_preparer()
-    source, audio_root = tmp_path / "baseline", tmp_path / "whamr"
+def test_existing_dump_links_are_readonly(tmp_path, monkeypatch):
+    checker = _load_dump_checker()
+    recipe = tmp_path / "damsep_clean"
+    recipe.mkdir()
+    baseline = tmp_path / "enh4_clean/dump_clean"
+    reverb = tmp_path / "enh_rir/dump_ctf_joint"
+    (recipe / "dump_clean").symlink_to("../enh4_clean/dump_clean")
+    (recipe / "dump_reverb").symlink_to("../enh_rir/dump_ctf_joint")
     rng = np.random.RandomState(1)
     for split in ("tr", "cv", "tt"):
-        folder = source / "dump_clean/raw" / f"{split}_mix_clean_reverb_min_8k"
+        dataset = f"{split}_mix_clean_reverb_min_8k"
+        folder = baseline / "raw" / dataset
+        teachers = reverb / "raw" / f"{split}_mix_both_reverb_min_8k"
         folder.mkdir(parents=True)
-        manifest = source / "data" / folder.name
-        manifest.mkdir(parents=True)
+        teachers.mkdir(parents=True)
         clean = [rng.randn(640, 2).astype(np.float32) * 0.01 for _ in (1, 2)]
         rev = [np.roll(x, 3, axis=0) for x in clean]
-        for speaker in (1, 2):
-            for kind, values in (
-                ("anechoic", clean[speaker - 1]),
-                ("reverb", rev[speaker - 1]),
-            ):
-                dest = audio_root / split / f"s{speaker}_{kind}" / "example.wav"
-                dest.parent.mkdir(parents=True)
-                sf.write(dest, values, 8000, subtype="FLOAT")
-            (manifest / f"spk{speaker}_reverb.scp").write_text(
-                "example /old/root/example.wav\n"
-            )
         for name, values in (("wav", sum(rev)), ("spk1", clean[0]), ("spk2", clean[1])):
             sf.write(folder / f"{name}.wav", values, 8000, subtype="PCM_16")
-            relative = (folder / f"{name}.wav").relative_to(source)
+            relative = Path("dump_clean/raw") / dataset / f"{name}.wav"
             (folder / f"{name}.scp").write_text(f"example {relative}\n")
-    output = tmp_path / "dump"
-    preparer.prepare(source, audio_root, output, workers=1)
-    report = json.loads((output / "preparation.json").read_text())
-    assert all(v["count"] == 1 for v in report["splits"].values())
-    assert not list(output.rglob("*.wav"))
-    teachers = tmp_path / "ctf_joint"
-    for split in ("tr", "cv", "tt"):
-        folder = teachers / "raw" / f"{split}_mix_both_reverb_min_8k"
-        folder.mkdir(parents=True)
         for speaker in (1, 2):
-            wav = audio_root / split / f"s{speaker}_reverb/example.wav"
-            (folder / f"spk{speaker}_reverb.scp").write_text(f"example {wav}\n")
-    alternate = tmp_path / "dump_from_teachers"
-    preparer.prepare(
-        source,
-        tmp_path / "missing_raw_audio",
-        alternate,
-        workers=1,
-        reverb_dump=teachers,
-    )
-    alternate_report = json.loads((alternate / "preparation.json").read_text())
-    assert alternate_report["whamr_root"] is None
-    assert all(
-        v["max_clean_error"] is None for v in alternate_report["splits"].values()
-    )
-    assert (alternate / "raw/tr_mix_clean_reverb_min_8k/wav.scp").read_text() == (
-        output / "raw/tr_mix_clean_reverb_min_8k/wav.scp"
-    ).read_text()
-    reverb = audio_root / "tr/s1_reverb/example.wav"
-    sf.write(reverb, np.zeros((640, 2)), 8000, subtype="FLOAT")
+            wav = teachers / f"spk{speaker}_reverb.wav"
+            sf.write(wav, rev[speaker - 1], 8000, subtype="FLOAT")
+            (teachers / f"spk{speaker}_reverb.scp").write_text(f"example {wav}\n")
+    original = {
+        p: p.read_bytes() for root in (baseline, reverb) for p in root.rglob("*.scp")
+    }
+    monkeypatch.chdir(recipe)
+    report = checker.check(Path("dump_clean"), Path("dump_reverb"), workers=1)
+    assert all(v["count"] == 1 for v in report["splits"].values())
+    assert all(p.read_bytes() == content for p, content in original.items())
+    assert (recipe / "dump_clean").is_symlink() and (
+        recipe / "dump_reverb"
+    ).is_symlink()
+    wav = reverb / "raw/tr_mix_both_reverb_min_8k/spk1_reverb.wav"
+    sf.write(wav, np.zeros((640, 2)), 8000, subtype="FLOAT")
     with pytest.raises(ValueError, match="sum of reverb"):
-        preparer.prepare(source, audio_root, tmp_path / "invalid", workers=1)
-    assert not (tmp_path / "invalid").exists()
+        checker.check(Path("dump_clean"), Path("dump_reverb"), workers=1)
+
+
+def test_cpu_statistics_skip_network_and_mamba(tmp_path, monkeypatch):
+    import yaml
+    from espnet2.tasks.damsep import DAMSEPTask
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("CPU stats must not construct the DAMSEP network")
+
+    monkeypatch.setattr(DAMSEPTask, "build_model", forbidden)
+    fields = (
+        "speech_mix",
+        "speech_ref1",
+        "speech_ref2",
+        "speech_reverb1",
+        "speech_reverb2",
+    )
+    data_args = []
+    for field in fields:
+        wav = tmp_path / f"{field}.wav"
+        sf.write(wav, np.zeros((640, 2), dtype=np.float32), 8000, subtype="FLOAT")
+        scp = tmp_path / f"{field}.scp"
+        scp.write_text(f"example {wav}\n")
+        for split in ("train", "valid"):
+            data_args.extend(
+                [f"--{split}_data_path_and_name_and_type", f"{scp},{field},sound"]
+            )
+    config = tmp_path / "stats.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            dict(
+                model_conf=dict(extract_feats_in_collect_stats=False),
+                preprocessor_conf=dict(force_single_channel=True, speech_segment=320),
+            )
+        )
+    )
+    stats = tmp_path / "stats"
+    DAMSEPTask.main(
+        cmd=[
+            "--config",
+            str(config),
+            "--collect_stats",
+            "true",
+            "--ngpu",
+            "0",
+            "--num_workers",
+            "0",
+            "--log_level",
+            "WARNING",
+            "--output_dir",
+            str(stats),
+        ]
+        + data_args
+    )
+    for split in ("train", "valid"):
+        for field in fields:
+            assert (
+                stats / split / f"{field}_shape"
+            ).read_text().strip() == "example 640"
+    assert not list(stats.rglob("*.pth"))
 
 
 def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path):

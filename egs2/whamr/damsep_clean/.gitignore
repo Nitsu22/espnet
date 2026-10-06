@@ -1,5 +1,8 @@
 exp/
 dump*/
+!dump_clean
+!dump_reverb
 data/
 __pycache__/
 *.pyc
+qsub_logs/

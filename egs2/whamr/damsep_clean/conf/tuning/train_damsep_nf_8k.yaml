@@ -12,6 +12,7 @@ preprocessor_conf:
   force_single_channel: true
   avoid_allzero_segment: true
 model_conf:
+  extract_feats_in_collect_stats: false
   network_conf:
     sample_rate: 8000
     input_dim: 64

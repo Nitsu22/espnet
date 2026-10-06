@@ -13,32 +13,30 @@ release's Lightning wrapper, with checkpoint resume and multi-GPU support.
 
 ## Data and comparison
 
-From this directory, `local/prepare_nf_dump.py` creates
-`dump_nf_8k_min/raw/{tr,cv,tt}_mix_clean_reverb_min_8k`. The lists reference
-existing audio without copying or regenerating WAVs:
+The recipe uses two versioned relative symbolic links:
 
-| Input/teacher | Source |
+| Link | Target and use |
 | --- | --- |
-| Mixture | `../enh4_clean/dump_clean/raw/*/wav.scp` |
-| Two direct-path clean references | Same dump's `spk1.scp`, `spk2.scp` |
-| Two reverberant source images | `../enh4_clean/data/*/spk1_reverb.scp`, `spk2_reverb.scp`, resolved against `../enh1/data/whamr/2speakers/wav8k/min` |
+| `dump_clean` | `../enh4_clean/dump_clean`: NF-WHAMR mixture and both direct-path clean teachers |
+| `dump_reverb` | `../enh_rir/dump_ctf_joint`: both matching isolated reverberant source images |
 
-These are the baseline's exact utterance IDs, formatted mixture and clean
-reference WAVs. All channels/rates/lengths are checked; training takes the
-left channel, 8 kHz. A sample spread through each split also verifies mixture
-summation and clean-reference pairing/gain within PCM16 quantization error.
-`preparation.json` records source-list and output-list hashes and check coverage.
-Use `--waveform-checks 20000` for waveform checks on every example in every split.
-Paths in output SCPs are relative to this recipe, for shared layout on another
-host. The old absolute paths in the reverb lists are not used as-is.
+The original SCP files are read directly. `dump_clean` also makes their
+existing recipe-relative WAV paths work from this directory. The noisy mixture
+in `dump_reverb` is not an input: only `spk1_reverb.scp` and `spk2_reverb.scp`
+are used. There is no additional data-generation stage, WAV copy, or rewritten
+dump. Do not replace these links with new data directories.
 
-TSUBAME already has the matching source images under
-`../enh_rir/dump_ctf_joint`, while its original `data/` directories are absent.
-Use `--reverb_dump ../enh_rir/dump_ctf_joint` for Stage 1 there. Only the two
-isolated reverberant sources are read from that dump; the mixture and clean
-teachers remain the exact NF-WHAMR baseline files. ID, audio-header and
-mixture-summation checks still apply. In this mode, a comparison of clean
-references to removed original raw files cannot run; `max_clean_error` is null.
+Stage 5 validates all three splits (20,000/5,000/3,000 examples), rates,
+channels, lengths and ID alignment. Sampled waveforms verify that the two
+reverberant teachers sum to the existing noise-free mixture within PCM16
+quantization error. The report and source-list hashes are stored under
+`exp/damsep_stats_8k/data_check.json`. Original SCPs and WAVs are never edited.
+
+Then standard ESPnet CPU statistics collection derives shape files for all
+five waveform series on the training/validation sets. It uses full utterances,
+without random cropping, model construction, Mamba, CUDA or feature whitening.
+`model_conf.extract_feats_in_collect_stats: false` makes this work even before
+Mamba is installed. Statistics outputs are separate from the linked dumps.
 
 Unlike the released HETMIXR loader, this recipe keeps short utterances and the
 complete baseline test set; it does not require/load RIR waveforms when direct
@@ -79,21 +77,34 @@ released Mamba 1 API (`mamba-ssm==1.2.0.post1`), PyTorch with CUDA, `einops`,
 `torch-complex` and normal ESPnet dependencies. Lightning is not required.
 Do not change an existing environment's dependencies without checking them.
 
+Stages follow the usual enhancement recipe: **5 statistics (CPU), 6 training
+(GPU), 7 inference (GPU), 8 scoring (CPU)**. Start from Stage 5 because the
+formatted dumps already exist.
+
 ```bash
-# Only build/verify data indexes; no training.
-bash run.sh --stage 1 --stop_stage 1
-# TSUBAME: prepare indexes in a CPU allocation, using existing reverb teachers.
-bash run.sh --stage 1 --stop_stage 1 --reverb_dump ../enh_rir/dump_ctf_joint
-# On an allocated CUDA host. Default: one GPU, one example per GPU.
-bash run.sh --stage 2 --stop_stage 2 --ngpu 1
-# Resume on four allocated GPUs: global batch is 4, per-rank batch is 1.
-bash run.sh --stage 2 --stop_stage 2 --ngpu 4
-# Full test inference, then the same CPU scorer used by enh4_clean.
-bash run.sh --stage 3 --stop_stage 4 --ngpu 1
+# In a CPU allocation: validate existing dumps and collect shapes.
+bash run.sh --stage 5 --stop_stage 5 --ngpu 0 --nj 4
+# TSUBAME CPU job; submit from this recipe directory.
+mkdir -p qsub_logs
+qsub -g tga-shinoda qsub/stats_cpu.sh
+# After Stage 5 and Mamba setup, on an allocated CUDA host.
+bash run.sh --stage 6 --stop_stage 6 --ngpu 1
+# Resume on four allocated GPUs: global batch 4, per-rank batch 1.
+bash run.sh --stage 6 --stop_stage 6 --ngpu 4
+# Full test inference on a GPU, followed by a separate CPU scoring job.
+bash run.sh --stage 7 --stop_stage 7 --ngpu 1
+bash run.sh --stage 8 --stop_stage 8 --ngpu 0
 ```
 
+`qsub/stats_cpu.sh` requests `cpu_4=1`, four statistics jobs with one thread
+and no loader workers each, priority -5 and a 30-minute walltime. It uses the
+existing tf-locoformer environment; no CUDA module or Mamba installation is
+required for this CPU stage. Shape files are stored under
+`exp/damsep_stats_8k/{train,valid}/` and consumed by Stage 6.
+
 `run.sh` does not overwrite `CUDA_VISIBLE_DEVICES`. GPU host choice and TSUBAME
-allocation/submission are separate; no production job is submitted by setup.
+allocation/submission are separate. The CPU statistics job is independent
+of GPU training.
 Checkpoints/logs/config are under `exp/damsep_nf_8k`, with the default inference
 checkpoint `valid.loss.best.pth`. Changing architecture or data requires a new
 `--expdir`. To start a new run, choose a new output directory; default resume
