@@ -99,6 +99,15 @@ compatibility trial running. It requests one resource unit and at most three
 minutes; CUDA compatibility results are saved to `exp/cuda_check/report.json`.
 GPU timing/scaling experiments require a separate group-charged job.
 
+Verified on TSUBAME H100 on 2026-10-06 (job 8917383, exit 0): the released
+six-block model with one four-second synthetic sample, FP32, all three losses,
+finite gradients for every parameter, clipping and one Adam update. Peak
+PyTorch allocated memory was 18.32 GiB (reserved 19.07 GiB). This establishes
+CUDA compatibility for that case; epoch speed, distributed scaling and
+separation quality are not measured by this check. Triton requires
+`/usr/sbin:/sbin` in PATH to discover the NVIDIA driver via `ldconfig`; the
+runner and CUDA check script include these directories.
+
 Stages follow the usual enhancement recipe: **5 statistics (CPU), 6 training
 (GPU), 7 inference (GPU), 8 scoring (CPU)**. Start from Stage 5 because the
 formatted dumps already exist.
