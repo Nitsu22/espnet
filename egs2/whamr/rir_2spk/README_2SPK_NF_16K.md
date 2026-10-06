@@ -104,3 +104,19 @@ Implementation checks are in
 `local/check_two_speaker_training.py` also supports this model for a real GPU
 update and two-RIR inference. Implementing this entry point does not start
 a training run.
+
+Two no-post-frequency ablations have separate configs and entry points:
+
+| Entry point suffix | Pre-pooling Time/Freq blocks | Post-pooling blocks | Parameters |
+| --- | --- | --- | --- |
+| `sweep_v2_no_postfreq.sh` | 4 | 0 | 371292 |
+| `sweep_v2_no_postfreq_2blocks.sh` | 2 | 0 | 201434 |
+
+The full entry point prefix is `run_pooled_bimamba_2spk_nf_16k_`.
+Each removes the entire post-pooling Attention/FFN block stack, preserving
+the pre-pooling lightweight frequency modules, two-slot/channel-wise pooling,
+slot embeddings and shared CTF head. The two-block variant reduces both
+pre-pooling Time and lightweight Freq module stacks together. All remaining
+config values match the original pooled BiMamba Sweep v2 run, including seed,
+teacher definition, PIT, padding behavior, batching and optimization. Each
+uses its own experiment/stats directory and trains from scratch.
