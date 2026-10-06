@@ -93,6 +93,28 @@ silently accepting a different dataset. Midgar retains the original paired
 prepared for the host that will run training, rather than copying indexes with
 midgar paths to TSUBAME.
 
+## Clean/reverb loss weight 1:0.1
+
+`conf/tuning/train_enh_tflocoformer_small_nocashe_ctf_joint_reverb01_4gpu.yaml`
+changes only `model_conf.loss_w_reverb` from 1.0 to 0.1. The training objective
+is `loss_clean + 0.1 * loss_reverb`, including the weighted joint PIT speaker
+assignment. The clean-only PIT validation metric, data, seed, initialization,
+batching, optimizer, and scheduler remain the same as the 1:1 configuration.
+
+Start this comparison from scratch in its separate output directory:
+
+```bash
+./run_small_nocashe_ctf_joint_4gpu.sh --stage 6 --stop_stage 6 --ngpu 4 \
+    --resume false \
+    --enh_config conf/tuning/train_enh_tflocoformer_small_nocashe_ctf_joint_reverb01_4gpu.yaml \
+    --enh_exp exp/enh_train_enh_tflocoformer_small_nocashe_ctf_joint_reverb01_4gpu
+```
+
+For TSUBAME, submit from this recipe with
+`qsub -g tga-shinoda qsub/qsub_small_nocashe_ctf_joint_reverb01_4gpu_24h.sh`.
+It uses one four-GPU node, priority -5, and a 24-hour runtime limit. Reuse the
+verified TSUBAME `dump_ctf_joint` with its absolute TSUBAME audio paths.
+
 ## Verification
 
 ```bash
