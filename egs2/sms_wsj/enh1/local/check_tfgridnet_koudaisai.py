@@ -67,7 +67,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ddp", action="store_true")
     parser.add_argument("--roland-root")
+    parser.add_argument("--batch-size-per-gpu", type=int, default=1)
     args = parser.parse_args()
+    assert args.batch_size_per_gpu > 0
     torch.set_num_threads(1)
     if not args.ddp:
         check_loss(args.roland_root)
@@ -101,8 +103,10 @@ def main():
     data = preprocess(key, dict(zip(names, arrays)))
     for name, array in zip(names, arrays):
         np.testing.assert_array_equal(data[name], array[:, 0])
-    batch = {name: torch.from_numpy(data[name]).unsqueeze(0).to(device) for name in names}
-    batch["speech_mix_lengths"] = torch.tensor([len(data["speech_mix"])], device=device)
+    batch = {name: torch.from_numpy(data[name]).unsqueeze(0).repeat(
+        args.batch_size_per_gpu, 1).to(device) for name in names}
+    batch["speech_mix_lengths"] = torch.full(
+        (args.batch_size_per_gpu,), len(data["speech_mix"]), device=device)
     if args.ddp:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     loss, stats, _ = model(**batch)
@@ -111,6 +115,8 @@ def main():
     for name, param in model.named_parameters():
         assert param.grad is not None and torch.isfinite(param.grad).all(), name
     print(json.dumps({"rank": rank, "samples": len(data["speech_mix"]),
+                      "batch_size_per_gpu": args.batch_size_per_gpu,
+                      "peak_reserved_bytes": torch.cuda.max_memory_reserved(device) if args.ddp else 0,
                       "parameters": sum(p.numel() for p in model.parameters()),
                       "loss": loss.item(), "finite_gradients": True,
                       "optimizer_steps": 0}), flush=True)
