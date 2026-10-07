@@ -45,7 +45,8 @@ Edit version-controlled code, configuration, and qsub scripts on midgar. If furt
 - The limit counts resource units, not GPUs: `node_f=1` has 4 GPUs and fits the published resource limit; `node_q=4` exceeds it. Check actual rejection messages. If a check (including multi-GPU initialization) needs more than 3 minutes, use a group-charged job with sufficient time instead of forcing a trial.
 - Production run: use the selected resources, priority, and estimated `h_rt` above. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
 - When asked to wait for another job, identify its actual job ID with `qstat` and use `qsub -hold_jid <job_id> ...`; never guess the dependency.
-- Report the submitted command, job ID when available, and synchronized commit. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
+- At every submission, calculate points from the effective resource type/count, priority, and `h_rt` using [the calculation and reporting guide](references/resources-and-points.md#report-points-at-submission). Report the expected consumption when a credible runtime estimate exists, the walltime-based upper estimate, and a brief calculation with the runtime assumption. If runtime is unknown, report only the upper estimate rather than inventing an expected runtime. For multiple jobs or array tasks, show each estimate and the combined total. Identify verified uncharged trials as 0 points; for other charging modes, use their applicable rules rather than the ordinary usage-based formula.
+- Report the submitted command, job ID when available, synchronized commit, and point estimates together; distinguish estimates from confirmed charges. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
 
 ## Maintain This Skill
 

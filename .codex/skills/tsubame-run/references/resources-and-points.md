@@ -27,7 +27,7 @@ Values are per resource unit. Memory is host RAM, not GPU memory. Specify units 
 - Fractional GPU allocations (`node_o`, `gpu_h`): verify the actual GPU memory and application compatibility before choosing them.
 - A job can request multiple units of one resource type; different resource types cannot be combined in one request. Split CPU and GPU phases into separate jobs when worthwhile, and verify prerequisite artifacts before starting the next phase.
 
-## Estimate and Reduce Points
+## Calculate Points
 
 For an ordinary group-charged, usage-based job, estimate:
 
@@ -38,6 +38,31 @@ points = units * resource_coefficient * priority_coefficient
 ```
 
 The official rules round down to 0.0001 points. Priority `-5` has coefficient 1; `-4` and `-3` have coefficients 2 and 4, respectively. Use `-5` unless the user prioritizes faster scheduling over point minimization. This formula does not apply to reservations, subscription jobs, or the dedicated interactive queue.
+
+## Report Points at Submission
+
+Use the effective submitted resource type/count, priority, and `h_rt`, including command-line overrides. In the submission report, give the job ID, those inputs, the runtime assumption and its basis, point estimates, and a short numerical substitution. For multiple jobs or array tasks, give the per-job or per-task estimates and their totals.
+
+- Expected consumption: substitute a runtime supported by prior logs or measured progress into the seconds-based formula above. If runtime is unknown, omit this estimate and say so.
+- Walltime-based upper estimate: substitute `h_rt` for actual runtime. For `h_rt` of at least 5 minutes, the quick calculation in hours is:
+
+  ```text
+  upper_points = units * resource_coefficient * priority_coefficient
+                 * 0.8 * h_rt_hours
+  ```
+
+  For a shorter charged job, use the full seconds-based formula with its 300-second minimum; do not use the `0.8 * h_rt_hours` shortcut.
+
+For example, at priority `-5` with `h_rt=02:00:00` and an expected runtime of 1 hour:
+
+| Resource request | Expected consumption | Walltime-based upper estimate |
+|---|---|---|
+| `node_f=1` | `1 * 1.000 * 1 * (0.7 * 1 + 0.1 * 2) = 0.9000` points | `1 * 1.000 * 1 * 0.8 * 2 = 1.6000` points |
+| `cpu_8=1` | `1 * 0.030 * 1 * (0.7 * 1 + 0.1 * 2) = 0.0270` points | `1 * 0.030 * 1 * 0.8 * 2 = 0.0480` points |
+
+These are calculation examples, not performance comparisons: use measured runtime estimates for the actual workload. If runtime is unknown, report only the walltime-based upper estimate. State that estimates are not confirmed charges. The [official settlement FAQ](https://www.t4.cii.isct.ac.jp/docs/all/faq.ja/portal/) explains that maximum provisional points are reserved at submission and settled after completion; a calculated upper estimate is not evidence that a specific amount was actually deducted.
+
+## Reduce Total Points
 
 - Compare the total across all required phases using credible runtime estimates. Increasing resource units or priority multiplies costs; extra parallelism helps only when its runtime reduction justifies the increase.
 - Requested `h_rt` contributes to the final charge even when the job finishes early. Set a measured runtime estimate plus a modest margin, rather than a long default or a limit so short that it causes incomplete work and reruns.
