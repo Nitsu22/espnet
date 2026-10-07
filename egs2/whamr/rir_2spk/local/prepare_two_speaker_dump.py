@@ -33,6 +33,18 @@ def main():
     parser.add_argument('--length', choices=['min', 'max'], default='min')
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
+    # A transferred self-contained dump has already had all audio SHA256s and
+    # headers checked on the destination. Revalidate its indexes without needing
+    # the original data_rir_plus tree (which is preserved as provenance).
+    if (args.output / 'portable_dump.json').exists():
+        from portable_rir_dump import verify_metadata
+
+        portable = verify_metadata(args.output)
+        saved = json.loads((args.output / 'preparation.json').read_text())
+        if portable['kind'] != 'nf' or saved['spec']['sample_rate'] != args.sample_rate or saved['spec']['length'] != args.length:
+            raise ValueError('Portable dump has different settings')
+        print('Portable dump verified:', args.output)
+        return
     source = args.source.resolve(strict=True)
     if not (source / 'generation_complete.json').exists():
         raise ValueError('Source generation is incomplete')
@@ -52,7 +64,12 @@ def main():
             spec['manifests'][str(p)] = digest(p)
     if args.output.exists():
         saved = json.loads((args.output / 'preparation.json').read_text())
-        if saved['spec'] != spec:
+        saved_spec = dict(saved['spec'])
+        # This known indexer version produced the original local dump. The
+        # portable-reuse branch leaves its data/index semantics unchanged.
+        if saved_spec.get('script_sha256') == 'b2cfc35054ff2c65965fcc51e7668ae2822d66a3a961c35fa2a9b0ee513035f0':
+            saved_spec['script_sha256'] = spec['script_sha256']
+        if saved_spec != spec:
             raise ValueError('Existing dump has different source/settings; use a new output')
         for name, value in saved['output_hashes'].items():
             if digest(args.output / name) != value:

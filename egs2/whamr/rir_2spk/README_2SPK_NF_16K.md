@@ -120,3 +120,23 @@ pre-pooling Time and lightweight Freq module stacks together. All remaining
 config values match the original pooled BiMamba Sweep v2 run, including seed,
 teacher definition, PIT, padding behavior, batching and optimization. Each
 uses its own experiment/stats directory and trains from scratch.
+
+## Portable dumps on TSUBAME
+
+`local/portable_rir_dump.py prepare` bundles every indexed WAV as immutable,
+byte-identical audio (local hard links when possible), relocates SCP paths to
+the destination and records SHA256 plus sample rate/channel/frame headers.
+The NF dump retains both channels, all 20000/5000/3000 examples and all speech
+and direct/reverb RIR teachers. The BUT dump retains its 8/16-kHz clean/noisy
+sets, source/direct/reverb/noise audio and original/distributed RIRs. Original
+midgar metadata is archived under `provenance/midgar`; the original NF source
+tree recorded there is not a runtime dependency of a portable dump.
+
+Copy into incoming directories with rsync before submitting
+`qsub/verify_transferred_dumps.sh`. That CPU-only job verifies every audio
+SHA256 and header, all SCP IDs/rates/lengths, then publishes both dumps.
+`transfer_complete.json` records verified file counts and sizes. Stage 1
+recognizes the verified portable NF dump and checks its metadata hashes;
+Stage 5 uses the same original sample lengths to prepare batching shapes.
+No resampling, quantization, RIR normalization or waveform regeneration is
+performed by this transfer workflow.
