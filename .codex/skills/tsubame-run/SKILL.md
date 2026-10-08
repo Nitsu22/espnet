@@ -1,53 +1,53 @@
 ---
 name: tsubame-run
-description: Run this ESPnet workspace on TSUBAME via qsub, including Git synchronization, qsub script preparation, submission, and job inspection.
+description: このESPnetワークスペースをTSUBAMEで実行する。Git同期、qsubの準備・投入、資源選択、ポイント見積もり、ジョブ確認に使う。
 ---
 
-# TSUBAME Run
+# TSUBAMEでの実行
 
-Use for this ESPnet workspace's TSUBAME jobs. For lab GPU hosts, use `.codex/skills/lab-gpu-run/SKILL.md`.
+このワークスペースのTSUBAMEジョブに使う。ラボGPUでの実行は `.codex/skills/lab-gpu-run/SKILL.md` を使う。
 
-## Paths
+## 接続先とパス
 
-- midgar repository: `/net/midgar/work2/nitsu/learning/tf-locoformer/espnet`
-- TSUBAME: `ssh tsubame`; repository `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet`
-- Current recipe: `egs2/whamr/enh_rir`; qsub examples: its `qsub/*.sh`. Use the requested recipe when different.
+- midgar：`/net/midgar/work2/nitsu/learning/tf-locoformer/espnet`
+- TSUBAME：`ssh tsubame`、リポジトリは `/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet`
+- 標準レシピ：`egs2/whamr/enh_rir`。別レシピの指定があればそちらを使う。実行例は各レシピの `qsub/*.sh`。
 
-## Sync Before Execution
+## 実行前のGit同期
 
-A request to run on TSUBAME includes pushing the required midgar commits and pulling them on TSUBAME. Read-only queue or log checks do not trigger synchronization.
+TSUBAMEでの実行依頼には、必要なmidgarのコミットをpushし、TSUBAMEでpullする操作を含む。キューやログを確認するだけなら同期は不要。
 
-1. On midgar, inspect the diff, prepare any required code/configuration/qsub changes, validate, and commit only changes needed for the run. Push the target branch; leave unrelated changes out.
-2. After connecting to TSUBAME, first check the repository status and branch. Use the same target branch and `git pull --ff-only` from its corresponding remote branch before run preparation or submission. Verify that HEAD matches the intended midgar commit.
-3. If local changes, branch divergence, or an unclear branch mapping prevents safe synchronization, report the blocker without overwriting changes or force-pushing.
+1. midgarで必要なコード・設定・qsubを編集し、差分確認と検証後、対象変更だけをコミットして作業ブランチへpushする。
+2. TSUBAMEで変更状態・ブランチ・待機/実行中ジョブの参照先を確認し、更新可能な作業ディレクトリで、同じブランチの対応するリモートから `git pull --ff-only` する。準備・投入前に、HEADが意図したmidgarのコミットと一致することを確認する。
+3. 未コミット変更や分岐、ブランチの対応不明などで安全に同期できなければ、上書きやforce pushをせず理由を報告する。
 
-Edit version-controlled code, configuration, and qsub scripts on midgar. If further changes are needed after synchronization, repeat the sync above. TSUBAME is for execution and run artifacts unless the user explicitly requests otherwise.
+管理対象のコード・設定・qsubはmidgarで編集し、追加修正時も同じ手順で同期する。特に指定がなければ、TSUBAMEは実行と成果物の保管に使う。待機・実行中のジョブが参照するディレクトリは更新せず、別コミットを並行実行するときは別ディレクトリを使う。
 
-## Resource Selection and Point Minimization
+## 資源選択とポイント節約
 
-- Before sizing a job, read [resource types and point costs](references/resources-and-points.md). Inspect the requested stages for CPU parallelism, peak host memory, GPU count, and GPU memory needs; do not inherit a resource request just because an example uses it.
-- Minimize the expected total TSUBAME points needed to complete the requested computation correctly. Compare resource coefficients and expected runtimes from prior logs or measurements; the smallest allocation is not always the cheapest if it runs much longer. Preserve the requested experiment and results.
-- For CPU-only work, choose `cpu_*` whenever it meets the job's requirements; explain any verified resource constraint that requires a GPU-bearing allocation. Split substantial CPU-only preparation or scoring from GPU computation when this reduces points and preserves data dependencies; reuse verified artifacts where appropriate. Do not move heavy computation onto login nodes to avoid charges.
-- For GPU work, request only the GPUs, CPU cores, and memory the job needs. Match `--ngpu`, worker counts, and thread settings to the allocation. Use fractional GPU resources only after verifying sufficient GPU memory and application compatibility.
-- Default to priority `-5`. Estimate `h_rt` with a modest margin and account for both actual runtime and requested walltime in the point estimate. Avoid limits that cause premature termination and repeated work; report the selected resources, walltime, and reason for the choice.
+- [資源一覧と計算方法](references/resources-and-points.md)を読み、対象ステージに必要なCPU並列数、ホストメモリ、GPU数・GPUメモリを確認する。実行例の資源指定をそのまま引き継がない。
+- 依頼された実験を正しく完了するまでの総ポイントを最小化する。資源係数と過去のログ・計測による所要時間を比較する。小さい資源でも実行が長引けば安くなるとは限らない。
+- CPUだけの処理は、要件を満たす `cpu_*` を選ぶ。GPU付き資源が必要なら、その資源制約を説明する。ポイントが減る場合はCPU前処理・評価をGPU処理と分け、確認済みの成果物を再利用する。課金回避のためにログインノードで重い処理をしない。
+- GPU処理は必要なGPU・CPU・メモリだけを確保し、`--ngpu`、ワーカー数、スレッド数を合わせる。GPUの分割資源は、GPUメモリとアプリの対応を確認して使う。
+- 優先度は通常 `-5`。`h_rt` は所要時間に適度な余裕を加え、指定時間もポイント計算に含める。途中終了による再実行を避けつつ、選んだ資源・時間・理由を報告する。
 
-## Prepare qsub Scripts on midgar
+## qsubの準備
 
-- Inspect existing scripts in the recipe's `qsub/` directory. Reuse the same experiment's script for continuation/reruns where suitable; inspect before overwriting. Create new scripts there only when needed.
-- Follow the closest successful example for the same recipe and GPU scale. Match `run*.sh`, `--ngpu`, `--stage`, `--stop_stage`, and optional arguments to the request.
-- Apply the resource selection above, then verify the environment against successful examples. Existing examples use `module load cuda/11.8.0`, `conda activate tf-locoformer`, and conda under `/gs/bs/tga-shinoda/nitsu/anaconda3`.
-- If no suitable example exists, read [the qsub pattern](references/qsub-script.md) as a fallback. If resources, environment, paths, or requested run conditions remain unverified, ask before submission.
+- レシピの `qsub/` にある、同じ実験・GPU規模で成功した例を確認する。継続・再実行では適切な既存スクリプトを再利用し、新規作成や上書きは必要な場合に行う。
+- `run*.sh`、`--ngpu`、`--stage`、`--stop_stage`、追加引数を依頼に合わせる。既存例の環境は `module load cuda/11.8.0`、`conda activate tf-locoformer`、condaの場所は `/gs/bs/tga-shinoda/nitsu/anaconda3`。
+- 適切な例がなければ[参考qsub](references/qsub-script.md)を使う。資源・環境・パス・実行条件に未解決の点があれば、投入前に確認する。
+- 構文、必要データ、出力先の容量を確認し、ログを保存する。ログディレクトリは投入前に作成する。環境準備の失敗時は処理を止める。
 
-## Submit and Inspect
+## 投入と結果確認
 
-- After synchronization, submit from the recipe directory, not from inside `qsub/`.
-- Use uncharged trials only for pre-charge compatibility checks, not research/training/benchmarking: submit without a TSUBAME group (`-g`/`newgrp`), request at most 2 resource units, `h_rt=00:03:00` or less, priority `-5`, and only one running trial. [Official trial limits](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#523).
-- The limit counts resource units, not GPUs: `node_f=1` has 4 GPUs and fits the published resource limit; `node_q=4` exceeds it. Check actual rejection messages. If a check (including multi-GPU initialization) needs more than 3 minutes, use a group-charged job with sufficient time instead of forcing a trial.
-- Production run: use the selected resources, priority, and estimated `h_rt` above. Submit with `qsub -g tga-shinoda qsub/<script>.sh`.
-- When asked to wait for another job, identify its actual job ID with `qstat` and use `qsub -hold_jid <job_id> ...`; never guess the dependency.
-- At every submission, calculate points from the effective resource type/count, priority, and `h_rt` using [the calculation and reporting guide](references/resources-and-points.md#report-points-at-submission). Report the expected consumption when a credible runtime estimate exists, the walltime-based upper estimate, and a brief calculation with the runtime assumption. If runtime is unknown, report only the upper estimate rather than inventing an expected runtime. For multiple jobs or array tasks, show each estimate and the combined total. Identify verified uncharged trials as 0 points; for other charging modes, use their applicable rules rather than the ordinary usage-based formula.
-- Report the submitted command, job ID when available, synchronized commit, and point estimates together; distinguish estimates from confirmed charges. Check queue state with `qstat` as needed. For failures, inspect the qsub script and ESPnet `exp/...` logs.
+- 同期後、レシピのディレクトリから投入する。`qsub/` の中からは投入しない。通常実行は `qsub -g tga-shinoda qsub/<script>.sh`。
+- 無課金のお試し実行は課金前の互換性確認だけに使い、研究・学習・性能測定には使わない。グループ指定（`-g` / `newgrp`）なし、資源単位数2以下、`h_rt=00:03:00` 以下、優先度 `-5`、同時実行1ジョブが条件。[公式条件](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#523)
+- 制限はGPU数ではなく資源単位数。`node_f=1` は4 GPUでも資源数の条件内、`node_q=4` は条件外。実際の拒否理由も確認する。初期化などに3分を超える場合は、十分な時間を指定した課金ジョブを使う。
+- 別ジョブの終了待ちを依頼されたら、`qstat` で実際のIDを確認して `qsub -hold_jid <job_id> ...` を使う。終了待ちは先行ジョブの成功を保証しないため、後続処理に必要な成果物も確認する。
+- 投入のたびに、実際の資源・個数・優先度・`h_rt` で[ポイントを計算](references/resources-and-points.md#投入時のポイント報告)する。根拠のある所要時間があれば見積ポイントと上限見積もり、不明なら上限だけを示す。条件と簡単な計算も添える。複数ジョブ・配列タスクは個別と合計を示し、条件を確認した無課金のお試し実行は0ポイントとする。予約など別の課金方式には専用の規則を使う。
+- 投入コマンド、ジョブID、同期したコミット、ポイント見積もりをまとめて報告する。見積もりと確定課金を区別する。
+- 状態は `qstat`、問題発生時はqsubとESPnetの `exp/...` ログを確認する。キューから消えただけで成功と判断せず、終了状態・ログ・必要な成果物で確認する。確認できなければ成功は未確認と報告する。
 
-## Maintain This Skill
+## このスキルの更新
 
-Keep only concise, verified facts reusable for this repository's qsub workflow. Do not add broad scheduler documentation, one-off logs, or experiment hyperparameters.
+このリポジトリのqsub運用に再利用できる、確認済みの情報を簡潔に残す。一般的なマニュアル、一度限りのログ、実験固有のハイパーパラメータは追加しない。

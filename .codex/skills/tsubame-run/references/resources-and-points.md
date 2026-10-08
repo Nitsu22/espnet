@@ -1,12 +1,12 @@
-# TSUBAME Resource Types and Point Costs
+# TSUBAMEの資源とポイント
 
-Verified on 2026-10-06 against the official [resource specifications](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#511), [resource coefficients](https://www.t4.cii.isct.ac.jp/fare_overview), and [charging rules, tables 2-4](https://www.somuka.titech.ac.jp/reiki_int/reiki_honbun/x385RG00001693.html). Recheck these sources when estimating a new run; update this reference if the published values change.
+2026-10-06に公式の[資源仕様](https://www.t4.cii.isct.ac.jp/docs/all/handbook.ja/jobs/#511)、[資源係数](https://www.t4.cii.isct.ac.jp/fare_overview)、[課金規則の表2〜4](https://www.somuka.titech.ac.jp/reiki_int/reiki_honbun/x385RG00001693.html)で確認済み。新規実行の見積もり時には最新の公式情報を確認し、変更があれば更新する。
 
-## Resource Types
+## 資源の種類
 
-Values are per resource unit. Memory is host RAM, not GPU memory. Specify units with `-l <type>=<count>`.
+数値は資源1単位あたり。メモリはホストRAMで、GPUメモリではない。`-l <type>=<count>` で個数を指定する。
 
-| Resource | CPU cores | Host RAM (GB) | GPUs | Point coefficient |
+| 資源 | CPUコア数 | ホストRAM（GB） | GPU数 | ポイント係数 |
 |---|---:|---:|---:|---:|
 | `node_f` | 192 | 768 | 4 | 1.000 |
 | `node_h` | 96 | 384 | 2 | 0.500 |
@@ -21,15 +21,15 @@ Values are per resource unit. Memory is host RAM, not GPU memory. Specify units 
 | `cpu_8` | 8 | 18.4 | 0 | 0.030 |
 | `cpu_4` | 4 | 9.2 | 0 | 0.015 |
 
-- CPU-only preparation or scoring: choose a `cpu_*` size that fits both memory and useful parallelism. For example, `cpu_8=1` fits up to 8 CPU cores and 18.4 GB host RAM; use a larger CPU allocation if either requirement exceeds that. If no CPU-only type meets a single-process memory requirement, explain that constraint when selecting a larger resource; memory across nodes cannot be pooled automatically for one process.
-- One full GPU: compare `gpu_1=1` with `node_q=1`. Prefer `gpu_1` when 8 CPU cores and 96 GB host RAM suffice; `node_q` provides more CPU and memory if needed. Compare expected total points if the smaller CPU allocation would slow the GPU job.
-- Two or four GPUs on one node: consider `node_h=1` or `node_f=1`, respectively, when the requested computation benefits from those GPU counts. Do not treat `node_q=4` as interchangeable with `node_f=1`; verify placement and multi-node support before requesting multiple units.
-- Fractional GPU allocations (`node_o`, `gpu_h`): verify the actual GPU memory and application compatibility before choosing them.
-- A job can request multiple units of one resource type; different resource types cannot be combined in one request. Split CPU and GPU phases into separate jobs when worthwhile, and verify prerequisite artifacts before starting the next phase.
+- CPUのみ：メモリと有効な並列数を満たす `cpu_*` を選ぶ。例として `cpu_8=1` は8コア・18.4 GBまで。CPU資源では単一プロセスのメモリ要件を満たせない場合は、制約を説明して大きい資源を選ぶ。別ノードのメモリは自動では合算できない。
+- GPU 1基：8コア・96 GBで足りるなら `gpu_1=1`、より多くのCPU・メモリが必要なら `node_q=1`。CPU不足で遅くなる場合は所要時間も含めて比較する。
+- 同一ノードのGPU 2基・4基：それぞれ `node_h=1`・`node_f=1` を検討する。`node_q=4` は `node_f=1` と同等とは限らず、配置と複数ノードへの対応を確認する。
+- GPU分割資源（`node_o`、`gpu_h`）：GPUメモリとアプリの対応を確認して選ぶ。
+- 同じ資源の複数単位は指定できるが、異なる資源種類は1ジョブに混在できない。CPU・GPU処理の分割が有効なら別ジョブにし、後続処理に必要な成果物を確認する。
 
-## Calculate Points
+## ポイントの計算
 
-For an ordinary group-charged, usage-based job, estimate:
+通常のグループ課金・従量制ジョブは次で見積もる。
 
 ```text
 points = units * resource_coefficient * priority_coefficient
@@ -37,35 +37,37 @@ points = units * resource_coefficient * priority_coefficient
          / 3600
 ```
 
-The official rules round down to 0.0001 points. Priority `-5` has coefficient 1; `-4` and `-3` have coefficients 2 and 4, respectively. Use `-5` unless the user prioritizes faster scheduling over point minimization. This formula does not apply to reservations, subscription jobs, or the dedicated interactive queue.
+`units` は資源の個数、`resource_coefficient` は上表の係数、`priority_coefficient` は優先度係数。`actual_seconds` は実行秒数、`requested_h_rt_seconds` は指定した制限時間の秒数。
 
-## Report Points at Submission
+公式規則では小数点以下4桁で切り捨てる。優先度 `-5` の係数は1、`-4` は2、`-3` は4。待ち時間短縮を優先する指定がなければ `-5` を使う。予約・定額制・専用インタラクティブキューにはこの式を使わない。
 
-Use the effective submitted resource type/count, priority, and `h_rt`, including command-line overrides. In the submission report, give the job ID, those inputs, the runtime assumption and its basis, point estimates, and a short numerical substitution. For multiple jobs or array tasks, give the per-job or per-task estimates and their totals.
+## 投入時のポイント報告
 
-- Expected consumption: substitute a runtime supported by prior logs or measured progress into the seconds-based formula above. If runtime is unknown, omit this estimate and say so.
-- Walltime-based upper estimate: substitute `h_rt` for actual runtime. For `h_rt` of at least 5 minutes, the quick calculation in hours is:
+コマンドラインによる上書きも含め、実際に投入した資源・個数・優先度・`h_rt` で計算する。ジョブID、計算条件、所要時間の根拠、ポイント見積もりと簡単な代入式を報告する。複数ジョブ・配列タスクは個別と合計を示す。
+
+- 見積ポイント：過去のログや計測で裏付けた所要時間を上の式に代入する。所要時間が不明なら見積ポイントは示さず、不明と伝える。
+- 上限見積もり：実行時間に `h_rt` を代入する。`h_rt` が5分以上なら、時間単位で簡単に計算できる。
 
   ```text
   upper_points = units * resource_coefficient * priority_coefficient
                  * 0.8 * h_rt_hours
   ```
 
-  For a shorter charged job, use the full seconds-based formula with its 300-second minimum; do not use the `0.8 * h_rt_hours` shortcut.
+  `h_rt_hours` は指定時間を時間単位にした値。5分未満の課金ジョブは、実行時間の最低300秒を含む元の式を使う。
 
-For example, at priority `-5` with `h_rt=02:00:00` and an expected runtime of 1 hour:
+例：優先度 `-5`、`h_rt=02:00:00`、予想実行時間1時間の場合。
 
-| Resource request | Expected consumption | Walltime-based upper estimate |
+| 資源指定 | 見積ポイント | 上限見積もり |
 |---|---|---|
-| `node_f=1` | `1 * 1.000 * 1 * (0.7 * 1 + 0.1 * 2) = 0.9000` points | `1 * 1.000 * 1 * 0.8 * 2 = 1.6000` points |
-| `cpu_8=1` | `1 * 0.030 * 1 * (0.7 * 1 + 0.1 * 2) = 0.0270` points | `1 * 0.030 * 1 * 0.8 * 2 = 0.0480` points |
+| `node_f=1` | `1 * 1.000 * 1 * (0.7 * 1 + 0.1 * 2) = 0.9000` | `1 * 1.000 * 1 * 0.8 * 2 = 1.6000` |
+| `cpu_8=1` | `1 * 0.030 * 1 * (0.7 * 1 + 0.1 * 2) = 0.0270` | `1 * 0.030 * 1 * 0.8 * 2 = 0.0480` |
 
-These are calculation examples, not performance comparisons: use measured runtime estimates for the actual workload. If runtime is unknown, report only the walltime-based upper estimate. State that estimates are not confirmed charges. The [official settlement FAQ](https://www.t4.cii.isct.ac.jp/docs/all/faq.ja/portal/) explains that maximum provisional points are reserved at submission and settled after completion; a calculated upper estimate is not evidence that a specific amount was actually deducted.
+表は計算例であり、同じ処理の性能比較ではない。実際の処理に合う所要時間を使い、不明なら上限だけを示す。見積もりは確定課金と区別する。[公式FAQ](https://www.t4.cii.isct.ac.jp/docs/all/faq.ja/portal/)では投入時に最大仮ポイントを確保し、終了後に精算するとされている。計算した上限は実際の引き落とし額を確認した証拠ではない。
 
-## Reduce Total Points
+## 総ポイントを減らす判断
 
-- Compare the total across all required phases using credible runtime estimates. Increasing resource units or priority multiplies costs; extra parallelism helps only when its runtime reduction justifies the increase.
-- Requested `h_rt` contributes to the final charge even when the job finishes early. Set a measured runtime estimate plus a modest margin, rather than a long default or a limit so short that it causes incomplete work and reruns.
-- The actual-runtime term has a 300-second minimum for each charged job. Avoid unnecessary tiny jobs or repeated failing submissions; group compatible short operations when that reduces overhead and preserves the workflow.
-- Inspect whether each stage actually uses CUDA before assigning it to a CPU job. Match stage boundaries, `--ngpu`, CPU workers, and threads to the allocation; changing the resource request alone does not make a GPU-dependent command CPU-compatible.
-- Reuse verified completed data preparation or statistics when the requested experiment permits it, rather than repeating CPU work while reserving GPUs. The existing uncharged-trial eligibility rules still apply; point minimization does not authorize research or measurement through uncharged trials.
+- 必要な全工程の所要時間と総ポイントを比較する。資源数・優先度を増やすと費用も増えるため、時間短縮が増加分に見合う場合に選ぶ。
+- 早く終了しても指定した `h_rt` は課金に含まれる。長すぎる既定値や、途中終了・再実行を招く短すぎる値を避ける。
+- 課金ジョブごとに実行時間は最低300秒として計算される。不要な小分けや失敗の繰り返しを避け、適切なら短い処理をまとめる。
+- CPUジョブに分ける前に、各ステージがCUDAを使うか確認する。資源指定だけ変えてもGPU必須のコマンドはCPU対応にならない。ステージ範囲、`--ngpu`、ワーカー・スレッド数も合わせる。
+- 実験条件が許せば、確認済みの前処理・統計を再利用する。節約のためでも、無課金のお試し実行を研究・測定に使わない。

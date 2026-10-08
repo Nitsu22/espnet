@@ -1,4 +1,4 @@
 interface:
-  display_name: "TSUBAME Run"
-  short_description: "Run ESPnet jobs on TSUBAME"
-  default_prompt: "Use $tsubame-run to prepare and submit an ESPnet qsub job on TSUBAME."
+  display_name: "TSUBAME実行"
+  short_description: "TSUBAMEの資源・ポイントを見積もり、ESPnetジョブを投入"
+  default_prompt: "$tsubame-run でTSUBAMEの資源とポイントを見積もり、ESPnetのqsubジョブを準備・投入してください。"

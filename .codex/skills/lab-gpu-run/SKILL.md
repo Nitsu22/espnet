@@ -1,39 +1,37 @@
 ---
 name: lab-gpu-run
-description: Run this ESPnet workspace on lab GPU servers. Use when Codex needs to choose a lab GPU host, check live GPU availability, run scripts over SSH, manage tmux for long jobs, or avoid GPUs used by others.
+description: このESPnet作業環境をラボGPUサーバーで実行する。ホスト選択、GPUの空き状況確認、SSH経由の実行、長時間ジョブの管理に使う。
 ---
 
-# Lab GPU Run
+# ラボGPUでの実行
 
-Use this skill for lab GPU servers only. For TSUBAME/qsub jobs, use `.codex/skills/tsubame-run/SKILL.md`.
+ラボGPUサーバー向けの手順。TSUBAMEのqsubジョブには `.codex/skills/tsubame-run/SKILL.md` を使う。
 
-## Host Selection
+## ホストとGPUの選択
 
-- Read `.codex/skills/lab-gpu-hosts/SKILL.md` when choosing or naming lab GPU SSH targets.
-- Check live GPU usage on candidate hosts before running.
-- Do not use GPUs currently used by other users.
-- If the user does not specify a host or GPU, choose based on task size and live availability.
-- For clearly light jobs, prefer weaker or single-GPU hosts before high-end multi-GPU servers.
+- 候補は `.codex/skills/lab-gpu-hosts/SKILL.md` で確認する。
+- `nvidia-smi` とプロセスの所有者を確認し、他ユーザーが使用中のGPUは使わない。所有者や空き状況が不明なら、そのGPUを使わず別の候補を調べる。
+- 指定がなければ、必要なGPU数・メモリと現在の空き状況から選ぶ。軽い処理には、性能が低めのホストや単一GPUのホストを優先する。
+- 起動直前にも空きを確認し、使用するGPUを `CUDA_VISIBLE_DEVICES` などで明示する。
 
-## Sync Before Execution
+## 実行前のGit同期
 
-A request to run on a lab GPU host includes pushing the required midgar commits and pulling them on the execution host. Read-only availability or log checks do not trigger synchronization.
+ラボGPUでの実行依頼には、必要なmidgarのコミットをpushし、実行ホストでpullする操作を含む。空き状況やログの確認だけなら同期は不要。
 
-1. On midgar, inspect the diff, validate and commit only changes needed for the run, then push the target branch. Leave unrelated changes out.
-2. On the execution host, first check the repository status and branch. Use the same target branch and `git pull --ff-only` from its corresponding remote branch before run preparation. Verify that HEAD matches the intended midgar commit.
-3. If local changes, branch divergence, or an unclear repository/branch mapping prevents safe synchronization, report the blocker without overwriting changes or force-pushing.
+1. midgarで差分と必要な検証を確認し、実行に必要な変更だけをコミットして対象ブランチへpushする。
+2. 実行ホストのリポジトリ状態とブランチを確認し、同じ対象ブランチで対応するリモートブランチから `git pull --ff-only` する。HEADが意図したmidgarのコミットと一致することを確認する。
+3. 未コミットの変更、ブランチの分岐、同期先の不明点があれば報告して解決する。既存の変更を上書きしたり、force pushしたりしない。
 
-## Run Policy
+## 実行と確認
 
-- Edit version-controlled code, configuration, and run scripts on midgar, then repeat the sync above. Lab hosts are for execution and run artifacts unless the user explicitly requests otherwise.
-- Run potentially long jobs inside `tmux` or an equivalent persistent session; clean up sessions created for the run when finished and no longer needed.
+- Git管理するコード・設定・実行スクリプトはmidgarで編集し、上記の手順で同期する。別途指示がなければ、ラボホストは実行と成果物の保存に使う。
+- 長時間ジョブは `tmux` など、SSH切断後も継続できる環境で実行する。標準出力・エラーと終了状態を保存し、実行用に作ったセッションは不要になったら片付ける。
+- 起動後にホスト・GPU・セッション名・ログの場所・同期したコミットを報告する。完了時は終了状態と必要な成果物を確認する。
 
-## Host Integrity
+## サーバー環境の保護
 
-- Treat the lab GPU server itself as immutable.
-- Never modify the server hardware, firmware, NVIDIA driver, kernel modules, system CUDA, system packages, module files, or host configuration.
-- Never use `sudo`, `apt`, `dnf`, `yum`, driver installers, CUDA system installers, or write under `/etc`, `/usr`, `/opt`, or `/usr/local` for a job.
-- Use `nvidia-smi` only for read-only inspection. Do not change MIG mode, persistence mode, power limits, clocks, or compute mode.
-- Restrict dependency changes to the explicitly requested user-owned conda or virtual environment. Do not modify the conda base environment.
-- Prefer environment-bundled CUDA runtime packages or wheels. Do not install a system CUDA toolkit to satisfy a project dependency.
-- If a task cannot run without a host-level change, stop and report the requirement; do not perform the change.
+- ハードウェア、ファームウェア、NVIDIAドライバー、カーネル、システムCUDA・パッケージ、moduleファイル、ホスト設定は変更しない。
+- ジョブ実行のために `sudo`、`apt`、`dnf`、`yum`、ドライバーやシステムCUDAのインストーラーを使わず、`/etc`、`/usr`、`/opt`、`/usr/local` に書き込まない。
+- `nvidia-smi` は確認だけに使い、MIG、persistence mode、電力制限、クロック、compute modeを変更しない。
+- 依存関係の変更は、明示的に依頼されたユーザー所有のconda・仮想環境内に限る。condaのbase環境は変更しない。CUDAは環境内のランタイムやwheelを優先する。
+- ホスト側の変更が必要なら、その変更を行わず要件を報告する。

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lab GPU Run"
-  short_description: "Run jobs on lab GPU servers"
-  default_prompt: "Use $lab-gpu-run to run this ESPnet workspace on lab GPU servers."
+  display_name: "ラボGPUでの実行"
+  short_description: "ラボGPUの空き状況を確認し、コードを同期してジョブを実行する"
+  default_prompt: "$lab-gpu-run を使い、このESPnet作業環境をラボGPUサーバーで実行してください。"

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lab GPU Hosts"
-  short_description: "Inventory of lab GPU SSH targets"
-  default_prompt: "Use $lab-gpu-hosts to choose a lab GPU SSH target."
+  display_name: "ラボGPUサーバー一覧"
+  short_description: "ラボGPUサーバーの構成を確認し、必要なGPUに合う接続先を選ぶ"
+  default_prompt: "$lab-gpu-hosts を使い、実行に適したラボGPUサーバーのSSH接続先を選んでください。"
