@@ -140,3 +140,63 @@ recognizes the verified portable NF dump and checks its metadata hashes;
 Stage 5 uses the same original sample lengths to prepare batching shapes.
 No resampling, quantization, RIR normalization or waveform regeneration is
 performed by this transfer workflow.
+
+## Controlled architecture ablations
+
+Four additional configs and entry points isolate the proposed changes from
+the full four-pre-block/two-post-block predictor. The full file prefix is
+`run_pooled_bimamba_2spk_nf_16k_sweep_v2_`; each suffix also has its own
+`conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_<suffix>.yaml` and
+experiment/statistics tag.
+
+| Suffix | Architecture change from the full model |
+| --- | --- |
+| `ffn_only.sh` | Keep four pre blocks and two post-pooling frequency FFNs; remove only post-pooling Attention. This differs from `no_postfreq`, which removes the complete Attention/FFN stack. |
+| `freq_before_pool.sh` | Keep the same two complete frequency Attention/FFN blocks and apply them immediately before temporal pooling, after the four lightweight Time/Freq blocks. |
+| `2blocks.sh` | Use two pre-pooling Time/Freq blocks and keep both complete post-pooling frequency blocks. |
+| `bilstm.sh` | Replace each of the four time BiMamba modules with a one-layer BiLSTM, input/hidden size 64 per direction, followed by a 128-to-64 projection. Keep all frequency modules and pooling unchanged. |
+
+The before-pooling variant processes a frequency sequence for every frame
+rather than for two pooled speaker slots, so it requires substantially more
+activation memory and computation. Its frequency stack has the same parameter
+count and layer definitions as the full model; placement, and the resulting
+input features, change. BiLSTM changes the time model and its parameter count;
+the hidden size is fixed rather than claimed to provide an exact parameter
+match. Construction with the real Mamba backend gives these counts:
+
+| Variant | Total parameters | Trainable parameters |
+| --- | ---: | ---: |
+| Full baseline | 456428 | 456412 |
+| `ffn_only` | 422876 | 422876 |
+| `freq_before_pool` | 456428 | 456412 |
+| `2blocks` | 286570 | 286554 |
+| `bilstm` | 461548 | 461532 |
+
+The BiLSTM variant is approximately 1.1% larger than the full baseline.
+Inference speed and peak memory still need measurement on the same hardware.
+
+All four preserve the same NF-WHAMR mixture, left-channel input, four-second
+crop, direct/reverberant RIR-pair preprocessing, full-tail Sweep v2 RIMag PIT
+loss, shared two-speaker assignment, 60 CTF taps, optimizer, batch settings,
+seed and evaluation code. Padding remains matched to TF-Locoformer Sweep v2:
+there is no new sequence mask, including in the time modules or temporal
+pooling. None of these variants adds a speech output or RIR-L1 loss.
+
+On TSUBAME, collect input-only shapes for all four with the CPU-only script:
+
+```bash
+cd /gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/rir_2spk
+qsub -g tga-shinoda qsub/pooled_bimamba_ablations_stage5.sh
+```
+
+For a single variant, the equivalent Stage 5 call is:
+
+```bash
+bash run_pooled_bimamba_2spk_nf_16k_sweep_v2_ffn_only.sh \
+    --stage 5 --stop_stage 5 --ngpu 0 \
+    --python /gs/bs/tga-shinoda/nitsu/anaconda3/envs/tf-locoformer/bin/python
+```
+
+Replace `ffn_only` with the other suffixes as needed. Stage 5 checks the dump
+manifest and prepares each configuration's batching shapes; it does not train
+the model. GPU training is a separate Stage 6 submission.
