@@ -230,3 +230,27 @@ experiment with `--resume true` and sizes the next segment from remaining
 epochs. Optimizer/scheduler and stopping criteria remain intact. Other
 failures are recorded and are not silently retried. Keep the launcher alive
 for these automatic continuations; its state is persisted after each change.
+
+### Completed-ablation evaluation on TSUBAME
+
+`qsub/pooled_bimamba_ablation_infer.sh` evaluates the completed `2blocks` or
+`bilstm` variant's `valid.loss.best.pth` (45epoch.pth) on the full 3000-example
+WHAMR test set and BUT clean/noisy 16-kHz sets. It uses ordinary-sweep PIM,
+full utterances, channel 0 and FLOAT output, matching the earlier comparison.
+It requests `gpu_h=1` for inference only, with a real CUDA smoke check first.
+
+Submit `qsub/pooled_bimamba_ablation_score.sh` with `-hold_jid` set to the
+actual inference job ID. This `cpu_4=1` job requires successful inference
+markers, applies the unchanged peak alignment/normalization and RMSE PIT,
+and saves both ordinary and polarity-aligned BUT scores. The main BUT
+comparison uses `score_polarity_aligned`, as for the earlier models.
+`valid_metric_counts.json` reports finite source-pair counts alongside each
+summary, and `evaluation_complete.json` marks all three conditions complete.
+
+Run both scripts from an isolated evaluation checkout's `rir_2spk`, leaving
+the ongoing training checkout intact. Arguments are the variant name and an
+absolute result root. Models and dumps are read from the original TSUBAME
+recipe; output metadata records the evaluation code commit and copied
+checkpoint SHA256. GPU inference and CPU scoring can also be selected with
+`local/evaluate_two_speaker.py --stage inference|score`; its default `all`
+continues to perform the original combined workflow.
