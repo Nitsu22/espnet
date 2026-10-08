@@ -279,6 +279,10 @@ class SeparateSpeech:
                     [batch_size], dtype=torch.long, fill_value=T
                 )
                 # b. Enhancement/Separation Forward
+                if hasattr(self.enh_model, "prepare_conditioning"):
+                    additional.update(
+                        self.enh_model.prepare_conditioning(speech_seg, lengths_seg, fs)
+                    )
                 feats, f_lens = self.enh_model.encoder(speech_seg, lengths_seg)
                 if isinstance(self.enh_model, ESPnetDiffusionModel):
                     feats = [self.enh_model.enhance(feats)]
@@ -339,6 +343,10 @@ class SeparateSpeech:
             waves = torch.unbind(waves, dim=0)
         else:
             # b. Enhancement/Separation Forward
+            if hasattr(self.enh_model, "prepare_conditioning"):
+                additional.update(
+                    self.enh_model.prepare_conditioning(speech_mix, lengths, fs)
+                )
             feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
             if isinstance(self.enh_model, ESPnetDiffusionModel):
                 feats = [self.enh_model.enhance(feats)]

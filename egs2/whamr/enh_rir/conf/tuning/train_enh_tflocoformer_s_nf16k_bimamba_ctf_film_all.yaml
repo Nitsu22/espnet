@@ -1,0 +1,89 @@
+# NF-WHAMR 16 kHz; match enh7_baseline's native-16k S configuration.
+seed: 0
+init: xavier_uniform
+max_epoch: 150
+use_amp: false
+train_dtype: float32
+grad_clip: 5.0
+batch_type: folded
+batch_size: 4
+num_workers: 4
+preprocessor: enh
+num_spk: 2
+iterator_type: sequence
+speech_segment: 64000
+shuffle_within_batch: true
+force_single_channel: true
+avoid_allzero_segment: true
+model_conf:
+  normalize_variance: true
+  bimamba_checkpoint: ../rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2/44epoch.pth
+  bimamba_sha256: 8f2ac71f6b30b13481efa30f081b45b17820b6919376bef47c9b7adfade86596
+  bimamba_predictor_conf:
+    emb_dim: 64
+    pre_layers: 4
+    post_layers: 2
+    d_state: 16
+    d_conv: 4
+    freq_bottleneck: 16
+    freq_rank: 16
+    local_kernel: 5
+    pooling_hidden: 32
+    n_heads: 4
+    ffn_dim: 128
+    head_dim: 128
+    slot_embedding_std: 0.02
+    eps: 1.0e-5
+optim: adamw
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.01
+patience: 10
+early_stopping_criterion: [valid, loss, min]
+val_scheduler_criterion: [valid, loss]
+best_model_criterion:
+- [valid, si_snr, max]
+- [valid, loss, min]
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+  warmup_steps: 4000
+  mode: min
+  factor: 0.5
+  patience: 3
+encoder: stft
+encoder_conf:
+  n_fft: 512
+  hop_length: 128
+separator: tflocoformer_bimamba_ctf_film_all
+separator_conf:
+  num_spk: 2
+  n_layers: 4
+  emb_dim: 96
+  norm_type: rmsgroupnorm
+  num_groups: 4
+  tf_order: ft
+  n_heads: 4
+  flash_attention: false
+  ffn_type: [swiglu_conv1d, swiglu_conv1d]
+  ffn_hidden_dim: [128, 128]
+  conv1d_kernel: 8
+  conv1d_shift: 1
+  dropout: 0.0
+  eps: 1.0e-05
+decoder: stft
+decoder_conf:
+  n_fft: 512
+  hop_length: 128
+criterions:
+- name: si_snr
+  conf:
+    eps: 1.0e-07
+  wrapper: pit
+  wrapper_conf:
+    weight: 1.0
+    independent_perm: true
+valid_batch_size: 1
+num_att_plot: 0
+log_interval: 50

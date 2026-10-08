@@ -23,6 +23,9 @@ from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.espnet_model_ctf import ESPnetEnhancementCTFModel
+from espnet2.enh.espnet_model_frozen_bimamba import (
+    ESPnetEnhancementFrozenBiMambaModel,
+)
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tfgridnet_roland import RolandTFL1, RolandTFMCPIT
 from espnet2.enh.loss.criterions.tfgridnet_wav_mag_mc import (
@@ -84,6 +87,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_bigdeltanet import (
 )
 from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf import (
     TFLocoformerCTFSeparator,
+)
+from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_all_ctf import (
+    TFLocoformerSeparator as TFLocoformerBiMambaFiLMSeparator,
 )
 from espnet2.enh.separator.tflocoformer_separator_nocashe_aeafusion import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocasheAEAFusion,
@@ -165,6 +171,7 @@ separator_choices = ClassChoices(
         tflocoformer_nocashe=TFLocoformerSeparatorNocashe,
         tflocoformer_split=TFLocoformerSplitSeparator,
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
+        tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
         tflocoformer_nocashe_aeafusion_first=TFLocoformerSeparatorNocasheAEAFusionFirst,
@@ -611,11 +618,12 @@ class EnhancementTask(AbsTask):
             )
 
         else:
-            model_class = (
-                ESPnetEnhancementCTFModel
-                if args.separator == "tflocoformer_nocashe_ctf"
-                else ESPnetEnhancementModel
-            )
+            if args.separator == "tflocoformer_bimamba_ctf_film_all":
+                model_class = ESPnetEnhancementFrozenBiMambaModel
+            elif args.separator == "tflocoformer_nocashe_ctf":
+                model_class = ESPnetEnhancementCTFModel
+            else:
+                model_class = ESPnetEnhancementModel
             model = model_class(
                 encoder=encoder,
                 separator=separator,
@@ -629,6 +637,9 @@ class EnhancementTask(AbsTask):
         # 2. Initialize
         if args.init is not None:
             initialize(model, args.init)
+
+        if isinstance(model, ESPnetEnhancementFrozenBiMambaModel):
+            model.restore_bimamba_source()
 
         return model
 
