@@ -1,4 +1,4 @@
-# NF-WHAMR baselines
+# WHAMR / NF-WHAMR baselines
 
 This directory holds new baseline experiments for comparisons with TF-based
 DAMSEP. It was scaffolded from `../enh_tmp`: `cmd.sh`, `local/`, scheduler
@@ -19,21 +19,28 @@ from this new recipe.
 
 Defaults are one allocated GPU, physical training batch 4, accumulation 1,
 validation batch 1, four loader workers, no attention plotting, and logging
-every 50 updates. Batch-4 memory/speed on one H100 is **not yet measured**.
-No training job has been submitted as part of creating this recipe.
+every 50 updates. `--condition nf_whamr` is the default; `--condition whamr`
+selects noisy WHAMR with the same model/optimization settings. The two config
+files differ only in their descriptive comments.
 
 ## Reused artifacts and separate outputs
 
-- `dump_clean -> ../enh4_clean/dump_clean` exposes the existing stereo 8 kHz
-  min NF-WHAMR WAV/SCP files. The preprocessor selects the left channel and
+- `dump -> ../enh1/dump` exposes noisy WHAMR; `dump_clean ->
+  ../enh4_clean/dump_clean` exposes NF-WHAMR. Both are existing stereo 8 kHz
+  min WAV/SCP files with anechoic clean teachers. No noise source is passed
+  as a separate training target: noisy WHAMR uses the original noisy mixture.
+  The preprocessor selects the left channel and
   crops training utterances to at most four seconds; short examples remain.
 - Stage 6 reads the original three-series train/valid statistics from
-  `../enh4_clean/exp/enh_stats_8k/`. No experiment/checkpoint directory is copied.
+  `../enh4_clean/exp/enh_stats_8k/` for NF-WHAMR and
+  `../enh1/exp/enh_stats_8k/` for WHAMR. No experiment/checkpoint directory is copied.
   The wrapper restricts execution to Stages 6-8 so shared statistics and dumps
   cannot be regenerated through it.
 - New training, inference and scoring outputs go to this recipe's
-  `exp/enh_train_tflocoformer_s_nf_8k_1gpu_batch4/`, specified explicitly with
-  `--enh_exp`. The existing baseline's results are not overwritten.
+  `exp/enh_train_tflocoformer_s_nf_8k_1gpu_batch4/` and
+  `exp/enh_train_tflocoformer_s_whamr_8k_1gpu_batch4/`. Condition/GPU/batch/accumulation
+  determine separate default output paths; `--enh_exp` can override them.
+  Do not reuse an existing experiment for a different setting.
 - Fold length is set to 200000 samples: the existing full-utterance shape
   files reach 130034 samples, although training crops to 32000. This prevents
   folded batching from shrinking physical batch 4 on one GPU. The wrapper
@@ -45,6 +52,8 @@ Run from this directory in an appropriate compute allocation:
 ```bash
 # Stage 6: clean-only baseline training, from scratch on the first invocation.
 bash run.sh --stage 6 --stop_stage 6
+# Noisy WHAMR, with the same batch/optimization settings.
+bash run_whamr_tflocoformer_s.sh --stage 6 --stop_stage 6
 # Resume the same experiment by repeating the command.
 # Alternative effective-batch-4 run; keep its checkpoint directory separate.
 bash run.sh --batch_size 1 --accum_grad 4 \
@@ -59,4 +68,37 @@ The default inference checkpoint is `valid.loss.best.pth`, matching the older
 baseline's selection policy. Do not change batch settings in an existing
 experiment: use a new `--enh_exp`. `CUDA_VISIBLE_DEVICES` is left to the
 allocation. TSUBAME job submission and synchronization follow the repository's
-`tsubame-run` skill; scheduler scripts can be added after memory/speed checks.
+`tsubame-run` skill.
+
+## TSUBAME production jobs
+
+After synchronization, submit from this recipe directory:
+
+```bash
+mkdir -p qsub_logs
+qsub -g tga-shinoda -N tfs_whamr_b4 qsub/train_tflocoformer_s_1gpu.sh whamr
+qsub -g tga-shinoda -N tfs_nf_b4 qsub/train_tflocoformer_s_1gpu.sh nf_whamr
+```
+
+Each job requests one full H100 (`gpu_1=1`), eight CPU cores, 96 GB host RAM,
+priority -5 and a 24-hour ceiling. Each performs Stage 6 only; GPU inference
+and CPU scoring are separate stages. The existing tf-locoformer conda
+environment and CUDA 11.8 module are used without installing dependencies.
+
+Within the charged allocation, `local/check_baseline_inputs.py` validates all
+SCP/statistics IDs, counts and shape alignment; samples the rates, channels,
+waveform lengths and clean-teacher equivalence; and verifies sampled noisy
+mixtures equal NF mixtures plus the existing noise images for train/valid.
+Test dumps do not require isolated noise files. The check then runs a real
+four-example, four-second FP32 CUDA forward/backward/AdamW update and full-length
+validation of the longest example. It records data hashes and GPU memory in
+the experiment's `input_check.json`. This probe does not save its model weights;
+normal training starts from seed 0 or the experiment's existing checkpoint.
+
+On a 24-hour time limit, resubmit the same condition to resume from the last
+completed epoch; an interrupted epoch repeats. The 150-epoch limit and early
+stopping remain the saved baseline's settings. Runtime for the new physical
+batch-four setup must be measured rather than inferred from GPU count alone.
+At priority -5 the walltime-based estimate is at most 3.84 points per initial
+job, or 7.68 for both: `1 * 0.2 * 1 * 0.8 * 24`. These are estimates, not
+confirmed charges; subsequent continuation jobs are additional allocations.
