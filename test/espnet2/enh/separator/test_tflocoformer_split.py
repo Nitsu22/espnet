@@ -240,6 +240,16 @@ class TestTFLocoformerSplit(unittest.TestCase):
             )
             self.assertNotEqual(rejected.returncode, 0)
 
+    def test_shared_recipe_bootstrap(self):
+        process = subprocess.run(
+            ["bash", "./enh.sh", "--help"],
+            cwd=RECIPE,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn("Usage:", process.stdout + process.stderr)
+
 
 if __name__ == "__main__":
     torch.set_num_threads(2)
