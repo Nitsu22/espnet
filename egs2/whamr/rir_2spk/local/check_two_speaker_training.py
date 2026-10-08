@@ -17,6 +17,9 @@ def main():
     parser.add_argument('--data-dir',required=True,type=Path)
     parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--batch-size',type=int,default=4)
+    parser.add_argument('--warmup-steps', type=int, default=0)
+    parser.add_argument('--timed-steps', type=int, default=0)
+    parser.add_argument('--valid-data-dir', type=Path)
     args=parser.parse_args()
     if args.output.exists():
         raise ValueError('Use a new output')
@@ -54,6 +57,24 @@ def main():
     opt.step();opt.zero_grad(set_to_none=True)
     torch.cuda.synchronize();seconds=time.perf_counter()-start
     peak=torch.cuda.max_memory_allocated()
+    # Optional charged GPU profiling. These updates are discarded; training
+    # starts from the unchanged config seed, not this measurement model.
+    if args.warmup_steps < 0 or args.timed_steps < 0:
+        raise ValueError('Use nonnegative step counts')
+    step_seconds = []
+    for step in range(args.warmup_steps + args.timed_steps):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        measured_loss = model(**batch)[0]
+        assert torch.isfinite(measured_loss)
+        measured_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip, error_if_nonfinite=True)
+        opt.step()
+        opt.zero_grad(set_to_none=True)
+        torch.cuda.synchronize()
+        if step >= args.warmup_steps:
+            step_seconds.append(time.perf_counter() - start)
+    peak = max(peak, torch.cuda.max_memory_allocated())
     model.eval()
     with torch.no_grad():
         current=model(**batch)[0]
@@ -64,12 +85,51 @@ def main():
         torch.testing.assert_close(current,permuted,rtol=2e-5,atol=2e-6)
         rir=model.estimate_rir(batch['speech_mix'][0],rir_length=32000)
     assert rir.shape==(2,32000) and torch.isfinite(rir).all()
+    valid_profile = []
+    if args.valid_data_dir is not None:
+        valid_proc = RIRTask.build_preprocess_fn(cfg, train=False)
+        valid_maps = {k: dict(line.split(maxsplit=1) for line in
+                             (args.valid_data_dir / f'{k}.scp').read_text().splitlines()) for k in names}
+        lengths = dict(line.split() for line in
+                       (args.valid_data_dir / 'utt2num_samples').read_text().splitlines())
+        ordered = sorted(lengths, key=lambda uid: int(lengths[uid]))
+        # Five equal-probability bin midpoints approximate validation time.
+        # The maximum-length sample separately checks worst-case memory.
+        with torch.no_grad():
+            for quantile in (.1, .3, .5, .7, .9, 1.0):
+                uid = ordered[min(len(ordered)-1, int(quantile * (len(ordered)-1)))]
+                example = {}
+                for k in names:
+                    example[k], rate = sf.read(valid_maps[k][uid])
+                    assert rate == 16000
+                example = valid_proc(uid, example)
+                observation = {k: torch.tensor(v[None], dtype=torch.float32, device='cuda')
+                               for k, v in example.items()}
+                for k, v in example.items():
+                    observation[k + '_lengths'] = torch.tensor([len(v)], device='cuda')
+                assert observation['speech_mix'].shape[1] == int(lengths[uid])
+                torch.cuda.reset_peak_memory_stats()
+                model(**observation)  # warm up kernels for this sequence length
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                valid_loss = model(**observation)[0]
+                torch.cuda.synchronize()
+                assert torch.isfinite(valid_loss)
+                valid_profile.append(dict(quantile=quantile, uid=uid,
+                                          samples=int(lengths[uid]), seconds=time.perf_counter()-start,
+                                          peak_allocated_bytes=torch.cuda.max_memory_allocated()))
     report=dict(config=str(args.config),config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
                 gpu=torch.cuda.get_device_name(),batch_size=args.batch_size,utterances=ids,
                 parameters=sum(p.numel() for p in model.parameters()),
                 first_update_seconds=seconds,peak_allocated_bytes=peak,gradient_norm=float(norm),
                 losses={k:float(v) for k,v in stats.items()},teacher_permutation_invariant=True,
                 noise_free_mixture_verified=True,rir_shape=list(rir.shape))
+    if step_seconds:
+        report['steady_update_seconds'] = float(np.median(step_seconds))
+        report['timed_step_seconds'] = step_seconds
+    if valid_profile:
+        report['validation_profile'] = valid_profile
+        report['estimated_valid_step_seconds'] = float(np.mean([x['seconds'] for x in valid_profile[:-1]]))
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
 
