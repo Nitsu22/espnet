@@ -315,3 +315,28 @@ recipe; output metadata records the evaluation code commit and copied
 checkpoint SHA256. GPU inference and CPU scoring can also be selected with
 `local/evaluate_two_speaker.py --stage inference|score`; its default `all`
 continues to perform the original combined workflow.
+
+## 8 kHz pooled BiMamba baseline
+
+`run_pooled_bimamba_2spk_nf_8k_sweep_v2.sh` trains the four-pre-block,
+two-post-block model from scratch on noise-free, two-speaker, channel-0 WHAMR.
+Stage 1 builds zero-copy indexes in `dump_nf_2spk_8k_min` from the existing
+8 kHz `data_rir_plus` manifests; it does not regenerate or copy audio.
+The 4-second crop, batch 4, 60 CTF taps, sweep v2 objective and optimizer
+match the 16 kHz baseline. FFT/window/hop are 256/256/128 samples (the same
+32/32/16 ms durations); physical RIR teachers are 16,000 samples (2 seconds).
+The frequency axis is 129 bins, so parameter count is 439,532 rather than
+456,428 at 16 kHz. This is a sampling-rate comparison, not an exact replication
+of DAMSEP's architecture or training settings.
+
+```bash
+bash run_pooled_bimamba_2spk_nf_8k_sweep_v2.sh --stage 1 --stop_stage 1
+python local/check_two_speaker_training.py \
+  --config conf/tuning/train_pooled_bimamba_2spk_nf_8k_sweep_v2.yaml \
+  --data-dir dump_nf_2spk_8k_min/raw/tr_rir_2spk_nf_min_8k \
+  --output exp/bimamba_8k_gpu_check.json
+bash run_pooled_bimamba_2spk_nf_8k_sweep_v2.sh --stage 5 --stop_stage 6
+```
+
+Use an available CUDA GPU and a persistent session, with a writable
+`NUMBA_CACHE_DIR`. Check the GPU smoke result before starting training.

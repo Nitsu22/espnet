@@ -37,7 +37,7 @@ def main():
     for uid in ids:
         data={}
         for k in names:
-            data[k],sr=sf.read(maps[k][uid]);assert sr==16000
+            data[k],sr=sf.read(maps[k][uid]);assert sr==cfg.sample_rate
         clean_sum=sum(sf.read(m[uid])[0] for m in reverb_maps)
         assert np.max(np.abs(clean_sum-data['speech_mix']))<2e-6, 'Input must be noise-free mixture'
         examples.append(proc(uid,data))
@@ -47,7 +47,7 @@ def main():
         assert len(set(lengths))==1
         batch[k]=torch.tensor(np.stack([e[k] for e in examples]),dtype=torch.float32,device='cuda')
         batch[k+'_lengths']=torch.tensor(lengths,device='cuda')
-    assert batch['speech_mix'].shape[-1]==64000
+    assert batch['speech_mix'].shape[-1]==cfg.preprocessor_conf['speech_segment']
     opt=torch.optim.AdamW(model.parameters(),**cfg.optim_conf)
     torch.cuda.reset_peak_memory_stats();torch.cuda.synchronize();start=time.perf_counter()
     loss,stats,_=model(**batch)
@@ -83,8 +83,8 @@ def main():
             swapped[prefix+'1'],swapped[prefix+'2']=batch[prefix+'2'],batch[prefix+'1']
         permuted=model(**swapped)[0]
         torch.testing.assert_close(current,permuted,rtol=2e-5,atol=2e-6)
-        rir=model.estimate_rir(batch['speech_mix'][0],rir_length=32000)
-    assert rir.shape==(2,32000) and torch.isfinite(rir).all()
+        rir=model.estimate_rir(batch['speech_mix'][0],rir_length=cfg.preprocessor_conf['rir_length'])
+    assert rir.shape==(2,cfg.preprocessor_conf['rir_length']) and torch.isfinite(rir).all()
     valid_profile = []
     if args.valid_data_dir is not None:
         valid_proc = RIRTask.build_preprocess_fn(cfg, train=False)
@@ -101,7 +101,7 @@ def main():
                 example = {}
                 for k in names:
                     example[k], rate = sf.read(valid_maps[k][uid])
-                    assert rate == 16000
+                    assert rate == cfg.sample_rate
                 example = valid_proc(uid, example)
                 observation = {k: torch.tensor(v[None], dtype=torch.float32, device='cuda')
                                for k, v in example.items()}

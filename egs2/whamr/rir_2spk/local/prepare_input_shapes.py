@@ -18,11 +18,14 @@ def main():
     assert config['force_single_channel'] is True
     assert config['preprocessor_conf']['force_single_channel'] is True
     saved=json.loads((args.dump/'preparation.json').read_text())
-    assert saved['spec']['num_spk']==2 and saved['spec']['sample_rate']=='16k'
+    sample_rate = saved['spec']['sample_rate']
+    assert sample_rate in ('8k', '16k')
+    assert config['sample_rate'] == config['model_conf']['sr'] == int(sample_rate.replace('k', '000'))
+    assert saved['spec']['num_spk']==2
     assert saved['spec']['length']=='min' and saved['spec']['noise'] is False
     report={}
     for split,mode in [('tr','train'),('cv','valid')]:
-        folder=Path('raw')/f'{split}_rir_2spk_nf_min_16k'
+        folder=Path('raw')/f'{split}_rir_2spk_nf_min_{sample_rate}'
         for name in ('utt2num_samples','wav.scp'):
             path=folder/name
             actual=hashlib.sha256((args.dump/path).read_bytes()).hexdigest()
