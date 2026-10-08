@@ -104,6 +104,22 @@ def test_scoring_rejects_missing_predictions_and_changed_checkpoint():
             invoke(experiment, data, output, '--stage', 'score')
 
 
+def test_auxiliary_checkpoint_selection_and_provenance():
+    with tempfile.TemporaryDirectory() as temporary:
+        experiment, data, output, audio = fixture(Path(temporary))
+        name = 'valid.loss_sweep.best.pth'
+        (experiment / name).write_bytes(b'sweep-best-fixture')
+        with patch.object(EVALUATE.subprocess, 'run', side_effect=fake_inference(audio)):
+            invoke(experiment, data, output, '--stage', 'inference', '--checkpoint', name)
+        assert (output / 'valid.loss.best.pth').read_bytes() == b'sweep-best-fixture'
+        assert json.loads((output / 'metadata.json').read_text())['checkpoint'] == name
+        with unittest.TestCase().assertRaisesRegex(ValueError, 'checkpoint'):
+            invoke(experiment, data, output, '--stage', 'score')
+        with patch.object(EVALUATE.subprocess, 'run', wraps=REAL_RUN):
+            invoke(experiment, data, output, '--stage', 'score', '--checkpoint', name)
+        assert (output / 'complete.json').exists()
+
+
 if __name__ == '__main__':
     suite = unittest.TestSuite(unittest.FunctionTestCase(value)
                                for name, value in list(globals().items()) if name.startswith('test_'))

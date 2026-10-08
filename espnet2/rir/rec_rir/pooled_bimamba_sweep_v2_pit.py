@@ -1,4 +1,4 @@
-"""New predictor with the unchanged TF-Locoformer Sweep v2 PIT objective/PIM."""
+"""Pooled predictor with shared Sweep v2 PIT/PIM and optional DRR supervision."""
 from espnet2.rir.rec_rir.pooled_bimamba import PooledBiMambaCTFPredictor
 from espnet2.rir.rec_rir.tflocoformer_sweep_v2_pit import ESPnetTFLocoformerSweepV2PITModel
 

@@ -121,6 +121,67 @@ config values match the original pooled BiMamba Sweep v2 run, including seed,
 teacher definition, PIT, padding behavior, batching and optimization. Each
 uses its own experiment/stats directory and trains from scratch.
 
+## Pooled BiMamba Sweep v2 + DRR
+
+`run_pooled_bimamba_2spk_nf_16k_sweep_v2_drr.sh` adds a DRR objective to the
+full four-pre-block/two-post-block predictor. The network, parameter count,
+input, teacher preprocessing, full-tail Sweep RIMag loss and ordinary-sweep
+PIM inference remain the same. No speech or additional prediction head is
+introduced. The shared Sweep v2 PIT implementation also accepts the optional
+DRR settings for TF-Locoformer; their default weight is zero, preserving the
+existing objective and checkpoint state dictionary.
+
+For each predicted slot/reference pair, the predicted CTF filters that
+reference's **direct sweep**. Differentiable iSTFT and the **original sweep's**
+inverse then restore the clean-to-reverb basis for the auxiliary measurement.
+The reference `STFT(sweep * rir_ref)` passes through the identical reconstruction
+and inverse, avoiding disagreement caused solely by the finite-band sweep
+measurement. The known inverse gain and delay are calibrated once; predicted
+RIRs are not peak-aligned, peak-normalized or fitted to the reference.
+
+DRR is `10 log10(E_direct / E_other)`, with a fixed inclusive +/-2.5 ms window
+around the physical reference RIR's absolute peak. The same reference-defined
+window is applied to both reconstructed responses; all samples outside it,
+including pre-peak samples, form the denominator. Both energies use a small
+total-energy-relative floor (1e-8), plus a float32 stability floor for silence.
+This peak convention matches the evaluation's reference convention; it is not
+an independently annotated direct-arrival time. The RIR measurement window is
+32000 samples (2 seconds), as in evaluation.
+
+One utterance-level PIT assignment minimizes the speaker-averaged combined
+cost `loss_sweep + 0.1 * SmoothL1(DRR_pred - DRR_target)`, with a 1 dB Huber
+transition. All reported terms use this SAME assignment. `loss_drr` is the
+unweighted SmoothL1 term, and `drr_mae_db` measures this matched training
+measurement, not the ordinary-PIM held-out evaluation metric. The weight 0.1
+is an initial experimental choice, not a tuned or demonstrated improvement.
+Early stopping and best checkpoint selection use `valid.loss_sweep`, keeping
+the primary Sweep criterion; combined loss values should not be compared
+numerically to Sweep-only runs.
+
+The auxiliary clean-to-reverb reconstruction uses the known direct RIR only
+when computing the loss. The network still receives only the mixture, and
+ordinary PIM inference still returns a direct-to-reverb transfer without
+restoring that direct path. This existing train/evaluation basis limitation
+is retained for comparison with the baseline; the auxiliary measurement does
+not remove it. Any improvement must be checked on the same WHAMR/BUT test sets.
+
+After training, evaluate the primary-component checkpoint with:
+
+```bash
+python local/evaluate_two_speaker.py \
+    --experiment exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_drr \
+    --checkpoint valid.loss_sweep.best.pth \
+    --data dump_nf_2spk_16k_min/raw/tt_rir_2spk_nf_min_16k \
+    --output exp/pooled_bimamba_sweep_drr_whamr
+```
+
+Scoring in a separate stage must use the same `--checkpoint` value. Inference
+and score alignment/normalization/PIT are otherwise unchanged. Unit tests in
+`test/espnet2/rir/rec_rir/test_sweep_v2_drr_pit.py` check the energy definition,
+gain/polarity invariance, silent-input gradients, matched reconstruction of a
+non-impulse direct path, DRR-only CTF gradients, zero-weight compatibility and
+shared assignment across the two losses.
+
 ## Portable dumps on TSUBAME
 
 `local/portable_rir_dump.py prepare` bundles every indexed WAV as immutable,

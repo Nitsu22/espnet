@@ -22,6 +22,8 @@ def read_scp(path):
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("--experiment", type=Path, required=True)
+    parser.add_argument("--checkpoint", default="valid.loss.best.pth",
+                        help="Checkpoint filename within the experiment directory")
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
@@ -30,6 +32,8 @@ def main():
     parser.add_argument("--also_polarity_aligned", action="store_true",
                         help="Additionally save polarity-aligned scores for BUT comparisons")
     args = parser.parse_args()
+    if Path(args.checkpoint).name != args.checkpoint:
+        raise ValueError("Checkpoint must be a filename within the experiment")
     recipe = Path(__file__).resolve().parents[1]
     repo = recipe.parents[2]
     experiment, data, output = (p.resolve() for p in (args.experiment, args.data, args.output))
@@ -42,13 +46,15 @@ def main():
         raise ValueError("Empty test set")
     if args.stage != "score":
         output.mkdir(parents=True, exist_ok=False)
-        for name in ("config.yaml", "valid.loss.best.pth"):
-            shutil.copy2(experiment / name, output / name)
+        shutil.copy2(experiment / "config.yaml", output / "config.yaml")
+        # Keep the internal inference filename stable while selecting the
+        # same primary validation component for auxiliary-loss experiments.
+        shutil.copy2(experiment / args.checkpoint, output / "valid.loss.best.pth")
         (output / "wav.scp").write_text("".join(f"{uid} {wavs[uid]}\n" for uid in ids))
         (output / "reference.scp").write_text("".join(
             f"{uid} {refs[0][uid]} {refs[1][uid]}\n" for uid in ids))
     metadata = dict(experiment=str(experiment), data=str(data), count=len(ids),
-                    checkpoint="valid.loss.best.pth", sample_rate=16000, rir_length=32000,
+                    checkpoint=args.checkpoint, sample_rate=16000, rir_length=32000,
                     input="full utterance, channel 0", inference="ordinary sweep PIM",
                     output_subtype="FLOAT", align="peak", scale_mode="peak",
                     pit_metric="rmse", reference="physical clean-to-reverb RIR",
@@ -58,7 +64,7 @@ def main():
         (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     else:
         saved = json.loads((output / "metadata.json").read_text())
-        for key in ("experiment", "data", "count", "checkpoint_sha256"):
+        for key in ("experiment", "data", "count", "checkpoint", "checkpoint_sha256"):
             if saved[key] != metadata[key]:
                 raise ValueError(f"Scoring metadata differs: {key}")
         marker = json.loads((output / "inference_complete.json").read_text())
