@@ -13,6 +13,8 @@ conda activate tf-locoformer
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1
 export PYTHONPATH="$(cd ../../.. && pwd)${PYTHONPATH:+:${PYTHONPATH}}"
 batch_size=${KOUDAISAI_BATCH_SIZE:-4}
+max_epoch=${KOUDAISAI_MAX_EPOCH:-50}
+test "$max_epoch" -gt 0
 test "$batch_size" -gt 0
 test "$((batch_size % 4))" -eq 0
 for split in train valid; do
@@ -23,4 +25,4 @@ python -m torch.distributed.run --standalone --nproc_per_node=4 \
     local/check_tfgridnet_koudaisai.py --ddp --batch-size-per-gpu "$((batch_size / 4))" \
     > exp_tfgridnet_koudaisai_1ch/smoke_ddp.log 2>&1
 bash run_tfgridnet_koudaisai_1ch.sh --stage 6 --stop_stage 6 \
-    --enh_args "--batch_size ${batch_size}"
+    --enh_args "--batch_size ${batch_size} --max_epoch ${max_epoch}"

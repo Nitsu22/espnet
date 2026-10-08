@@ -9,7 +9,7 @@
 set -euo pipefail
 exp_dir=exp_tfgridnet_koudaisai_1ch/tfgridnet_2block_1ch
 test -s "${exp_dir}/checkpoint.pth"
-# Preserve the preceding batch-4 run before ESPnet rewrites config and logs.
+# Preserve the preceding run before ESPnet rewrites config and logs.
 archive_dir="${exp_dir}/before_batch16_${JOB_ID}"
 mkdir -p "$archive_dir"
 cp -p "${exp_dir}/checkpoint.pth" "${exp_dir}/config.yaml" "${exp_dir}/train.log" "$archive_dir/"
