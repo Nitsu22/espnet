@@ -200,3 +200,33 @@ bash run_pooled_bimamba_2spk_nf_16k_sweep_v2_ffn_only.sh \
 Replace `ffn_only` with the other suffixes as needed. Stage 5 checks the dump
 manifest and prepares each configuration's batching shapes; it does not train
 the model. GPU training is a separate Stage 6 submission.
+
+### One-GPU TSUBAME training
+
+Charged profile job 8934455 validated all four scratch updates, paired-teacher
+PIT invariance, two-RIR inference and full-length validation including its
+longest utterance on H100. Median steady updates were 0.1600 s (`ffn_only`),
+0.2087 s (`freq_before_pool`), 0.0867 s (`2blocks`), and 0.0863 s (`bilstm`).
+Training peak allocations ranged from 4.32 to 10.27 GB. The successful Mamba
+wheel is reused from `../damsep_clean/.deps/mamba-cu118-torch21-py310`, matching
+TSUBAME's PyTorch 2.1/cu118 environment.
+
+`local/launch_bimamba_ablations_tsubame.py` runs on midgar in a persistent
+terminal session. It submits `qsub/pooled_bimamba_ablation_train_1gpu.sh` once
+per variant with `gpu_1=1`, priority -5, Stage 6 only, and unchanged training
+configs. It records every job ID, commit, command, time estimate and point
+estimate in the requested state JSON. Estimates use 5109 folded training
+batches and 5000 full-length batch-one validation examples per epoch, with
+25% overhead plus 30 seconds per epoch. The old model's 55-epoch stopping
+point is a runtime assumption, not a prediction of the new models' convergence.
+Walltime sizing includes the configured 100-epoch case and is capped at the
+published 24-hour limit: 24 hours for `ffn_only`/`freq_before_pool`, 20 hours
+for `2blocks`/`bilstm`.
+
+The training script stops two minutes before its hard limit and records a
+restart marker only for timeout status 124 with an existing checkpoint.
+The launcher waits for that job to leave the queue, then resumes the same
+experiment with `--resume true` and sizes the next segment from remaining
+epochs. Optimizer/scheduler and stopping criteria remain intact. Other
+failures are recorded and are not silently retried. Keep the launcher alive
+for these automatic continuations; its state is persisted after each change.
