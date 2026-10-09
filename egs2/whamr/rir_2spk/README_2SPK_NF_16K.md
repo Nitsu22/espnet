@@ -184,6 +184,18 @@ shared assignment across the two losses.
 
 ## Portable dumps on TSUBAME
 
+For Sweep + DRR training, submit
+`qsub -g tga-shinoda qsub/pooled_bimamba_sweep_drr_train_1gpu.sh` from a dedicated
+TSUBAME checkout's `rir_2spk` with a link to the verified portable NF dump.
+The script uses `gpu_1=1`, priority -5 and a 24-hour limit, prepares input-only
+Stage 5 shapes, validates a real batch-four update and full-length validation,
+then runs Stage 6 from scratch with unchanged training settings. Its Mamba
+wheel comes from the existing shared `damsep_clean/.deps` environment.
+Logs and a profile report go to `exp/pooled_bimamba_sweep_drr_jobs/job_<ID>`.
+If the time limit is reached, the script records `resume_ready`; an explicit
+subsequent submission with argument `true` resumes the existing checkpoint.
+Do not update the checkout while its job is queued or running.
+
 `local/portable_rir_dump.py prepare` bundles every indexed WAV as immutable,
 byte-identical audio (local hard links when possible), relocates SCP paths to
 the destination and records SHA256 plus sample rate/channel/frame headers.
