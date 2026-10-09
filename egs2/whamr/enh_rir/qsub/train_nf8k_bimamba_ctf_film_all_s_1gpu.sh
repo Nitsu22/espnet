@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Initial one-hour run; submit after the CPU input preparation job.
+# Default initial one-hour run. For continuation, override h_rt at submission
+# and pass the allocation length in seconds followed by require_checkpoint=true.
 #$ -cwd
 #$ -l gpu_1=1
 #$ -l h_rt=01:00:00
@@ -13,6 +14,14 @@ conda activate tf-locoformer
 module load cuda/11.8.0
 set -euo pipefail
 cd "${SGE_O_WORKDIR:?Submit from enh_rir}"
+allocation_seconds=${1:-3600}
+require_checkpoint=${2:-false}
+[[ ${allocation_seconds} =~ ^[0-9]+$ ]] && (( allocation_seconds >= 600 ))
+case ${require_checkpoint} in
+    true) test -s exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_film_all_seed0/checkpoint.pth ;;
+    false) ;;
+    *) echo 'require_checkpoint must be true or false' >&2; exit 2 ;;
+esac
 shared=/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export PYTHONPATH="${PWD}/../../..:${shared}/egs2/whamr/damsep_clean/.deps/mamba-cu118-torch21-py310${PYTHONPATH:+:${PYTHONPATH}}"
@@ -34,7 +43,7 @@ python local/check_bimamba_conditioning_training.py \
     --output "${logs}/cuda_check.json" > "${logs}/cuda_check.log" 2>&1
 cat "${logs}/cuda_check.log"
 # Probe weights are discarded; Stage 6 initializes the configured seed anew.
-remaining_seconds=$((3600 - SECONDS - 120))
+remaining_seconds=$((allocation_seconds - SECONDS - 120))
 [[ ${remaining_seconds} -gt 300 ]]
 set +e
 timeout --signal=TERM --kill-after=30s "${remaining_seconds}s" \
