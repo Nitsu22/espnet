@@ -13,7 +13,7 @@ from espnet2.rir.rec_rir.pooled_bimamba import PooledBiMambaCTFPredictor
 
 
 class FrozenBiMambaCTF(nn.Module):
-    """The standard 16-kHz Sweep-v2 predictor, without its training/PIM losses.
+    """The standard 8/16-kHz Sweep-v2 predictor, without training/PIM losses.
 
     Each observation is processed at its own length: temporal pooling must not
     see padding from another utterance. The public CTF ordering matches
@@ -22,13 +22,19 @@ class FrozenBiMambaCTF(nn.Module):
     assignment are used to generate the conditioning signal.
     """
 
-    def __init__(self, predictor_conf):
+    def __init__(self, predictor_conf, sample_rate=16000):
         super().__init__()
+        if sample_rate not in (8000, 16000):
+            raise ValueError("BiMamba supports only native 8/16-kHz checkpoints")
+        self.sample_rate = int(sample_rate)
+        self.n_fft = self.sample_rate // 1000 * 32
+        self.num_freqs = self.n_fft // 2 + 1
         self.predictor = PooledBiMambaCTFPredictor(
-            input_dim=257, num_spk=2, ctf_taps=60, **predictor_conf
+            input_dim=self.num_freqs, num_spk=2, ctf_taps=60, **predictor_conf
         )
         self.transforms = RecRIRTransforms(
-            sr=16000, n_fft=512, hop_len=256, win_type="sqrthann", win_len=512
+            sr=self.sample_rate, n_fft=self.n_fft, hop_len=self.n_fft // 2,
+            win_type="sqrthann", win_len=self.n_fft,
         )
         self.register_buffer("source_loaded", torch.tensor(False))
         self.register_buffer("source_sha256", torch.zeros(32, dtype=torch.uint8))
@@ -72,8 +78,8 @@ class FrozenBiMambaCTF(nn.Module):
         outputs = []
         for wave, length in zip(speech, lengths):
             count = int(length.item())
-            if count <= 256 or count > wave.shape[0]:
-                raise ValueError("Invalid length for the pretrained 512-point STFT")
+            if count <= self.n_fft // 2 or count > wave.shape[0]:
+                raise ValueError("Invalid length for the pretrained BiMamba STFT")
             wave = wave[:count].float().unsqueeze(0)
             if not torch.isfinite(wave).all():
                 raise ValueError("Nonfinite BiMamba input")
@@ -81,7 +87,7 @@ class FrozenBiMambaCTF(nn.Module):
             spectrum = self.transforms.stft(wave[:, None], "complex")
             spectrum = spectrum[:, 0].transpose(1, 2).contiguous()
             ctf, _, _ = self.predictor(spectrum)
-            if ctf.shape != (1, 2, 257, 60) or not torch.isfinite(ctf).all():
+            if ctf.shape != (1, 2, self.num_freqs, 60) or not torch.isfinite(ctf).all():
                 raise ValueError("Invalid BiMamba CTF output")
             ctf = ctf.to(torch.complex64).flip(-1)
             outputs.append(torch.view_as_real(ctf).permute(0, 3, 1, 2, 4))
@@ -97,19 +103,29 @@ class ESPnetEnhancementFrozenBiMambaModel(ESPnetEnhancementModel):
         bimamba_checkpoint,
         bimamba_sha256,
         bimamba_predictor_conf,
+        bimamba_sample_rate=16000,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        if self.num_spk != 2 or self.encoder.output_dim != 257:
-            raise ValueError("Frozen BiMamba conditioning requires two speakers/257 bins")
-        if self.encoder.n_fft != 512 or self.encoder.default_fs != 16000:
-            raise ValueError("Use a 16-kHz, 512-point separation STFT")
+        if bimamba_sample_rate not in (8000, 16000):
+            raise ValueError("Use native 8/16-kHz BiMamba")
+        self.bimamba_sample_rate = int(bimamba_sample_rate)
+        n_fft = self.bimamba_sample_rate // 1000 * 32
+        if self.num_spk != 2 or self.encoder.output_dim != n_fft // 2 + 1:
+            raise ValueError("Separation and BiMamba frequency bins must match")
+        # The legacy 8-kHz Baseline leaves encoder.default_fs at 16000 but
+        # supplies 8-kHz waveforms to a fixed 256-point STFT (fs=None). Match
+        # that actual transform; default_fs is only for adaptive USES calls.
+        if self.encoder.n_fft != n_fft:
+            raise ValueError("Match the native-rate, 32-ms separation STFT")
         if len(bimamba_sha256) != 64:
             raise ValueError("A pinned BiMamba SHA256 is required")
         bytes.fromhex(bimamba_sha256)
         self.bimamba_checkpoint = str(bimamba_checkpoint)
         self.bimamba_sha256 = bimamba_sha256
-        self.frozen_ctf = FrozenBiMambaCTF(bimamba_predictor_conf)
+        self.frozen_ctf = FrozenBiMambaCTF(
+            bimamba_predictor_conf, self.bimamba_sample_rate
+        )
 
     def restore_bimamba_source(self):
         """Run AFTER separation-model initialization, so Xavier cannot erase it.
@@ -127,8 +143,10 @@ class ESPnetEnhancementFrozenBiMambaModel(ESPnetEnhancementModel):
             logging.info("BiMamba source absent; a complete model checkpoint is required")
 
     def prepare_conditioning(self, speech, lengths, fs=None):
-        if fs is not None and fs != 16000:
-            raise ValueError("Frozen BiMamba conditioning accepts only 16-kHz audio")
+        if fs is not None and fs != self.bimamba_sample_rate:
+            raise ValueError(
+                f"Frozen BiMamba conditioning requires {self.bimamba_sample_rate // 1000}-kHz audio"
+            )
         if speech.ndim == 3:
             speech = speech[:, :, self.ref_channel]
         return {"rir_ctf": self.frozen_ctf(speech, lengths)}

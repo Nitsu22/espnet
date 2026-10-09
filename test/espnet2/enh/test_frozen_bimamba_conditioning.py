@@ -29,9 +29,10 @@ CONFIG = RECIPE / "conf/tuning/train_enh_tflocoformer_s_nf16k_bimamba_ctf_film_a
 BASELINE = ROOT / "egs2/whamr/enh7_baseline/conf/tuning/train_enh_tflocoformer_s_nf_16k.yaml"
 
 
-def options(small=True):
+def options(small=True, sample_rate=16000):
+    config = RECIPE / f"conf/tuning/train_enh_tflocoformer_s_nf{sample_rate // 1000}k_bimamba_ctf_film_all.yaml"
     args = EnhancementTask.get_parser().parse_args(
-        ["--config", str(CONFIG), "--output_dir", "/tmp/bimamba_conditioning_test"]
+        ["--config", str(config), "--output_dir", "/tmp/bimamba_conditioning_test"]
     )
     args.model_conf = copy.deepcopy(args.model_conf)
     if small:
@@ -57,6 +58,8 @@ class CPUMamba(nn.Module):
 
 
 class ConditioningTests(unittest.TestCase):
+    sample_rate = 16000
+
     def setUp(self):
         torch.set_num_threads(1)
         torch.manual_seed(0)
@@ -66,8 +69,8 @@ class ConditioningTests(unittest.TestCase):
             side_effect=lambda dim, specification: CPUMamba(dim),
         )
         self.patch.start()
-        self.args = options()
-        component = FrozenBiMambaCTF(self.args.model_conf["bimamba_predictor_conf"])
+        self.args = options(sample_rate=self.sample_rate)
+        component = FrozenBiMambaCTF(self.args.model_conf["bimamba_predictor_conf"], self.sample_rate)
         state = {"ctf_predictor." + key: value
                  for key, value in component.predictor.state_dict().items()}
         self.source = Path(self.temp.name) / "source.pth"
@@ -100,7 +103,7 @@ class ConditioningTests(unittest.TestCase):
         lengths = torch.tensor([1024, 768])
         component = self.model.frozen_ctf
         result = component(speech, lengths)
-        self.assertEqual(result.shape, (2, 60, 2, 257, 2))
+        self.assertEqual(result.shape, (2, 60, 2, self.sample_rate // 1000 * 16 + 1, 2))
         self.assertFalse(result.requires_grad)
         changed = speech.clone()
         changed[1, 768:] = 1e5
@@ -173,8 +176,9 @@ class ConditioningTests(unittest.TestCase):
         args.model_conf["bimamba_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
             EnhancementTask.build_model(args)
-        with self.assertRaisesRegex(ValueError, "16-kHz"):
-            self.model.prepare_conditioning(torch.randn(1, 1024), torch.tensor([1024]), 8000)
+        with self.assertRaisesRegex(ValueError, f"{self.sample_rate // 1000}-kHz"):
+            wrong_rate = 8000 if self.sample_rate == 16000 else 16000
+            self.model.prepare_conditioning(torch.randn(1, 1024), torch.tensor([1024]), wrong_rate)
 
     def test_inference_uses_conditioning_for_full_and_segment_inputs(self):
         with mock.patch.object(EnhancementTask, "build_model_from_file",
@@ -183,31 +187,53 @@ class ConditioningTests(unittest.TestCase):
                 inference = SeparateSpeech(segment_size=segment, hop_size=hop)
                 with mock.patch.object(self.model, "prepare_conditioning",
                                        wraps=self.model.prepare_conditioning) as prepare:
-                    waves = inference(torch.randn(1, 1024), fs=16000)
+                    samples = self.sample_rate * 64 // 1000
+                    waves = inference(torch.randn(1, samples), fs=self.sample_rate)
                     self.assertEqual(prepare.call_count, expected_calls)
                     self.assertEqual(len(waves), 2)
-                    self.assertEqual(waves[0].shape, (1, 1024))
+                    self.assertEqual(waves[0].shape, (1, samples))
                     self.assertTrue(all(torch.isfinite(torch.from_numpy(w)).all() for w in waves))
+
+
+class Conditioning8kTests(ConditioningTests):
+    sample_rate = 8000
 
 
 class RealCheckpointAndConfigTests(unittest.TestCase):
     def test_baseline_conditions_match(self):
-        base, new = [yaml.safe_load(path.read_text()) for path in (BASELINE, CONFIG)]
-        for key in base.keys() - {"separator", "model_conf"}:
-            self.assertEqual(base[key], new[key], key)
-        self.assertEqual(base["model_conf"], {"normalize_variance": new["model_conf"]["normalize_variance"]})
+        for rate in (8000, 16000):
+            with self.subTest(sample_rate=rate):
+                tag = f"{rate // 1000}k"
+                paths = (ROOT / f"egs2/whamr/enh7_baseline/conf/tuning/train_enh_tflocoformer_s_nf_{tag}.yaml",
+                         RECIPE / f"conf/tuning/train_enh_tflocoformer_s_nf{tag}_bimamba_ctf_film_all.yaml")
+                base, new = [yaml.safe_load(path.read_text()) for path in paths]
+                for key in base.keys() - {"separator", "model_conf"}:
+                    self.assertEqual(base[key], new[key], key)
+                self.assertEqual(base["model_conf"], {"normalize_variance": new["model_conf"]["normalize_variance"]})
 
     def test_real_checkpoint_strict_load_and_exact_weights(self):
-        args = options(small=False)
-        path = RECIPE / args.model_conf["bimamba_checkpoint"]
+        for rate in (8000, 16000):
+            with self.subTest(sample_rate=rate):
+                args = options(small=False, sample_rate=rate)
+                path = RECIPE / args.model_conf["bimamba_checkpoint"]
+                if not path.is_file():
+                    self.skipTest("Pretrained BiMamba artifact is not present in this checkout")
+                args.model_conf["bimamba_checkpoint"] = str(path)
+                model = EnhancementTask.build_model(args)
+                source = torch.load(path, map_location="cpu")
+                for name, value in model.frozen_ctf.predictor.state_dict().items():
+                    torch.testing.assert_close(value, source["ctf_predictor." + name], rtol=0, atol=0)
+
+    def test_cross_rate_checkpoint_is_rejected(self):
+        args = options(small=False, sample_rate=8000)
+        other = options(small=False, sample_rate=16000)
+        path = RECIPE / other.model_conf["bimamba_checkpoint"]
         if not path.is_file():
-            self.skipTest("Pretrained BiMamba artifact is not present in this checkout")
-        args.model_conf["bimamba_checkpoint"] = str(path)
-        model = EnhancementTask.build_model(args)
-        source = torch.load(path, map_location="cpu")
-        self.assertEqual(sum(p.numel() for p in model.frozen_ctf.parameters()), 456428)
-        for name, value in model.frozen_ctf.predictor.state_dict().items():
-            torch.testing.assert_close(value, source["ctf_predictor." + name], rtol=0, atol=0)
+            self.skipTest("Pretrained 16-kHz artifact is not present")
+        args.model_conf.update(bimamba_checkpoint=str(path),
+                               bimamba_sha256=other.model_conf["bimamba_sha256"])
+        with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+            EnhancementTask.build_model(args)
 
 
 if __name__ == "__main__":

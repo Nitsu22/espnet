@@ -29,6 +29,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dump", type=Path, default=Path("dump_nf_2spk_16k_min"))
     parser.add_argument("--config", default="conf/tuning/train_enh_tflocoformer_s_nf16k_bimamba_ctf_film_all.yaml")
+    parser.add_argument("--input-style", choices=("native", "baseline"), default="native")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
@@ -36,6 +37,11 @@ def main():
     options = EnhancementTask.get_parser().parse_args(
         ["--config", args.config, "--output_dir", str(args.output.parent), "--ngpu", "1"]
     )
+    sample_rate = options.model_conf.get("bimamba_sample_rate", 16000)
+    segment = sample_rate * 4
+    suffix = (f"rir_2spk_nf_min_{sample_rate // 1000}k" if args.input_style == "native"
+              else f"mix_clean_reverb_min_{sample_rate // 1000}k")
+    ref_prefix = "speech_direct" if args.input_style == "native" else "spk"
     np.random.seed(options.seed)
     torch.manual_seed(options.seed)
     torch.backends.cudnn.deterministic = True
@@ -44,9 +50,9 @@ def main():
     before = digest_parameters(model.frozen_ctf)
 
     def read_split(split):
-        folder = args.dump / "raw" / f"{split}_rir_2spk_nf_min_16k"
+        folder = args.dump / "raw" / f"{split}_{suffix}"
         maps = [read_scp(folder / name) for name in (
-            "wav.scp", "speech_direct1.scp", "speech_direct2.scp")]
+            "wav.scp", f"{ref_prefix}1.scp", f"{ref_prefix}2.scp")]
         return maps, read_scp(folder / "utt2num_samples")
 
     def batch(maps, ids, training):
@@ -56,19 +62,19 @@ def main():
             values = {}
             for name, mapping in zip(("speech_mix", "speech_ref1", "speech_ref2"), maps):
                 wave, sr = sf.read(mapping[uid], dtype="float32", always_2d=True)
-                if sr != 16000:
-                    raise ValueError("Input is not native 16 kHz")
+                if sr != sample_rate:
+                    raise ValueError("Input and frozen BiMamba sample rates differ")
                 values[name] = wave
             rows.append((uid, preprocess(uid, values)))
         _, data = EnhancementTask.build_collate_fn(options, training)(rows)
         return {name: value.cuda() for name, value in data.items()}
 
     maps, lengths = read_split("tr")
-    ids = [uid for uid, length in lengths.items() if int(length) >= 64000][:4]
+    ids = [uid for uid, length in lengths.items() if int(length) >= segment][:4]
     if len(ids) != 4:
         raise ValueError("Cannot find four four-second training observations")
     train = batch(maps, ids, True)
-    if train["speech_mix"].shape != (4, 64000):
+    if train["speech_mix"].shape != (4, segment):
         raise ValueError("Expected physical batch four and aligned four-second crops")
     optimizer = torch.optim.AdamW(model.parameters(), **options.optim_conf)
     torch.cuda.reset_peak_memory_stats()
@@ -96,6 +102,7 @@ def main():
         trainable_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad),
         frozen_weights_unchanged=True,
         source_sha256=model.bimamba_sha256,
+        sample_rate=sample_rate,
     )
     model.zero_grad(set_to_none=True)
     del optimizer, loss, train
