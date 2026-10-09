@@ -352,3 +352,51 @@ bash run_pooled_bimamba_2spk_nf_8k_sweep_v2.sh --stage 5 --stop_stage 6
 
 Use an available CUDA GPU and a persistent session, with a writable
 `NUMBA_CACHE_DIR`. Check the GPU smoke result before starting training.
+
+## Independent architecture ablations (16 kHz)
+
+The following four variants use the original four-pre/two-post-block baseline,
+with exactly one requested architecture change. All share seed 0, batch 4,
+4-second training crops, full-utterance validation with batch 1, 60 CTF taps,
+SweepCTF v2 PIT, optimizer/scheduler, checkpoint selection and padding behavior.
+
+| Suffix | Change | Parameters | Tensor GPU |
+| --- | --- | ---: | ---: |
+| `time2_freq4` | Time blocks at stages 1 and 3; all four lightweight frequency blocks | 309,100 | 4 |
+| `time4_freq2` | All four time blocks; lightweight frequency blocks at stages 1 and 3 | 433,898 | 5 |
+| `scalar_pool` | Speaker/frequency-specific scalar temporal weights shared across feature channels | 452,270 | 6 |
+| `local_freq_only` | Remove the pre-pooling global frequency MLP branch; retain local depthwise convolution | 413,416 | 7 |
+
+The baseline has 456,428 parameters. Depth selectors are zero-based `[0, 2]`
+in YAML: the skipped branches are parameter-free identities in a fixed
+four-stage schedule, preserving the order and depth of the other branch.
+Thus the earlier `pre_layers: 2` experiment (both branches reduced) and the
+new two experiments separate time and frequency contributions. The scalar
+Pooling variant still has separate distributions for the two speaker slots;
+it shares only the channel axis, not the speaker or frequency axes.
+The global-MLP removal does not remove post-pooling frequency attention.
+
+Each suffix has a YAML and `run_pooled_bimamba_2spk_nf_16k_sweep_v2_SUFFIX.sh`.
+An isolated checkout may reuse the original recipe's prepared dump through an
+absolute symlink. No audio copies are needed. On a verified free lab GPU:
+
+```bash
+bash local/run_pooled_bimamba_architecture_lab.sh \
+  time2_freq4 4 /absolute/path/to/original/egs2/whamr/rir_2spk
+```
+
+Use a separate persistent session/log for each variant. The launcher validates
+input-only shapes and then performs an actual CUDA update, checks every active
+parameter's finite gradient, verifies teacher-permutation invariance, decodes
+two RIRs and measures full-length validation (including the longest example).
+It starts scratch training only after those checks pass. No dependency or
+host configuration is modified. The launcher refuses an existing run marker
+or checkpoint; it does not silently restart an experiment.
+
+Models and stats are saved in the supplied result recipe's `exp/rir_train_...`
+and `exp/rir_stats_...` directories. Provenance, GPU checks and exit codes are
+under `exp/architecture_ablation_training_20261009/SUFFIX/`. A zero exit code
+plus the completed training log/checkpoint is required to claim completion.
+The baseline regression covers identical state keys, seeded initial weights
+and forward outputs with default settings. CPU stand-ins verify topology and
+objective wiring; actual Mamba execution is checked separately on the lab GPU.

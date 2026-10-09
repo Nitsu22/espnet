@@ -49,24 +49,30 @@ class TimeBiLSTM(nn.Module):
 
 
 class LightFrequencyBlock(nn.Module):
-    def __init__(self, dim, freqs, bottleneck, rank, kernel, eps):
+    def __init__(self, dim, freqs, bottleneck, rank, kernel, eps, global_mlp=True):
         super().__init__()
+        if not isinstance(global_mlp, bool):
+            raise ValueError("global_mlp must be a boolean")
+        self.global_mlp = global_mlp
         self.local_norm = nn.LayerNorm(dim, eps=eps)
         self.local = nn.Conv1d(dim, dim, kernel, padding=kernel // 2, groups=dim)
-        self.global_norm = nn.LayerNorm(dim, eps=eps)
-        self.compress = nn.Linear(dim, bottleneck)
-        # One frequency MLP shared by all compressed feature channels.
-        self.frequency_mlp = nn.Sequential(nn.Linear(freqs, rank), nn.GELU(), nn.Linear(rank, freqs))
-        self.expand = nn.Linear(bottleneck, dim)
+        if global_mlp:
+            self.global_norm = nn.LayerNorm(dim, eps=eps)
+            self.compress = nn.Linear(dim, bottleneck)
+            # One frequency MLP shared by all compressed feature channels.
+            self.frequency_mlp = nn.Sequential(nn.Linear(freqs, rank), nn.GELU(), nn.Linear(rank, freqs))
+            self.expand = nn.Linear(bottleneck, dim)
 
     def forward(self, x):
         batch, frames, freqs, dim = x.shape
         sequence = x.reshape(batch * frames, freqs, dim)
         update = self.local(self.local_norm(sequence).transpose(1, 2)).transpose(1, 2)
         sequence = sequence + F.gelu(update)
-        update = self.compress(self.global_norm(sequence)).transpose(1, 2)
-        update = self.frequency_mlp(update).transpose(1, 2)
-        return (sequence + self.expand(update)).reshape(batch, frames, freqs, dim)
+        if self.global_mlp:
+            update = self.compress(self.global_norm(sequence)).transpose(1, 2)
+            update = self.frequency_mlp(update).transpose(1, 2)
+            sequence = sequence + self.expand(update)
+        return sequence.reshape(batch, frames, freqs, dim)
 
 
 class FrequencyAttentionBlock(nn.Module):
@@ -109,7 +115,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  pooling_hidden=32, n_heads=4, ffn_dim=128,
                  head_dim=128, slot_embedding_std=0.02, eps=1e-5,
                  post_attention=True, frequency_refinement_position="after_pool",
-                 time_module="bimamba"):
+                 time_module="bimamba", time_block_indices=None,
+                 frequency_block_indices=None, pooling_channelwise=True,
+                 pre_frequency_global=True):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -124,20 +132,32 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("frequency_refinement_position must be 'after_pool' or 'before_pool'")
         if time_module not in ("bimamba", "bilstm"):
             raise ValueError("time_module must be 'bimamba' or 'bilstm'")
+        if not isinstance(pooling_channelwise, bool):
+            raise ValueError("pooling_channelwise must be a boolean")
+        if not isinstance(pre_frequency_global, bool):
+            raise ValueError("pre_frequency_global must be a boolean")
+        time_indices = self._active_indices(time_block_indices, pre_layers, "time_block_indices")
+        frequency_indices = self._active_indices(frequency_block_indices, pre_layers, "frequency_block_indices")
         self.input_dim = input_dim
         self._num_spk = num_spk
         self.ctf_taps = ctf_taps
         self.frequency_refinement_position = frequency_refinement_position
+        self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
-            self.time_blocks = nn.ModuleList(TimeBiMamba(emb_dim, d_state, d_conv, eps) for _ in range(pre_layers))
+            self.time_blocks = nn.ModuleList(
+                TimeBiMamba(emb_dim, d_state, d_conv, eps) if i in time_indices else nn.Identity()
+                for i in range(pre_layers))
         else:
-            self.time_blocks = nn.ModuleList(TimeBiLSTM(emb_dim, eps) for _ in range(pre_layers))
+            self.time_blocks = nn.ModuleList(
+                TimeBiLSTM(emb_dim, eps) if i in time_indices else nn.Identity()
+                for i in range(pre_layers))
         self.frequency_blocks = nn.ModuleList(
-            LightFrequencyBlock(emb_dim, input_dim, freq_bottleneck, freq_rank, local_kernel, eps)
-            for _ in range(pre_layers))
+            LightFrequencyBlock(emb_dim, input_dim, freq_bottleneck, freq_rank, local_kernel, eps,
+                                global_mlp=pre_frequency_global) if i in frequency_indices else nn.Identity()
+            for i in range(pre_layers))
         self.pooling = nn.Sequential(nn.Linear(emb_dim, pooling_hidden), nn.GELU(),
-                                     nn.Linear(pooling_hidden, num_spk * emb_dim))
+                                     nn.Linear(pooling_hidden, num_spk * self.pooling_channels))
         self.slot_embeddings = nn.Parameter(torch.empty(num_spk, emb_dim))
         nn.init.normal_(self.slot_embeddings, std=slot_embedding_std)
         self.post_blocks = nn.ModuleList(
@@ -145,6 +165,17 @@ class PooledBiMambaCTFPredictor(nn.Module):
             for _ in range(post_layers))
         self.head = nn.Sequential(nn.LayerNorm(emb_dim, eps=eps), nn.Linear(emb_dim, head_dim),
                                   nn.SiLU(), nn.Linear(head_dim, 2 * ctf_taps))
+
+    @staticmethod
+    def _active_indices(indices, layers, name):
+        if indices is None:
+            return tuple(range(layers))
+        if not isinstance(indices, (list, tuple)) or any(
+                isinstance(i, bool) or not isinstance(i, int) for i in indices):
+            raise ValueError(f"{name} must be a list of integer stage indices")
+        if len(set(indices)) != len(indices) or any(i < 0 or i >= layers for i in indices):
+            raise ValueError(f"{name} must contain unique indices in [0, pre_layers)")
+        return tuple(indices)
 
     def forward(self, input, ilens=None, additional=None):
         if input.ndim != 3 or not torch.is_complex(input) or input.shape[-1] != self.input_dim:
@@ -158,7 +189,7 @@ class PooledBiMambaCTFPredictor(nn.Module):
             for block in self.post_blocks:
                 sequence = block(sequence)
             x = sequence.reshape(batch, frames, freqs, dim)
-        scores = self.pooling(x).reshape(batch, frames, freqs, self.num_spk, dim)
+        scores = self.pooling(x).reshape(batch, frames, freqs, self.num_spk, self.pooling_channels)
         # Match baseline padding behavior: softmax over the full batch time axis.
         weights = scores.softmax(dim=1)
         pooled = (weights * x.unsqueeze(3)).sum(1).permute(0, 2, 1, 3)

@@ -279,6 +279,10 @@ def test_ablation_configs_change_only_requested_architecture():
         "freq_before_pool": {"frequency_refinement_position": "before_pool"},
         "2blocks": {"pre_layers": 2},
         "bilstm": {"time_module": "bilstm"},
+        "time2_freq4": {"time_block_indices": [0, 2]},
+        "time4_freq2": {"frequency_block_indices": [0, 2]},
+        "scalar_pool": {"pooling_channelwise": False},
+        "local_freq_only": {"pre_frequency_global": False},
     }
     for suffix, options in changes.items():
         actual = yaml.safe_load((configs / f"{prefix}_{suffix}.yaml").read_text())
@@ -293,9 +297,129 @@ def test_invalid_architecture_selectors_fail_early():
         {"post_attention": 0},
         {"frequency_refinement_position": "after_time"},
         {"time_module": "lstm"},
+        {"time_block_indices": [1]},
+        {"time_block_indices": [0, 0]},
+        {"frequency_block_indices": [-1]},
+        {"frequency_block_indices": [True]},
+        {"time_block_indices": "0"},
+        {"pooling_channelwise": "false"},
+        {"pre_frequency_global": 0},
     ):
         with unittest.TestCase().assertRaises(ValueError):
             predictor(**options)
+
+
+def test_independent_depth_removal_preserves_other_stages_and_order():
+    """Two-stage masks remove only the requested branch, never zip-truncate."""
+    with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", cpu_mamba_standin):
+        full = predictor(pre_layers=4)
+        time2 = predictor(pre_layers=4, time_block_indices=[0, 2])
+        freq2 = predictor(pre_layers=4, frequency_block_indices=[0, 2])
+    complete = dict(full.named_parameters())
+    for model, removed_branch in ((time2, "time_blocks"), (freq2, "frequency_blocks")):
+        active = dict(model.named_parameters())
+        removed = complete.keys() - active.keys()
+        assert removed and all(name.startswith((f"{removed_branch}.1.", f"{removed_branch}.3."))
+                               for name in removed), removed
+        assert all(name in complete and value.shape == complete[name].shape
+                   for name, value in active.items())
+        assert len(model.time_blocks) == len(model.frequency_blocks) == 4
+        events, handles = [], []
+        for branch in ("time_blocks", "frequency_blocks"):
+            for index, block in enumerate(getattr(model, branch)):
+                handles.append(block.register_forward_pre_hook(
+                    lambda module, inputs, label=(branch, index): events.append(label)))
+        result = model(torch.randn(2, 7, 33, dtype=torch.complex64))[0]
+        for handle in handles:
+            handle.remove()
+        assert events == [(branch, i) for i in range(4)
+                          for branch in ("time_blocks", "frequency_blocks")]
+        result.abs().square().mean().backward()
+        assert all(p.grad is not None and torch.isfinite(p.grad).all()
+                   for p in model.parameters() if p.requires_grad)
+        for i in (1, 3):
+            assert isinstance(getattr(model, removed_branch)[i], nn.Identity)
+
+
+def test_scalar_pooling_keeps_speaker_specific_weights_and_broadcasts_channels():
+    """Only the channel dimension shares a time distribution, not speakers."""
+    with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", cpu_mamba_standin):
+        model = predictor(pooling_channelwise=False, post_layers=0).eval()
+    captured = {}
+    pool_handle = model.pooling.register_forward_hook(
+        lambda module, inputs, output: captured.update(x=inputs[0].detach(), scores=output.detach()))
+    head_handle = model.head.register_forward_pre_hook(
+        lambda module, inputs: captured.update(pooled=inputs[0].detach()))
+    output = model(torch.randn(2, 7, 33, dtype=torch.complex64))[0]
+    pool_handle.remove(); head_handle.remove()
+    x = captured["x"]
+    scores = captured["scores"].reshape(2, 7, 33, 2, 1)
+    weights = scores.softmax(1)
+    torch.testing.assert_close(weights.sum(1), torch.ones(2, 33, 2, 1))
+    assert not torch.allclose(weights[..., 0, :], weights[..., 1, :])
+    expected = (weights * x.unsqueeze(3)).sum(1).permute(0, 2, 1, 3)
+    expected = (expected + model.slot_embeddings[None, :, None]).reshape(4, 33, 8)
+    torch.testing.assert_close(captured["pooled"], expected)
+    output.abs().square().mean().backward()
+    assert model.pooling[-1].out_features == 2
+    assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in model.parameters() if p.requires_grad)
+
+
+def test_global_frequency_removal_keeps_local_parameters_and_gradient():
+    with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", cpu_mamba_standin):
+        full = predictor(pre_layers=4)
+        local = predictor(pre_layers=4, pre_frequency_global=False)
+    full_parameters, local_parameters = dict(full.named_parameters()), dict(local.named_parameters())
+    removed = full_parameters.keys() - local_parameters.keys()
+    assert removed and all(name.startswith("frequency_blocks.") and
+                           name.split(".")[2] in {"global_norm", "compress", "frequency_mlp", "expand"}
+                           for name in removed)
+    assert all(name in full_parameters and p.shape == full_parameters[name].shape
+               for name, p in local_parameters.items())
+    result = local(torch.randn(2, 7, 33, dtype=torch.complex64))[0]
+    result.abs().square().mean().backward()
+    for block in local.frequency_blocks:
+        assert not hasattr(block, "frequency_mlp")
+        assert block.local.weight.grad.abs().sum() > 0
+    assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in local.parameters() if p.requires_grad)
+
+
+def test_four_architecture_variants_full_sweep_pit_and_checkpoint():
+    """All active branches train through the shared objective and decode two RIRs."""
+    variants = ({"time_block_indices": [0, 2]}, {"frequency_block_indices": [0, 2]},
+                {"pooling_channelwise": False}, {"pre_frequency_global": False})
+    batch = dict(speech_mix=torch.randn(2, 256), speech_mix_lengths=torch.tensor([256, 192]))
+    batch["speech_mix"][1, 192:] = 0
+    for speaker in (1, 2):
+        direct = torch.zeros(2, 256)
+        direct[:, 20 + speaker] = speaker
+        reverb = direct.clone(); reverb[:, 130 + speaker] = .3 * speaker
+        batch[f"rir_direct{speaker}"] = direct
+        batch[f"rir_ref{speaker}"] = reverb
+    for options in variants:
+        with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", cpu_mamba_standin):
+            model = sweep_model(pre_layers=4, **options).train()
+        loss, stats, _ = model(**batch)
+        assert torch.isfinite(loss)
+        torch.testing.assert_close(loss.detach(), stats["loss_sweep"])
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            if parameter.requires_grad:
+                assert parameter.grad is not None and torch.isfinite(parameter.grad).all(), name
+        model.eval()
+        swapped = dict(batch)
+        for prefix in ("rir_direct", "rir_ref"):
+            swapped[prefix + "1"], swapped[prefix + "2"] = batch[prefix + "2"], batch[prefix + "1"]
+        with torch.no_grad():
+            torch.testing.assert_close(model(**batch)[0], model(**swapped)[0])
+            expected = model.estimate_ctf(batch["speech_mix"][0])
+            with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", cpu_mamba_standin):
+                clone = sweep_model(pre_layers=4, **options).eval()
+            buffer = io.BytesIO(); torch.save(model.state_dict(), buffer); buffer.seek(0)
+            clone.load_state_dict(torch.load(buffer), strict=True)
+            torch.testing.assert_close(expected, clone.estimate_ctf(batch["speech_mix"][0]))
+            rirs = clone.estimate_rir(batch["speech_mix"][0], rir_length=256)
+            assert rirs.shape == (2, 256) and torch.isfinite(rirs).all()
 
 
 if __name__ == "__main__":

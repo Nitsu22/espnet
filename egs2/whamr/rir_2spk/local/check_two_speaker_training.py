@@ -53,6 +53,10 @@ def main():
     loss,stats,_=model(**batch)
     assert torch.isfinite(loss).all()
     loss.backward()
+    for name, parameter in model.named_parameters():
+        if parameter.requires_grad:
+            assert parameter.grad is not None, name
+            assert torch.isfinite(parameter.grad).all(), name
     norm=torch.nn.utils.clip_grad_norm_(model.parameters(),cfg.grad_clip,error_if_nonfinite=True)
     opt.step();opt.zero_grad(set_to_none=True)
     torch.cuda.synchronize();seconds=time.perf_counter()-start
@@ -123,7 +127,8 @@ def main():
                 parameters=sum(p.numel() for p in model.parameters()),
                 first_update_seconds=seconds,peak_allocated_bytes=peak,gradient_norm=float(norm),
                 losses={k:float(v) for k,v in stats.items()},teacher_permutation_invariant=True,
-                noise_free_mixture_verified=True,rir_shape=list(rir.shape))
+                noise_free_mixture_verified=True,active_parameters_have_finite_gradients=True,
+                rir_shape=list(rir.shape))
     if step_seconds:
         report['steady_update_seconds'] = float(np.median(step_seconds))
         report['timed_step_seconds'] = step_seconds
