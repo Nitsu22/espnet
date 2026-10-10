@@ -13,7 +13,13 @@ conda activate tf-locoformer
 set -euo pipefail
 variant=${1:?Specify 2blocks, bilstm or drr}
 result_root=${2:?Specify an absolute output root}
+scope=${3:-all}
 case "${variant}" in 2blocks|bilstm|drr) ;; *) exit 2 ;; esac
+case "${scope}" in
+    all) conditions=(whamr but_clean but_noisy) ;;
+    whamr) conditions=(whamr) ;;
+    *) exit 2 ;;
+esac
 [[ ${result_root} == /* ]]
 recipe=${SGE_O_WORKDIR:?}
 cd "${recipe}"
@@ -28,8 +34,14 @@ date -Is
 hostname
 git rev-parse HEAD
 # A dependency only waits for termination; require successful full inference.
-[[ $(cat "${output}/inference_exit_status") == 0 ]]
-test -s "${output}/all_inference_complete.json"
+if [[ ${scope} == all ]]; then
+    [[ $(cat "${output}/inference_exit_status") == 0 ]]
+    test -s "${output}/all_inference_complete.json"
+else
+    # The user may stop the multi-condition GPU job after WHAMR completes.
+    # Require this condition's successful full inference, independently.
+    test -s "${output}/whamr/inference_complete.json"
+fi
 training_recipe=${source_recipe}
 checkpoint=valid.loss.best.pth
 if [[ ${variant} == drr ]]; then
@@ -37,7 +49,7 @@ if [[ ${variant} == drr ]]; then
     checkpoint=valid.loss_sweep.best.pth
 fi
 experiment="${training_recipe}/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_${variant}"
-for condition in whamr but_clean but_noisy; do
+for condition in "${conditions[@]}"; do
     extra=()
     case "${condition}" in
         whamr) data="${source_recipe}/dump_nf_2spk_16k_min/raw/tt_rir_2spk_nf_min_16k" ;;
@@ -47,7 +59,7 @@ for condition in whamr but_clean but_noisy; do
     python local/evaluate_two_speaker.py --stage score --experiment "${experiment}" --checkpoint "${checkpoint}" \
         --data "${data}" --output "${output}/${condition}" "${extra[@]}"
 done
-python - "${output}" <<'PY'
+python - "${output}" "${scope}" <<'PY'
 import csv
 import json
 import math
@@ -55,7 +67,8 @@ from pathlib import Path
 import sys
 root = Path(sys.argv[1])
 reports = {}
-for condition in ('whamr', 'but_clean', 'but_noisy'):
+conditions = ('whamr',) if sys.argv[2] == 'whamr' else ('whamr', 'but_clean', 'but_noisy')
+for condition in conditions:
     names = ('score',) if condition == 'whamr' else ('score', 'score_polarity_aligned')
     reports[condition] = {}
     for name in names:

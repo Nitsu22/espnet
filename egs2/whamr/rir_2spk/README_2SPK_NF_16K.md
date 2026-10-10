@@ -154,8 +154,10 @@ transition. All reported terms use this SAME assignment. `loss_drr` is the
 unweighted SmoothL1 term, and `drr_mae_db` measures this matched training
 measurement, not the ordinary-PIM held-out evaluation metric. The weight 0.1
 is an initial experimental choice, not a tuned or demonstrated improvement.
-Early stopping and best checkpoint selection use `valid.loss_sweep`, keeping
-the primary Sweep criterion; combined loss values should not be compared
+Best checkpoint selection uses `valid.loss_sweep`, keeping the primary Sweep
+criterion. The current config leaves early stopping at ESPnet's default
+`valid.loss` (the combined objective); it does not override
+`early_stopping_criterion`. Combined loss values should not be compared
 numerically to Sweep-only runs.
 
 The auxiliary clean-to-reverb reconstruction uses the known direct RIR only
