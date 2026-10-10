@@ -400,3 +400,75 @@ plus the completed training log/checkpoint is required to claim completion.
 The baseline regression covers identical state keys, seeded initial weights
 and forward outputs with default settings. CPU stand-ins verify topology and
 objective wiring; actual Mamba execution is checked separately on the lab GPU.
+
+## Post-pooling attention interaction ablations (16 kHz)
+
+The four variants retain the four time/lightweight-frequency stages, weighted
+speaker/channel pooling, slot embeddings and two post-pooling frequency blocks
+of the 456,428-parameter baseline. They add one pre-normalized, four-head,
+64-dimensional attention residual per post-pooling block. The added attention
+has no separate FFN or convolution. The existing frequency block's FFN and
+local convolution still operate separately per speaker.
+
+| Suffix | Attention sequence per post-pooling block | Initial Tensor GPU |
+| --- | --- | ---: |
+| `post_speaker` | Frequency block, then attention across two speaker slots at each frequency | 4 |
+| `post_joint` | Frequency block, then attention across all speaker/frequency tokens | 5 |
+| `post_frequency` | Frequency block, then additional attention across frequencies within each speaker | 6 |
+| `pre_speaker` | Attention across two speaker slots at each frequency, then frequency block | 7 |
+
+Each attention projects the same feature dimension and uses the same number
+of heads, giving all four variants 489,964 parameters: 33,536 more than the
+456,428-parameter baseline. The CUDA check verifies this count before training.
+Attention across frequencies uses frequency positions 0 through 256 for each
+speaker, with the positions reset for the second speaker in joint attention.
+The speaker-slot embeddings distinguish the slots; no fixed speaker ordering
+is imposed on the paired teachers. The speaker-axis version shares its
+attention weights across frequencies. These comparisons test interaction
+scope, the order of speaker/frequency processing and the capacity-only
+control. The default model remains identical to the pre-ablation baseline.
+
+The only added predictor configuration entries are `post_interaction` and
+`post_interaction_order`. Every variant shares seed 0, folded batch 4, four-second
+training crops, full-utterance batch-one validation, the original padding
+behavior, direct-sweep paired teachers, SweepCTF v2 loss/PIT, optimizer,
+scheduler, early stopping and best-validation-loss checkpoint selection.
+No speech-output or additional RIR loss is introduced.
+
+Run each variant in its own persistent session from an isolated code checkout,
+after checking the selected GPU is free:
+
+```bash
+bash local/run_pooled_bimamba_attention_lab.sh \
+  post_speaker 4 /absolute/path/to/original/egs2/whamr/rir_2spk
+```
+
+`RIR_LAB_PYTHON` may select an existing compatible Python environment; the
+launcher does not install packages or alter the host. It reuses the prepared
+`dump_nf_2spk_16k_min` through the checkout's dump symlink, checks input-only
+batching shapes, performs a real CUDA update and profiling, verifies all active
+parameter gradients, paired-teacher PIT invariance, two-RIR inference and
+full-length validation including the longest utterance, then starts Stage 6
+from scratch. Existing model, stats or run markers cause a failure rather
+than an overwrite or implicit resume.
+
+After training exits successfully, the same pipeline selects whatever epoch
+`valid.loss.best.pth` points to and automatically evaluates WHAMR only. It
+first evaluates two test examples, infers the full 3,000-example test set on
+GPU, releases CUDA for CPU scoring, and verifies all 6,000 scored source pairs
+and CSV aggregates. Evaluation uses the existing ordinary-sweep PIM, full
+utterances, channel 0, FLOAT RIR output, two-second RIRs, peak alignment,
+independent peak normalization and full-RMSE PIT. BUT evaluation is omitted.
+The reference-peak-to-50-ms error is `rmse_direct_50ms_mean`; the separate
+`rmse_50ms_mean` measures the first 50 ms of each aligned RIR.
+
+Training/profiling/provenance and pipeline phase/exit markers are under
+`exp/attention_ablation_training_20261011/SUFFIX/`; models and stats are under
+`exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_SUFFIX/` and
+`exp/rir_stats_train_pooled_bimamba_2spk_nf_16k_sweep_v2_SUFFIX/` in the supplied
+result recipe. Evaluation output is
+`exp/attention_ablation_whamr_20261011/SUFFIX/whamr/`. Its sibling
+`evaluation_complete.json` is written only after validating successful stage
+markers, complete IDs/PIT pairs, unchanged scoring settings, checkpoint/config
+hashes and matching CSV aggregates. A later-stage failure records the failed
+phase and nonzero pipeline exit while preserving successful training markers.

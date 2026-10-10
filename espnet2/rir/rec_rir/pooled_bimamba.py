@@ -108,6 +108,81 @@ class FrequencyAttentionBlock(nn.Module):
         return x + self.ffn_out(update)
 
 
+class PostPoolingAttention(nn.Module):
+    """Attention-only residual over speakers, frequencies, or their union.
+
+    Input and output are ``[batch, speakers, frequencies, channels]``. All
+    projections are shared across speakers and frequencies. Joint attention
+    uses the same frequency positions for every speaker, so flattening the
+    speaker and frequency axes does not introduce a fictitious frequency
+    offset between speakers.
+    """
+
+    def __init__(self, dim, heads, eps, axis):
+        super().__init__()
+        if axis not in ("speaker", "joint", "frequency"):
+            raise ValueError("axis must be 'speaker', 'joint', or 'frequency'")
+        if (isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0
+                or isinstance(heads, bool) or not isinstance(heads, int)
+                or heads <= 0 or dim % heads):
+            raise ValueError("Use positive integer dimensions with dim divisible by heads")
+        if axis != "speaker" and (dim // heads) % 2:
+            raise ValueError("Frequency RoPE requires an even head dimension")
+        self.axis = axis
+        self.dim = dim
+        self.heads = heads
+        self.norm_attention = nn.LayerNorm(dim, eps=eps)
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.projection = nn.Linear(dim, dim)
+        # Unlike RotaryEmbedding's frozen Parameter, these deterministic
+        # frequencies are a buffer: every interaction has identical counts.
+        inverse_frequencies = None
+        if axis != "speaker":
+            head_dim = dim // heads
+            inverse_frequencies = 1.0 / (
+                10000 ** (torch.arange(0, head_dim, 2).float() / head_dim))
+        self.register_buffer("rope_frequencies", inverse_frequencies,
+                             persistent=False)
+
+    def _rotate_frequency_positions(self, tensor, positions):
+        angles = (positions.float()[:, None]
+                  * self.rope_frequencies.float()[None, :])
+        angles = angles.repeat_interleave(2, dim=-1).to(tensor)
+        paired = tensor.reshape(*tensor.shape[:-1], -1, 2)
+        rotated_half = torch.stack((-paired[..., 1], paired[..., 0]), -1)
+        rotated_half = rotated_half.flatten(-2)
+        return tensor * angles.cos() + rotated_half * angles.sin()
+
+    def forward(self, x):
+        if x.ndim != 4 or x.shape[-1] != self.dim:
+            raise ValueError("Expected pooled features [B, S, F, dim]")
+        batch, speakers, freqs, dim = x.shape
+        if self.axis == "speaker":
+            sequence = x.permute(0, 2, 1, 3).reshape(batch * freqs, speakers, dim)
+        elif self.axis == "frequency":
+            sequence = x.reshape(batch * speakers, freqs, dim)
+        else:
+            sequence = x.reshape(batch, speakers * freqs, dim)
+        sequence_batch, sequence_length, _ = sequence.shape
+        qkv = self.qkv(self.norm_attention(sequence)).reshape(
+            sequence_batch, sequence_length, 3, self.heads, dim // self.heads)
+        query, key, value = qkv.permute(2, 0, 3, 1, 4).unbind(0)
+        if self.axis != "speaker":
+            positions = torch.arange(freqs, device=x.device)
+            if self.axis == "joint":
+                positions = positions.repeat(speakers)
+            query = self._rotate_frequency_positions(query, positions)
+            key = self._rotate_frequency_positions(key, positions)
+        update = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0)
+        update = self.projection(
+            update.transpose(1, 2).reshape(sequence_batch, sequence_length, dim))
+        if self.axis == "speaker":
+            update = update.reshape(batch, freqs, speakers, dim).permute(0, 2, 1, 3)
+        else:
+            update = update.reshape(batch, speakers, freqs, dim)
+        return x + update
+
+
 class PooledBiMambaCTFPredictor(nn.Module):
     def __init__(self, input_dim=257, num_spk=2, ctf_taps=60, emb_dim=64,
                  pre_layers=4, post_layers=2, d_state=16, d_conv=4,
@@ -117,7 +192,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  post_attention=True, frequency_refinement_position="after_pool",
                  time_module="bimamba", time_block_indices=None,
                  frequency_block_indices=None, pooling_channelwise=True,
-                 pre_frequency_global=True):
+                 pre_frequency_global=True, post_interaction="none",
+                 post_interaction_order="after_frequency"):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -136,12 +212,28 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("pooling_channelwise must be a boolean")
         if not isinstance(pre_frequency_global, bool):
             raise ValueError("pre_frequency_global must be a boolean")
+        if post_interaction not in ("none", "speaker", "joint", "frequency"):
+            raise ValueError("post_interaction must be 'none', 'speaker', 'joint', or 'frequency'")
+        if post_interaction_order not in ("after_frequency", "before_frequency"):
+            raise ValueError("post_interaction_order must be 'after_frequency' or 'before_frequency'")
+        if post_interaction != "none":
+            if frequency_refinement_position != "after_pool":
+                raise ValueError("Post-pooling interactions require frequency_refinement_position='after_pool'")
+            if post_layers == 0:
+                raise ValueError("Enabled post_interaction requires positive post_layers")
+            if (isinstance(n_heads, bool) or not isinstance(n_heads, int)
+                    or n_heads <= 0 or emb_dim % n_heads):
+                raise ValueError("Use a positive integer n_heads dividing emb_dim")
+            if post_interaction != "speaker" and (emb_dim // n_heads) % 2:
+                raise ValueError("Frequency RoPE requires an even head dimension")
         time_indices = self._active_indices(time_block_indices, pre_layers, "time_block_indices")
         frequency_indices = self._active_indices(frequency_block_indices, pre_layers, "frequency_block_indices")
         self.input_dim = input_dim
         self._num_spk = num_spk
         self.ctf_taps = ctf_taps
         self.frequency_refinement_position = frequency_refinement_position
+        self.post_interaction = post_interaction
+        self.post_interaction_order = post_interaction_order
         self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
@@ -165,6 +257,11 @@ class PooledBiMambaCTFPredictor(nn.Module):
             for _ in range(post_layers))
         self.head = nn.Sequential(nn.LayerNorm(emb_dim, eps=eps), nn.Linear(emb_dim, head_dim),
                                   nn.SiLU(), nn.Linear(head_dim, 2 * ctf_taps))
+        # Initialize additions last so the seed still gives every common
+        # baseline parameter (including the CTF head) the exact same values.
+        self.post_interaction_blocks = nn.ModuleList(
+            PostPoolingAttention(emb_dim, n_heads, eps, post_interaction)
+            for _ in range(post_layers) if post_interaction != "none")
 
     @staticmethod
     def _active_indices(indices, layers, name):
@@ -194,10 +291,21 @@ class PooledBiMambaCTFPredictor(nn.Module):
         weights = scores.softmax(dim=1)
         pooled = (weights * x.unsqueeze(3)).sum(1).permute(0, 2, 1, 3)
         pooled = pooled + self.slot_embeddings[None, :, None, :]
-        pooled = pooled.reshape(batch * self.num_spk, freqs, dim)
-        if self.frequency_refinement_position == "after_pool":
-            for block in self.post_blocks:
-                pooled = block(pooled)
+        if self.post_interaction == "none":
+            # Keep the legacy layout and operation ordering exactly intact.
+            pooled = pooled.reshape(batch * self.num_spk, freqs, dim)
+            if self.frequency_refinement_position == "after_pool":
+                for block in self.post_blocks:
+                    pooled = block(pooled)
+        else:
+            for block, interaction in zip(self.post_blocks, self.post_interaction_blocks):
+                if self.post_interaction_order == "before_frequency":
+                    pooled = interaction(pooled)
+                pooled = block(pooled.reshape(batch * self.num_spk, freqs, dim))
+                pooled = pooled.reshape(batch, self.num_spk, freqs, dim)
+                if self.post_interaction_order == "after_frequency":
+                    pooled = interaction(pooled)
+            pooled = pooled.reshape(batch * self.num_spk, freqs, dim)
         output = self.head(pooled).reshape(batch, self.num_spk, freqs, self.ctf_taps, 2).float()
         ctf = torch.complex(output[..., 0], output[..., 1]).contiguous()
         return ctf, ilens, OrderedDict()
