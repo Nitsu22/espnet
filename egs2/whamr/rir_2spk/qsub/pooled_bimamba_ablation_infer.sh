@@ -12,9 +12,9 @@ source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 module load cuda/11.8.0
 set -euo pipefail
-variant=${1:?Specify 2blocks or bilstm}
+variant=${1:?Specify 2blocks, bilstm or drr}
 result_root=${2:?Specify an absolute output root}
-case "${variant}" in 2blocks|bilstm) ;; *) exit 2 ;; esac
+case "${variant}" in 2blocks|bilstm|drr) ;; *) exit 2 ;; esac
 [[ ${result_root} == /* ]]
 recipe=${SGE_O_WORKDIR:?}
 cd "${recipe}"
@@ -32,16 +32,24 @@ trap 'code=$?; echo "$code" > "$output/inference_exit_status"; date -Is' EXIT
 date -Is
 hostname
 git rev-parse HEAD
-experiment="${source_recipe}/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_${variant}"
+training_recipe=${source_recipe}
+checkpoint=valid.loss.best.pth
 training_job=8935090
 [[ ${variant} != bilstm ]] || training_job=8935092
-[[ $(cat "${source_recipe}/exp/pooled_bimamba_ablation_train_jobs/job_${training_job}/exit_status") == 0 ]]
-[[ $(readlink "${experiment}/valid.loss.best.pth") == 45epoch.pth ]]
+if [[ ${variant} == drr ]]; then
+    training_recipe=${recipe}
+    checkpoint=valid.loss_sweep.best.pth
+    [[ $(cat "${training_recipe}/exp/pooled_bimamba_sweep_drr_jobs/job_8946830/exit_status") == 0 ]]
+else
+    [[ $(cat "${training_recipe}/exp/pooled_bimamba_ablation_train_jobs/job_${training_job}/exit_status") == 0 ]]
+fi
+experiment="${training_recipe}/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_${variant}"
+[[ $(readlink "${experiment}/${checkpoint}") == 45epoch.pth ]]
 python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0), torch.cuda.get_device_properties(0).total_memory)'
 whamr="${source_recipe}/dump_nf_2spk_16k_min/raw/tt_rir_2spk_nf_min_16k"
 # Real CUDA smoke check on the allocated MIG device before the full datasets.
 python local/evaluate_two_speaker.py --stage inference --limit 2 \
-    --experiment "${experiment}" --data "${whamr}" --output "${output}/smoke_whamr"
+    --experiment "${experiment}" --checkpoint "${checkpoint}" --data "${whamr}" --output "${output}/smoke_whamr"
 for condition in whamr but_clean but_noisy; do
     case "${condition}" in
         whamr) data=${whamr} ;;
@@ -50,7 +58,7 @@ for condition in whamr but_clean but_noisy; do
     esac
     [[ $(wc -l < "${data}/wav.scp") == 3000 ]]
     python local/evaluate_two_speaker.py --stage inference \
-        --experiment "${experiment}" --data "${data}" --output "${output}/${condition}"
+        --experiment "${experiment}" --checkpoint "${checkpoint}" --data "${data}" --output "${output}/${condition}"
 done
 python - "${output}" <<'PY'
 import json

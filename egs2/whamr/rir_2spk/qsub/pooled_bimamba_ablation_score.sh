@@ -11,9 +11,9 @@ set -e
 source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 set -euo pipefail
-variant=${1:?Specify 2blocks or bilstm}
+variant=${1:?Specify 2blocks, bilstm or drr}
 result_root=${2:?Specify an absolute output root}
-case "${variant}" in 2blocks|bilstm) ;; *) exit 2 ;; esac
+case "${variant}" in 2blocks|bilstm|drr) ;; *) exit 2 ;; esac
 [[ ${result_root} == /* ]]
 recipe=${SGE_O_WORKDIR:?}
 cd "${recipe}"
@@ -30,7 +30,13 @@ git rev-parse HEAD
 # A dependency only waits for termination; require successful full inference.
 [[ $(cat "${output}/inference_exit_status") == 0 ]]
 test -s "${output}/all_inference_complete.json"
-experiment="${source_recipe}/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_${variant}"
+training_recipe=${source_recipe}
+checkpoint=valid.loss.best.pth
+if [[ ${variant} == drr ]]; then
+    training_recipe=${recipe}
+    checkpoint=valid.loss_sweep.best.pth
+fi
+experiment="${training_recipe}/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_${variant}"
 for condition in whamr but_clean but_noisy; do
     extra=()
     case "${condition}" in
@@ -38,7 +44,7 @@ for condition in whamr but_clean but_noisy; do
         but_clean) data="${source_recipe}/../rir_1ch/dump_but_2spk/raw/tt_but_2spk_clean_reverb_min_16k"; extra=(--also_polarity_aligned) ;;
         but_noisy) data="${source_recipe}/../rir_1ch/dump_but_2spk/raw/tt_but_2spk_noisy_reverb_min_16k"; extra=(--also_polarity_aligned) ;;
     esac
-    python local/evaluate_two_speaker.py --stage score --experiment "${experiment}" \
+    python local/evaluate_two_speaker.py --stage score --experiment "${experiment}" --checkpoint "${checkpoint}" \
         --data "${data}" --output "${output}/${condition}" "${extra[@]}"
 done
 python - "${output}" <<'PY'
