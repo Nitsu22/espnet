@@ -63,11 +63,14 @@ TSUBAME 側には元 RIR の再転送を要しない。元 manifest は provenan
 ```bash
 mkdir -p qsub_logs
 qsub -g tga-shinoda qsub/prepare_imported_oracle_ctf.sh dump_oracle_ctf_nf8k_imported
+# 保存済み dump の再検証だけを行う場合:
+qsub -g tga-shinoda qsub/check_oracle_ctf_inputs_cpu.sh
 # CPU準備の正常終了後に投入する。hold_jidだけでは成功を保証しない。
 qsub -g tga-shinoda qsub/check_oracle_ctf_concat_gpu.sh
 ```
 
 CPU準備は cpu_8×1・1時間・priority-5、上限見積もり0.024ポイント。
+保存済み dump の再検証は cpu_4×1・30分・priority-5、上限見積もり0.006ポイント。
 CUDA検証は gpu_1×1・15分・priority-5、上限見積もり0.04ポイント。
 CUDA検証は実batch4の有限loss/gradient/optimizer step、最長validation入力、
 checkpoint経由の推論を確認し、probeの重みを破棄する。

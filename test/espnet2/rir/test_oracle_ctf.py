@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -152,6 +153,13 @@ def test_dump_publication_validation_relocation_and_corruption(tmp_path):
     portable = tmp_path / "portable"
     prepare_oracle.relocate(output, baseline / "dump", baseline, portable)
     prepare_oracle.validate_prepared_dump(portable, require_full=False)
+    previous_directory = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        prepare_oracle.validate_prepared_dump(Path("oracle"), require_full=False)
+        prepare_oracle.validate_prepared_dump(Path("portable"), require_full=False)
+    finally:
+        os.chdir(previous_directory)
     assert json.loads((portable / "preparation.json").read_text())["imported_manifest_sha256"]
     feature.write_bytes(feature.read_bytes() + b"corrupt")
     with unittest.TestCase().assertRaisesRegex(ValueError, "checksum"):

@@ -210,7 +210,7 @@ def _validate_manifest(report, require_full):
 
 
 def validate_prepared_dump(output, require_full=True):
-    output = Path(output)
+    output = Path(output).resolve(strict=True)
     marker = output / "preparation.json"
     if not marker.is_file():
         raise ValueError("Oracle CTF dump has no complete preparation manifest")
