@@ -472,3 +472,60 @@ result recipe. Evaluation output is
 markers, complete IDs/PIT pairs, unchanged scoring settings, checkpoint/config
 hashes and matching CSV aggregates. A later-stage failure records the failed
 phase and nonzero pipeline exit while preserving successful training markers.
+
+## Frequency module replacements (2026-10-12)
+
+The following four configurations retain four time/pre-frequency stages,
+two post-frequency stages, the same two-slot pooling and shared CTF head.
+Only `pre_frequency_module` and `post_frequency_module` differ from the
+original 16 kHz SweepCTF v2 baseline. Extra post-pooling attention is disabled.
+
+| Run suffix | Before pooling | After pooling | Total parameters |
+| --- | --- | --- | ---: |
+| `freq_pre_attention` | Frequency Attention + Conv-FFN | Existing Attention + Conv-FFN | 581,640 |
+| `freq_pre_bimamba` | Frequency BiMamba + Conv-FFN | Existing Attention + Conv-FFN | 809,192 |
+| `freq_post_bimamba` | Existing light frequency module | Frequency BiMamba + Conv-FFN | 570,204 |
+| `freq_both_bimamba` | Frequency BiMamba + Conv-FFN | Frequency BiMamba + Conv-FFN | 922,968 |
+
+The attention variant follows the full-frequency attention/FFN structure
+of TF-Locoformer using this recipe's `FrequencyAttentionBlock`. Its lightweight
+GLU/depthwise-convolution FFN differs from the original ConvSwiGLU. The
+pre-attention and pre-Mamba variants use identical Conv-FFN definitions and
+initial FFN weights. Post-Mamba retains the original post-block Conv-FFN and
+its initial weights. The Mamba branches have separate forward/backward
+parameters, reverse the frequency axis, and use d_state=16, d_conv=4 and the
+existing expand=2 implementation. The time branches are unchanged BiMamba.
+
+Before pooling, frequency processing has shape `[B*T, F, 64]`; after pooling
+it has shape `[B*2, F, 64]`. All speaker slots share the post-frequency weights.
+Mixers never run along the speaker axis. The pre-only/post-only and combined
+experiments use identical initial replacement weights for their corresponding
+stages. Independent CPU RNG streams preserve the baseline initialization of
+the encoder, time modules, pooling, slot embeddings, head and retained FFNs.
+Discarded initialization placeholders are absent from the parameter list.
+Default switches preserve the existing checkpoint keys and exact outputs.
+
+All four share seed 0, 4-second crops, folded batch 4, full-input batch-one
+validation, 60 complex CTF taps, direct-sweep teachers, SweepCTF v2 RIMag/PIT,
+the original padding behavior, optimizer, scheduler and early stopping. This
+is a module-family ablation with different parameter counts; report size and
+measured time alongside accuracy. Use full-length validation in CUDA checks
+because pre-pooling frequency modeling processes every observation frame.
+
+From a checkout with `dump_nf_2spk_16k_min` and the existing Python environment:
+
+```bash
+bash run_pooled_bimamba_2spk_nf_16k_sweep_v2_freq_pre_attention.sh \
+  --stage 5 --stop_stage 6 --ngpu 1
+```
+
+The other suffixes use matching run wrappers/configurations and distinct model
+and stats directories. Stage 5 creates input-only shapes; Stage 6 trains from
+scratch unless resume is explicitly selected. No dataset audio is copied.
+For WHAMR evaluation, report the physical clean-reverb reference and the fixed
+`dump_ls_direct_reverb` relative-transfer reference separately; both use the
+same ordinary-PIM model predictions. No comparison CSV is required.
+
+CPU verification is `python test/espnet2/rir/rec_rir/test_pooled_bimamba_frequency.py`.
+Its frequency-Mamba substitutes check layout and integration; real selective
+scan is verified by `local/check_two_speaker_training.py` on CUDA before a run.

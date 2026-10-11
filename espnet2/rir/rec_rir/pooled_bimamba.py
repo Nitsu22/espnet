@@ -108,6 +108,57 @@ class FrequencyAttentionBlock(nn.Module):
         return x + self.ffn_out(update)
 
 
+class FrequencyBiMambaBlock(nn.Module):
+    """Bidirectional frequency Mamba with the attention block's Conv-FFN.
+
+    Each input is an independent frequency sequence ``[N, F, D]``. The
+    backward branch reverses frequency bins, never frames or speaker slots.
+    The FFN modules are reused from a seeded attention block so comparisons
+    change the sequence mixer while keeping the FFN initialization fixed.
+    """
+
+    def __init__(self, dim, d_state, d_conv, eps, ffn_source):
+        super().__init__()
+        if ffn_source.ffn_in.in_features != dim:
+            raise ValueError("Frequency Mamba and FFN dimensions differ")
+        self.dim = dim
+        self.norm_mamba = nn.LayerNorm(dim, eps=eps)
+        specification = f"mamba({d_state},{d_conv})"
+        self.forward_mamba = _build_mamba(dim, specification)
+        self.backward_mamba = _build_mamba(dim, specification)
+        self.projection = nn.Linear(2 * dim, dim)
+        self.norm_ffn = ffn_source.norm_ffn
+        self.ffn_in = ffn_source.ffn_in
+        self.local = ffn_source.local
+        self.ffn_out = ffn_source.ffn_out
+
+    def forward(self, x):
+        if x.ndim != 3 or x.shape[-1] != self.dim:
+            raise ValueError("Expected frequency sequences [N, F, dim]")
+        sequence = self.norm_mamba(x)
+        forward = self.forward_mamba(sequence.contiguous())
+        backward = self.backward_mamba(sequence.flip(1).contiguous()).flip(1)
+        x = x + self.projection(torch.cat((forward, backward), -1))
+        update = F.glu(self.ffn_in(self.norm_ffn(x)), dim=-1)
+        update = F.silu(self.local(update.transpose(1, 2)).transpose(1, 2))
+        return x + self.ffn_out(update)
+
+
+class FramewiseFrequencyBlock(nn.Module):
+    """Apply a frequency block independently to every observation frame."""
+
+    def __init__(self, sequence_block):
+        super().__init__()
+        self.sequence_block = sequence_block
+
+    def forward(self, x):
+        if x.ndim != 4:
+            raise ValueError("Expected features [B, T, F, D]")
+        batch, frames, freqs, dim = x.shape
+        output = self.sequence_block(x.reshape(batch * frames, freqs, dim))
+        return output.reshape(batch, frames, freqs, dim)
+
+
 class PostPoolingAttention(nn.Module):
     """Attention-only residual over speakers, frequencies, or their union.
 
@@ -193,7 +244,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  time_module="bimamba", time_block_indices=None,
                  frequency_block_indices=None, pooling_channelwise=True,
                  pre_frequency_global=True, post_interaction="none",
-                 post_interaction_order="after_frequency"):
+                 post_interaction_order="after_frequency",
+                 pre_frequency_module="light",
+                 post_frequency_module="attention"):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -212,6 +265,17 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("pooling_channelwise must be a boolean")
         if not isinstance(pre_frequency_global, bool):
             raise ValueError("pre_frequency_global must be a boolean")
+        if pre_frequency_module not in ("light", "attention", "bimamba"):
+            raise ValueError("pre_frequency_module must be 'light', 'attention', or 'bimamba'")
+        if post_frequency_module not in ("attention", "bimamba"):
+            raise ValueError("post_frequency_module must be 'attention' or 'bimamba'")
+        if pre_frequency_module != "light" and not pre_frequency_global:
+            raise ValueError("pre_frequency_global selects a branch of the light module only")
+        if post_frequency_module == "bimamba":
+            if not post_attention:
+                raise ValueError("post_attention=False cannot select a BiMamba replacement")
+            if post_layers == 0:
+                raise ValueError("A post-frequency replacement requires positive post_layers")
         if post_interaction not in ("none", "speaker", "joint", "frequency"):
             raise ValueError("post_interaction must be 'none', 'speaker', 'joint', or 'frequency'")
         if post_interaction_order not in ("after_frequency", "before_frequency"):
@@ -234,6 +298,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.frequency_refinement_position = frequency_refinement_position
         self.post_interaction = post_interaction
         self.post_interaction_order = post_interaction_order
+        self.pre_frequency_module = pre_frequency_module
+        self.post_frequency_module = post_frequency_module
         self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
@@ -262,6 +328,39 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.post_interaction_blocks = nn.ModuleList(
             PostPoolingAttention(emb_dim, n_heads, eps, post_interaction)
             for _ in range(post_layers) if post_interaction != "none")
+        # Build replacements after all legacy modules. Independent CPU RNG
+        # streams preserve common baseline weights and make the pre-only /
+        # post-only mixers identical to their counterparts in the combined
+        # experiment. Discarded placeholders are not registered parameters.
+        seed = torch.initial_seed()
+
+        def seeded_module(offset, factory):
+            with torch.random.fork_rng(devices=[]):
+                torch.default_generator.manual_seed((seed + offset) % (2**63 - 1))
+                return factory()
+
+        if pre_frequency_module != "light":
+            for index in frequency_indices:
+                attention = seeded_module(
+                    100003 + 97 * index,
+                    lambda: FrequencyAttentionBlock(
+                        emb_dim, n_heads, ffn_dim, local_kernel, eps),
+                )
+                sequence = attention
+                if pre_frequency_module == "bimamba":
+                    sequence = seeded_module(
+                        200003 + 97 * index,
+                        lambda: FrequencyBiMambaBlock(
+                            emb_dim, d_state, d_conv, eps, attention),
+                    )
+                self.frequency_blocks[index] = FramewiseFrequencyBlock(sequence)
+        if post_frequency_module == "bimamba":
+            for index, attention in enumerate(self.post_blocks):
+                self.post_blocks[index] = seeded_module(
+                    300007 + 97 * index,
+                    lambda: FrequencyBiMambaBlock(
+                        emb_dim, d_state, d_conv, eps, attention),
+                )
 
     @staticmethod
     def _active_indices(indices, layers, name):
