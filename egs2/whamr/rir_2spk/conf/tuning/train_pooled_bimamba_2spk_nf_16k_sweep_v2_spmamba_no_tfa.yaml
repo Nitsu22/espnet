@@ -1,0 +1,68 @@
+batch_size: 4
+batch_type: folded
+best_model_criterion:
+- - valid
+  - loss
+  - min
+force_single_channel: true
+grad_clip: 1.0
+init: null
+init_param: []
+keep_nbest_models: 5
+max_epoch: 100
+model_conf:
+  ctf_taps: 60
+  extract_feats_in_collect_stats: false
+  hop_len: 256
+  loss_type: RIMag
+  n_fft: 512
+  normalize_by_mix: true
+  num_freqs: 257
+  num_spk: 2
+  pim_sweep_duration: 8.192
+  predictor_conf:
+    d_conv: 4
+    d_state: 16
+    emb_dim: 32
+    eps: 1.0e-05
+    ffn_dim: 128
+    freq_bottleneck: 16
+    freq_rank: 16
+    head_dim: 128
+    local_kernel: 5
+    n_heads: 4
+    pooling_hidden: 32
+    post_layers: 2
+    pre_layers: 4
+    slot_embedding_std: 0.02
+    pre_backbone: spmamba
+    unfold_kernel: 3
+    pre_frame_attention: false
+    frame_qk_channels: 1
+  sr: 16000
+  win_len: 512
+  win_type: sqrthann
+num_workers: 4
+optim: adamw
+optim_conf:
+  eps: 1.0e-08
+  lr: 0.001
+  weight_decay: 0.0
+patience: 10
+preprocessor: rec_rir_sweep_v2_pit
+preprocessor_conf:
+  force_single_channel: true
+  rir_length: 32000
+  speech_segment: 64000
+rir_model_type: pooled_bimamba_sweep_v2_pit
+sample_rate: 16000
+scheduler: cosineannealingwarmrestarts
+scheduler_conf:
+  T_0: 5000
+  T_mult: 1
+  eta_min: 0.0
+seed: 0
+use_amp: false
+val_scheduler_criterion:
+- valid
+- loss

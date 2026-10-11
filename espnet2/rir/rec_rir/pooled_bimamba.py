@@ -11,6 +11,7 @@ from torch.nn import functional as F
 from rotary_embedding_torch import RotaryEmbedding
 
 from espnet2.rir.rec_rir.model import _build_mamba
+from espnet2.rir.rec_rir.spmamba_blocks import FrameAttention, UnfoldAxisBiMamba
 
 
 class TimeBiMamba(nn.Module):
@@ -246,8 +247,21 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  pre_frequency_global=True, post_interaction="none",
                  post_interaction_order="after_frequency",
                  pre_frequency_module="light",
-                 post_frequency_module="attention"):
+                 post_frequency_module="attention", pre_backbone="legacy",
+                 unfold_kernel=3, pre_frame_attention=False, frame_qk_channels=1):
         super().__init__()
+        if pre_backbone not in ("legacy", "spmamba"):
+            raise ValueError("pre_backbone must be legacy or spmamba")
+        if not isinstance(pre_frame_attention, bool):
+            raise ValueError("pre_frame_attention must be boolean")
+        if pre_backbone == "legacy" and pre_frame_attention:
+            raise ValueError("Frame attention is an SPMamba front-end option")
+        if pre_backbone == "spmamba" and (
+                time_module != "bimamba" or pre_frequency_module != "light"
+                or time_block_indices is not None or frequency_block_indices is not None
+                or not pre_frequency_global):
+            raise ValueError("SPMamba replaces complete time/frequency stages")
+        self.pre_backbone = pre_backbone
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
                     n_heads, ffn_dim, head_dim)
@@ -362,6 +376,21 @@ class PooledBiMambaCTFPredictor(nn.Module):
                         emb_dim, d_state, d_conv, eps, attention),
                 )
 
+        self.frame_attention_blocks = nn.ModuleList()
+        if pre_backbone == "spmamba":
+            for index in range(pre_layers):
+                self.frequency_blocks[index] = seeded_module(
+                    400009 + 97 * index,
+                    lambda: UnfoldAxisBiMamba(emb_dim, unfold_kernel, d_state, d_conv, eps, "frequency"))
+                self.time_blocks[index] = seeded_module(
+                    500009 + 97 * index,
+                    lambda: UnfoldAxisBiMamba(emb_dim, unfold_kernel, d_state, d_conv, eps, "time"))
+            if pre_frame_attention:
+                self.frame_attention_blocks = nn.ModuleList(
+                    seeded_module(600011 + 97 * index,
+                                  lambda: FrameAttention(emb_dim, n_heads, frame_qk_channels, eps))
+                    for index in range(pre_layers))
+
     @staticmethod
     def _active_indices(indices, layers, name):
         if indices is None:
@@ -377,8 +406,13 @@ class PooledBiMambaCTFPredictor(nn.Module):
         if input.ndim != 3 or not torch.is_complex(input) or input.shape[-1] != self.input_dim:
             raise ValueError("Expected complex STFT [B, T, input_dim]")
         x = self.encoder(torch.stack((input.real, input.imag), 1).float()).permute(0, 2, 3, 1)
-        for time_block, frequency_block in zip(self.time_blocks, self.frequency_blocks):
-            x = frequency_block(time_block(x))
+        for index, (time_block, frequency_block) in enumerate(zip(self.time_blocks, self.frequency_blocks)):
+            if self.pre_backbone == "spmamba":
+                x = time_block(frequency_block(x))
+                if self.frame_attention_blocks:
+                    x = self.frame_attention_blocks[index](x)
+            else:
+                x = frequency_block(time_block(x))
         batch, frames, freqs, dim = x.shape
         if self.frequency_refinement_position == "before_pool":
             sequence = x.reshape(batch * frames, freqs, dim)

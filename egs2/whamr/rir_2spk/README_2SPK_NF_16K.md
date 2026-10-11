@@ -529,3 +529,40 @@ same ordinary-PIM model predictions. No comparison CSV is required.
 CPU verification is `python test/espnet2/rir/rec_rir/test_pooled_bimamba_frequency.py`.
 Its frequency-Mamba substitutes check layout and integration; real selective
 scan is verified by `local/check_two_speaker_training.py` on CUDA before a run.
+
+## SPMamba-inspired pooled CTF model (2026-10-12)
+
+The lightweight CTF adaptation uses four frequency-then-time stages. Each axis
+uses channel LayerNorm, channel-major Unfold (kernel 3, stride 1, symmetric zero
+padding), bidirectional Mamba-1 with expand=2 and branch RMSNorm/residual, then
+a learned ConvTranspose1d and outer residual. No time/frequency downsampling is
+introduced. Two-speaker channelwise pooling, two post-pooling frequency Attention
+blocks and the CTF head retain the existing SweepCTF v2 definitions.
+
+Both configurations use emb_dim=32: the unfolded Mamba width is 96. Keeping
+emb_dim=64 would require 4,735,464 parameters, so the smaller width is chosen for
+the lightweight experiment. This is an architecture/method comparison against
+the 64-dimensional baseline, not an isolated Unfold ablation.
+
+- `spmamba_no_tfa`: no pre-pooling frame attention.
+- `spmamba_tfa`: whole-frame attention after each frequency/time pair. Each of
+  four heads uses one query/key channel per frequency bin; value tensors retain
+  all frequency bins and feature channels. It is distinct from frequency-only
+  or speaker-axis attention.
+
+The two configurations differ only in frame attention and preserve identical
+initial values for every common parameter. Both use the noise-free 16 kHz
+2-speaker dump, seed 0, 4-second training crops, folded batch size 4, validation
+batch size 1, shared direct-sweep/full-tail SweepCTF v2 PIT loss, optimizer and
+scheduler. Padding behavior matches the existing architecture comparison.
+
+This is inspired by the official SPMamba separator, not a complete reproduction:
+https://github.com/JusperLee/SPMamba/blob/main/look2hear/models/SPMamba.py
+The differences include smaller width, expand=2 (official expand=4), symmetric
+boundary padding and channel normalization, and a pooled CTF output instead of
+a speech output. No speech estimation head or speech reconstruction loss is used.
+
+Run either matching `run_pooled_bimamba_2spk_nf_16k_sweep_v2_spmamba_*.sh` with
+`--stage 5 --stop_stage 6 --ngpu 1`. Future WHAMR scoring should report both the
+physical RIR reference and existing LS direct-reverb reference; no comparison
+CSV is required.
