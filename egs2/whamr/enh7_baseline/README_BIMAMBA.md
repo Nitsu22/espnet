@@ -41,6 +41,23 @@ scoring. Supply a separate `--enh_exp` when changing batch/GPU settings or seed.
 The baseline checkpoint is not loaded; this is a scratch-training ablation.
 These commands prepare no scheduler allocation and submit no job.
 
+For TSUBAME, use an isolated checkout and reuse the original linked WHAMR/NF
+dumps and WHAMR statistics. The existing Mamba wheel folder is supplied as an
+argument, without changing the conda environment:
+
+```bash
+mkdir -p qsub_logs
+qsub -g tga-shinoda qsub/train_tflocoformer_bimamba_s_1gpu.sh /absolute/path/to/mamba/dependencies
+```
+
+The job first verifies CUDA/reference output and gradient agreement, then
+checks the original audio/teacher pairing, a real batch-four optimizer step
+and the longest validation example. Failure stops the job before training.
+The probe weights are discarded. Resources are `gpu_1=1`, priority -5 and
+24 hours; the upper point estimate is `0.2 * 0.8 * 24 = 3.84`, excluding any
+later continuation. Training resumes an existing checkpoint in this dedicated
+experiment directory if a subsequent job is submitted.
+
 ## Implementation validation
 
 The CPU checks use real Mamba parameters and the official reference scan.

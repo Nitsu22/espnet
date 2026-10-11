@@ -131,14 +131,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--condition", choices=("whamr", "nf_whamr"), required=True)
     parser.add_argument("--expdir", type=Path, required=True)
+    parser.add_argument("--config", type=Path, help="Override the baseline model config")
     args = parser.parse_args()
     report, maps, valid_shape = check_data(args.condition)
-    config = Path("conf/tuning") / (
+    config = args.config or Path("conf/tuning") / (
         "train_enh_tflocoformer_s_whamr_8k.yaml"
         if args.condition == "whamr"
         else "train_enh_tflocoformer_s_nf_8k.yaml"
     )
     saved = args.expdir / "config.yaml"
+    selected_config = yaml.safe_load(config.read_text())
     if saved.exists():
         previous = yaml.safe_load(saved.read_text())
         expected = (
@@ -152,6 +154,14 @@ def main():
             raise ValueError(
                 "Existing checkpoint belongs to a different condition/batch"
             )
+        if args.config is not None and (
+            previous["separator"] != selected_config["separator"]
+            or any(
+                previous["separator_conf"].get(key) != value
+                for key, value in selected_config["separator_conf"].items()
+            )
+        ):
+            raise ValueError("Existing checkpoint belongs to a different separator")
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise RuntimeError("This check requires exactly one allocated CUDA device")
     options = EnhancementTask.get_parser().parse_args(
@@ -237,6 +247,9 @@ def main():
         device=torch.cuda.get_device_name(0),
         dtype="float32",
         parameters=sum(p.numel() for p in model.parameters()),
+        separator=options.separator,
+        config=str(config),
+        config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
     )
     args.expdir.mkdir(parents=True, exist_ok=True)
     (args.expdir / "input_check.json").write_text(json.dumps(report, indent=2) + "\n")
