@@ -14,6 +14,9 @@ Local changes to `models/SPMamba.py`:
 - Initialize `backward_blocks` to `None` for the unidirectional constructor.
 - Use `reshape` for speaker/spectrum views that can be noncontiguous.
 - Repeat waveform lengths for the flattened batch/speaker separation decoder.
+- Add an opt-in `estimate_ctf=False` path that retains separation/dereverberation
+  but skips the CTF fusion, temporal blocks, pooling and decoder. The default
+  full-model computation is unchanged. `models/RecRIR.py` accepts the same flag.
 
 `layers/stft_tfgn.py` uses the current `@typechecked` constructor decorator
 instead of the removed `typeguard.check_argument_types` API.

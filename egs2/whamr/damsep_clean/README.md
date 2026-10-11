@@ -184,6 +184,46 @@ reverberant image. They are not decoded physical RIRs or distance estimates.
 CTF-to-RIR sweep decoding and DRR/near-far evaluation are outside this recipe;
 the released DAMSEP code also does not include its paper's decoding pipeline.
 
+## Clean waveform only ablation
+
+`conf/tuning/train_damsep_nf_8k_clean_only.yaml` starts a separate experiment
+from seed 0 with the same data, four-second training crop, full validation,
+FP32, per-GPU batch one and optimizer/scheduler settings. Training uses only
+clean negative-SNR PIT; validation uses clean SI-SDR. Both auxiliary weights
+are zero and `model_conf.clean_only: true` disables their computation.
+
+The separation and shared dereverberation path remains identical. Its
+intermediate separated waveforms are still needed to form the clean output,
+but they have no reverberant-source loss. CTF fusion, temporal CTF blocks,
+pooling and the CTF decoder do not execute. Their registered parameters are
+frozen; retaining their construction preserves the shared path's seed-based
+initialization. No auxiliary spectral analysis or clean-to-reverb convolution
+is computed. Clean-only inference exports only clean WAVs and scoring uses
+only the clean references.
+
+Reuse the completed Stage 5 shapes, without collecting statistics again:
+
+```bash
+bash run.sh --stage 6 --stop_stage 6 --ngpu 1 --accum_grad 1 \
+    --config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
+    --expdir exp/damsep_nf_8k_clean_only
+qsub -g tga-shinoda qsub/train_clean_only_1gpu.sh
+```
+
+The production script checks the longest real validation utterance and one
+real four-second training backward/Adam update before starting fresh training
+(or resuming this ablation's own checkpoint). It never loads the full-loss
+experiment's checkpoint. Its allocation is one full GPU, priority -5, 24 hours;
+the point upper estimate is `0.2 * 0.8 * 24 = 3.8400`. Clean-only speed and
+convergence time are not yet measured.
+
+When the full-loss experiment is running, execute this ablation from a separate
+Git checkout with the same branch/commit as its local implementation. Reuse
+the original `enh4_clean/dump_clean`, `enh_rir/dump_ctf_joint`, recipe `.deps`
+and `exp/damsep_stats_8k` via symbolic links in that checkout. Do not update
+the checkout used by a running job. Logs/checkpoints are under the separate
+checkout's `egs2/whamr/damsep_clean/exp/damsep_nf_8k_clean_only`.
+
 ## Verification
 
 Run model/loss/data tests from the repository root:

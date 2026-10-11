@@ -103,7 +103,10 @@ if (( stage <= 7 && stop_stage >= 7 )); then
 fi
 
 if (( stage <= 8 && stop_stage >= 8 )); then
-    for branch in clean reverb; do
+    score_branches=$("${python}" -c \
+        'import sys,yaml; c=yaml.safe_load(open(sys.argv[1])); print("clean" if c["model_conf"].get("clean_only", False) else "clean reverb")' \
+        "${expdir}/config.yaml")
+    for branch in ${score_branches}; do
         refs=()
         for speaker in 1 2; do
             if [[ ${branch} == clean ]]; then

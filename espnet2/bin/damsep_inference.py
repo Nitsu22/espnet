@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full-utterance DAMSEP inference; write clean/reverb WAVs and complex CTFs."""
+"""DAMSEP inference; clean-only mode exports clean WAVs without CTF estimates."""
 
 import argparse
 import json
@@ -42,9 +42,10 @@ def inference(args):
     if len(keys) != len(set(keys)) or not keys:
         raise ValueError("Inference keys must be nonempty and unique")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    lists = {
-        (branch, speaker): [] for branch in ("clean", "reverb") for speaker in (1, 2)
-    }
+    branches = (("clean", "x_derev"),)
+    if not model.clean_only:
+        branches += (("reverb", "x_sep"),)
+    lists = {(branch, speaker): [] for branch, _ in branches for speaker in (1, 2)}
     ctf_list = []
     with torch.no_grad():
         for i, uid in enumerate(keys):
@@ -55,7 +56,7 @@ def inference(args):
                 )
             waveform = torch.from_numpy(audio[:, 0].copy()).unsqueeze(0).to(args.device)
             output = model.separate(waveform)
-            for branch, field in (("clean", "x_derev"), ("reverb", "x_sep")):
+            for branch, field in branches:
                 values = output[field][0].cpu().numpy()
                 if not np.isfinite(values).all():
                     raise ValueError(f"{uid}: nonfinite {branch} estimates")
@@ -73,19 +74,21 @@ def inference(args):
                         subtype="PCM_16" if args.normalize_output_wav else "FLOAT",
                     )
                     lists[branch, speaker].append(f"{uid} {dest}\n")
-            ctf_ri = output["rir"].reshape(2, 2, 257, 60).cpu().numpy()
-            ctf = ctf_ri[:, 0] + 1j * ctf_ri[:, 1]
-            if not np.isfinite(ctf).all():
-                raise ValueError(f"{uid}: nonfinite CTF estimates")
-            dest = args.output_dir / "ctf" / f"{uid}.npz"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(dest, ctf=ctf)
-            ctf_list.append(f"{uid} {dest}\n")
+            if not model.clean_only:
+                ctf_ri = output["rir"].reshape(2, 2, 257, 60).cpu().numpy()
+                ctf = ctf_ri[:, 0] + 1j * ctf_ri[:, 1]
+                if not np.isfinite(ctf).all():
+                    raise ValueError(f"{uid}: nonfinite CTF estimates")
+                dest = args.output_dir / "ctf" / f"{uid}.npz"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(dest, ctf=ctf)
+                ctf_list.append(f"{uid} {dest}\n")
             if (i + 1) % 100 == 0:
                 print(f"Inferred {i + 1}/{len(keys)} utterances", flush=True)
     for (branch, speaker), lines in lists.items():
         (args.output_dir / branch / f"spk{speaker}.scp").write_text("".join(lines))
-    (args.output_dir / "ctf.scp").write_text("".join(ctf_list))
+    if not model.clean_only:
+        (args.output_dir / "ctf.scp").write_text("".join(ctf_list))
     (args.output_dir / "inference.json").write_text(
         json.dumps(
             dict(
@@ -95,8 +98,13 @@ def inference(args):
                 channel=0,
                 count=len(keys),
                 normalize_output_wav=args.normalize_output_wav,
-                ctf_shape=[2, 257, 60],
-                ctf_source_order="matches output WAVs; no distance ordering",
+                clean_only=model.clean_only,
+                ctf_shape=None if model.clean_only else [2, 257, 60],
+                ctf_source_order=(
+                    None
+                    if model.clean_only
+                    else "matches output WAVs; no distance ordering"
+                ),
             ),
             indent=2,
         )

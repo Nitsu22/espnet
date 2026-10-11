@@ -148,6 +148,63 @@ def test_network_outputs_and_joint_backward(cpu_model):
         )
 
 
+def test_clean_only_skips_ctf_and_auxiliary_losses(cpu_model, monkeypatch):
+    model = ESPnetDAMSEPModel(
+        network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
+        clean_only=True,
+        loss_w_reverb=0,
+        loss_w_reconstruction=0,
+    )
+    model.load_state_dict(cpu_model.state_dict())
+    mix = torch.randn(2, 640) * 0.02
+    model.eval()
+    cpu_model.eval()
+    with torch.no_grad():
+        full_output = cpu_model.separate(mix)
+        output = model.separate(mix)
+    assert "rir" not in output
+    torch.testing.assert_close(output["x_derev"], full_output["x_derev"])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Clean-only must not execute CTF or auxiliary losses")
+
+    for name in ("ctf_layers", "compress_CTF", "weight_layer", "decoder_CTF"):
+        module = getattr(model.network.recrir, name)
+        # ModuleList itself has no forward; hooks on its layers catch execution.
+        if isinstance(module, torch.nn.ModuleList):
+            for layer in module:
+                layer.register_forward_pre_hook(forbidden)
+        else:
+            module.register_forward_pre_hook(forbidden)
+        assert all(not p.requires_grad for p in module.parameters())
+    monkeypatch.setattr(model.transforms, "stft", forbidden)
+    clean = torch.randn(2, 2, 640) * 0.02
+    # Reverberant teachers are not used by the clean objective.
+    reverb = torch.full_like(clean, float("nan"))
+    for training in (False, True):
+        model.train(training)
+        output = model.network(mix, estimate_ctf=False)
+        loss, stats = model._loss(output, clean, reverb)
+        expected = torch.minimum(
+            negative_sdr(output["x_derev"], clean, not training).mean(-1),
+            negative_sdr(output["x_derev"].flip(1), clean, not training).mean(-1),
+        ).mean()
+        torch.testing.assert_close(loss, expected)
+        assert set(stats) == {"loss", "loss_clean", "pit_swap_ratio"}
+    loss.backward()
+    assert all(
+        p.grad is not None and torch.isfinite(p.grad).all()
+        for p in model.parameters()
+        if p.requires_grad
+    )
+    assert all(p.grad is None for p in model.parameters() if not p.requires_grad)
+
+
+def test_clean_only_rejects_auxiliary_supervision(cpu_model):
+    with pytest.raises(ValueError, match="auxiliary loss weights"):
+        ESPnetDAMSEPModel(clean_only=True)
+
+
 def test_padding_is_excluded_from_network_and_loss(cpu_model):
     cpu_model.eval()
     signals = [torch.randn(2, 768) * 0.01 for _ in range(5)]
@@ -326,7 +383,8 @@ def test_cpu_statistics_skip_network_and_mamba(tmp_path, monkeypatch):
     assert not list(stats.rglob("*.pth"))
 
 
-def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path):
+@pytest.mark.parametrize("clean_only", [False, True])
+def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean_only):
     """Exercise the complete trainer/checkpoint/adapter path on real waveforms."""
     import argparse
 
@@ -364,7 +422,12 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path):
     config.write_text(
         yaml.safe_dump(
             dict(
-                model_conf=dict(network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2)),
+                model_conf=dict(
+                    network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
+                    clean_only=clean_only,
+                    loss_w_reverb=0.0 if clean_only else 0.1,
+                    loss_w_reconstruction=0.0 if clean_only else 0.5,
+                ),
                 preprocessor_conf=dict(speech_segment=640, force_single_channel=True),
                 num_workers=0,
                 batch_type="unsorted",
@@ -415,8 +478,12 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path):
             normalize_output_wav=True,
         )
     )
-    with np.load(dest / "ctf/example.npz") as data:
-        assert data["ctf"].shape == (2, 257, 60) and np.isfinite(data["ctf"]).all()
+    if clean_only:
+        assert not (dest / "ctf").exists() and not (dest / "reverb").exists()
+        assert not (dest / "ctf.scp").exists()
+    else:
+        with np.load(dest / "ctf/example.npz") as data:
+            assert data["ctf"].shape == (2, 257, 60) and np.isfinite(data["ctf"]).all()
     # Score the clean branch with the unchanged baseline scorer.
     score_main(
         [

@@ -70,6 +70,7 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
         loss_hop_length: int = 128,
         loss_window: str = "sqrthann",
         extract_feats_in_collect_stats: bool = False,
+        clean_only: bool = False,
     ):
         super().__init__()
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
@@ -100,7 +101,22 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
             raise ValueError("This DAMSEP recipe requires two sources, mono, 8 kHz")
         if loss_w_reverb < 0 or loss_w_reconstruction < 0:
             raise ValueError("Loss weights must be nonnegative")
+        if clean_only and (loss_w_reverb != 0 or loss_w_reconstruction != 0):
+            raise ValueError(
+                "clean_only requires both auxiliary loss weights to be zero"
+            )
         self.network = SPMamba(**conf)
+        self.clean_only = clean_only
+        if clean_only:
+            # Retain construction/initialization order for the shared clean
+            # path, but exclude unused CTF parameters from gradient updates.
+            for module in (
+                self.network.recrir.ctf_layers,
+                self.network.recrir.decoder_CTF,
+                self.network.recrir.compress_CTF,
+                self.network.recrir.weight_layer,
+            ):
+                module.requires_grad_(False)
         self.num_spk = 2
         self.loss_w_reverb = loss_w_reverb
         self.loss_w_reconstruction = loss_w_reconstruction
@@ -143,6 +159,13 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
             return x.gather(1, index)
 
         loss_clean = torch.where(swap, swapped, identity)
+        if self.clean_only:
+            # Do not run auxiliary STFTs, RI+Mag supervision, or CTF filtering.
+            return loss_clean.mean(), {
+                "loss": loss_clean.mean().detach(),
+                "loss_clean": loss_clean.mean().detach(),
+                "pit_swap_ratio": swap.float().mean().detach(),
+            }
         clean_spec = self.transforms.stft(clean)
         target_spec = self.transforms.stft(reverb)
         loss_reverb = ri_mag_loss(
@@ -210,7 +233,7 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
             if n <= self.network.ctf_n_fft // 2:
                 raise ValueError("DAMSEP needs more than 256 waveform samples")
             mix, c1, c2, r1, r2 = [s[indices, :n] for s in signals]
-            output = self.network(mix)
+            output = self.network(mix, estimate_ctf=not self.clean_only)
             loss, stats = self._loss(
                 output, torch.stack([c1, c2], 1), torch.stack([r1, r2], 1)
             )
@@ -230,6 +253,8 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
 
     @torch.no_grad()
     def separate(self, speech_mix):
-        """Return clean/reverberant waveforms and native complex CTFs."""
+        """Return waveform estimates; full mode also returns native complex CTFs."""
         dtype = next(self.network.parameters()).dtype
-        return self.network(self._mono(speech_mix).to(dtype=dtype))
+        return self.network(
+            self._mono(speech_mix).to(dtype=dtype), estimate_ctf=not self.clean_only
+        )

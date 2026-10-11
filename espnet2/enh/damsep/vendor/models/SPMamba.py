@@ -555,7 +555,9 @@ class SPMamba(BaseModel):
             attention="mamba(16,4)",
         )
 
-    def forward(self, input: torch.Tensor, return_all: bool = True):
+    def forward(
+        self, input: torch.Tensor, return_all: bool = True, estimate_ctf: bool = True
+    ):
         # ------- 1) SPMamba separation branch -------
         was_one_d = False
         if input.ndim == 1:
@@ -617,7 +619,7 @@ class SPMamba(BaseModel):
         )
 
         # BiSpatialNet: y_spch [BS,2,F,Tctf], y_CTF [BS,2,F,L], y_rev [BS,2,F,Tctf]
-        y_CTF, y_spch = self.recrir(feat_ctf)
+        y_CTF, y_spch = self.recrir(feat_ctf, estimate_ctf=estimate_ctf)
 
         # x_derev = y_spch[:, 0, ...].unsqueeze(1) + 1j * y_spch[:, 1, ...].unsqueeze(1)
         # y_spch: [BS, 2, F, Tctf]  -> derev_spec: [BS, Tctf, F] (ComplexTensor)
@@ -635,11 +637,13 @@ class SPMamba(BaseModel):
         # (可选) 保证 dtype 和 x_sep 一致
         x_derev = x_derev.to(dtype=x_sep.dtype)
 
-        return {
+        output = {
             "x_sep": x_sep,  # X1/X2 (reverberant, for separation loss)
             "x_derev": x_derev,  # dereverbed X1/X2 (for dereverb loss)
-            "rir": y_CTF,  # complex CTF as [B*S, real/imag, F, taps]
         }
+        if estimate_ctf:
+            output["rir"] = y_CTF  # [B*S, real/imag, F, taps]
+        return output
 
     @property
     def num_spk(self):

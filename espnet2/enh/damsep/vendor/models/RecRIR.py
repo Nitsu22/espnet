@@ -466,7 +466,9 @@ class BiSpatialNet(nn.Module):
             nn.Softmax(dim=2),
         )
 
-    def forward(self, input: Tensor, return_embedding=False) -> Tensor:
+    def forward(
+        self, input: Tensor, return_embedding=False, estimate_ctf=True
+    ) -> Tensor:
 
         input_pad = torch.nn.functional.pad(
             input,
@@ -490,6 +492,11 @@ class BiSpatialNet(nn.Module):
             x = m(x)
         x_clean = x
         y_clean = self.decoder_rev(x_clean).permute(0, 3, 1, 2)  # [B,C,F,T]
+
+        if not estimate_ctf:
+            if return_embedding:
+                raise ValueError("CTF embeddings require estimate_ctf=True")
+            return None, y_clean
 
         # Fuse reverberant and clean-branch features before CTF estimation.
         x = self.compress_CTF(x_rev, x_clean)
