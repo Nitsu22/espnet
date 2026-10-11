@@ -6,6 +6,7 @@ Relocation retains original RIR provenance and verifies exact baseline WAV bytes
 """
 
 import argparse
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
@@ -209,7 +210,27 @@ def _validate_manifest(report, require_full):
         raise ValueError("Oracle audio-link manifest is incomplete")
 
 
-def validate_prepared_dump(output, require_full=True):
+def _ordered_parallel_checks(function, items, workers):
+    """Bound in-flight work and report failures in the original input order."""
+    items = iter(items)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        pending = deque()
+        for _ in range(2 * workers):
+            try:
+                pending.append(executor.submit(function, next(items)))
+            except StopIteration:
+                break
+        while pending:
+            pending.popleft().result()
+            try:
+                pending.append(executor.submit(function, next(items)))
+            except StopIteration:
+                pass
+
+
+def validate_prepared_dump(output, require_full=True, workers=4):
+    if workers <= 0:
+        raise ValueError("validation workers must be positive")
     output = Path(output).resolve(strict=True)
     marker = output / "preparation.json"
     if not marker.is_file():
@@ -224,9 +245,11 @@ def validate_prepared_dump(output, require_full=True):
                     if path.is_file() and path.name != "preparation.json"}
     if actual_files != set(report["output_hashes"]):
         raise ValueError("Oracle dump file inventory changed")
-    for name, expected in report["output_hashes"].items():
+    def verify_checksum(item):
+        name, expected = item
         if digest(output / name) != expected:
             raise ValueError(f"Oracle dump checksum changed: {name}")
+    _ordered_parallel_checks(verify_checksum, report["output_hashes"].items(), workers)
     for split, examples in report["baseline_audio"].items():
         folder = output / "raw" / f"{split}_mix_clean_reverb_min_8k"
         maps = {name: read_scp(folder / name) for name in AUDIO_NAMES}
@@ -235,7 +258,8 @@ def validate_prepared_dump(output, require_full=True):
         if (any(set(values) != set(examples) for values in maps.values())
                 or set(ctf_map) != set(examples) or set(shape_map) != set(examples)):
             raise ValueError(f"Baseline index identity changed: {split}")
-        for uid, files in examples.items():
+        def verify_example(item):
+            uid, files = item
             expected_feature = output / "features" / split / (uid + ".npy")
             if ctf_map[uid] != str(expected_feature) or shape_map[uid] != "60":
                 raise ValueError(f"Oracle feature reference changed: {split}/{uid}")
@@ -253,6 +277,7 @@ def validate_prepared_dump(output, require_full=True):
                 path = Path(maps[name][uid])
                 if not path.is_absolute() or digest(path) != files[name]["sha256"]:
                     raise ValueError(f"Exact baseline audio changed: {split}/{uid}/{name}")
+        _ordered_parallel_checks(verify_example, examples.items(), workers)
     return report
 
 

@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import tempfile
@@ -143,7 +144,8 @@ def test_dump_publication_validation_relocation_and_corruption(tmp_path):
     feature = output / "features/tr" / (uid + ".npy")
     assert np.load(feature).shape == (60, 2, 129, 2)
     assert report["spec"]["tap_order"] == "causal"
-    prepare_oracle.validate_prepared_dump(output, require_full=False)
+    assert prepare_oracle.validate_prepared_dump(output, require_full=False) == report
+    assert prepare_oracle.validate_prepared_dump(output, require_full=False, workers=1) == report
     with unittest.TestCase().assertRaisesRegex(ValueError, "limited/smoke"):
         prepare_oracle.validate_prepared_dump(output)
     # RIR provenance is retained, but original RIRs need not exist for training.
@@ -161,6 +163,17 @@ def test_dump_publication_validation_relocation_and_corruption(tmp_path):
     finally:
         os.chdir(previous_directory)
     assert json.loads((portable / "preparation.json").read_text())["imported_manifest_sha256"]
+    first_started, second_finished = Event(), Event()
+    def out_of_order_failure(index):
+        if index == 0:
+            first_started.set()
+            assert second_finished.wait(timeout=2)
+            raise ValueError("first failure")
+        assert first_started.wait(timeout=2)
+        second_finished.set()
+        raise ValueError("second failure")
+    with unittest.TestCase().assertRaisesRegex(ValueError, "first failure"):
+        prepare_oracle._ordered_parallel_checks(out_of_order_failure, range(2), workers=2)
     feature.write_bytes(feature.read_bytes() + b"corrupt")
     with unittest.TestCase().assertRaisesRegex(ValueError, "checksum"):
         prepare_oracle.validate_prepared_dump(output, require_full=False)
