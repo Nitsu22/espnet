@@ -1,0 +1,1 @@
+../../enh4_clean/local/wsj_format_data.sh
