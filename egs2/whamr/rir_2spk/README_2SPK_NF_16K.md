@@ -44,6 +44,106 @@ CTF pairs each predicted filter with a reference speaker's direct and reverb
 speech. Sweep v2 pairs each filter with BOTH that speaker's direct-sweep and
 reverberant-sweep; swapping only the reverberant target would be incorrect.
 
+## Additional LS direct-reverb evaluation
+
+`run_ls_direct_reverb_eval.sh` Stage 1 creates a separate evaluation-only dump:
+`dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_16k`. It does not modify the existing
+training dump, physical clean-reverb references, mixture audio or model weights.
+The references can be reused by every model's existing ordinary-PIM predictions.
+
+For each left-microphone physical pair, form the full responses
+`x = sweep * h_direct` and `y = sweep * h_reverb`, then solve
+`min_g ||full_conv(x,g)-y||² + alpha*||x||²*||g||²`.
+Both physical RIRs retain their relative gain and timing, with one common
+direct-peak scale. `g` is a causal 32000-sample FIR starting at lag zero.
+The default `alpha=1e-6` is a declared initial reference setting, not a fitted
+or proven optimum. FFT-based CG solves the finite linear-convolution problem
+including the full predicted tail; failure to converge prevents publication.
+This is not FFT division followed by truncation or circular convolution.
+
+The evaluation reference is **ordinary `sweep*g`**, convolved with the same
+original inverse used by `RecRIRPIM`, cropped from peak minus 2.5 ms to 32000
+samples and stored as mono FLOAT WAV. Applying `x*g` at this step would restore
+the clean-reverb basis and is deliberately not used. The exact existing PIM
+sweep includes its ramps and guards; float64 computation improves LS numerical
+accuracy. Source hashes, output WAV/index hashes, solver settings, convergence
+and both sweep-response/physical-pair reconstruction errors are recorded.
+
+Dump contents:
+
+- `g_ls1/2.scp` and `filters1/2/`: fitted causal FIRs before PIM measurement.
+- `rir_ref_ls1/2.scp`, `reference.scp`, `rir1/2/`: measured evaluation references.
+- `preparation.json`, `records.jsonl`, `fit_metrics.csv`: definition and diagnostics.
+- `ls_rir_source.py`: checksum-verified snapshot of the exact fitting code.
+
+The full 3000-mixture test dump contains 6000 FIRs and 6000 reference RIRs,
+approximately 1.54 GB of waveform payload. Speech is not copied.
+
+```bash
+# Run from rir_2spk with the existing ESPnet Python environment.
+bash run_ls_direct_reverb_eval.sh --workers 2
+
+# Reuse existing predictions; inference and physical scoring need not be repeated.
+bash run_ls_direct_reverb_eval.sh --stage 2 --stop_stage 2 \
+    --prediction exp/MODEL/whamr/inference/rir.scp \
+    --model_label MODEL --out_dir exp/MODEL/whamr/score_ls_direct_reverb
+
+# Compare several models against exactly the same reference.
+python local/evaluate_ls_direct_reverb.py \
+    --reference_dir dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_16k \
+    --prediction Rec-RIR exp/REC/whamr/inference/rir.scp \
+    --prediction BiMamba exp/BIMAMBA/whamr/inference/rir.scp \
+    --out_dir exp/ls_direct_reverb_comparison
+```
+
+Alternatively, `local/evaluate_two_speaker.py --ls_reference_dir DIR` appends
+this evaluation to a normal inference/physical-scoring run. Existing defaults
+are unchanged. LS scores are saved separately as `score_ls_direct_reverb`.
+
+Every mixture uses one global two-speaker permutation chosen by full-waveform
+RMSE. Correlation and all secondary metrics use that same assignment. The
+existing scorer supplies peak alignment, independent absolute-peak scaling and
+preserved polarity. Thus these scores assess **relative-transfer waveform
+shape**, not absolute delay/gain. DRR/C50/RT60 here describe the relative filter
+and must not be presented as physical clean-reverb room parameters. Keep the
+original physical evaluation alongside these additional results.
+
+The reference depends on regularization, support and sweep bandwidth. Finite
+CTF approximation remains even after the basis is matched. Inspect
+`fit_metrics.csv`; sensitivity studies should create a NEW reference directory
+for each alpha and report results separately, without tuning on model test
+scores. Limited references require explicit `--allow_limited` for smoke tests.
+Preparation publishes only complete dumps and refuses to overwrite a directory;
+scoring verifies reference checksums, IDs, waveform headers and primary metric
+counts. Unit verification: `python -m unittest discover -s test/espnet2/rir
+-p test_ls_rir.py` from the repository root.
+
+Verified on 2026-10-12 (JST), using the existing local test data and predictions:
+all 3000 mixtures / 6000 pairs were prepared and checksum/header validated.
+Every LS fit converged in at most 15 CG iterations. Mean/max relative
+sweep-response MSE were 4.372e-7 / 4.002e-5; physical-pair reconstruction MSE
+were 9.211e-5 / 7.863e-3. The latter exposes the residual of the finite causal
+reference, rather than claiming exact inversion. On 24 pairs, changing alpha
+to 1e-7 or 1e-5 gave mean reference correlations above 0.999999; these checks
+did not select alpha based on model test scores. Nine numerical/integration
+tests, source-preservation checks, PIM identity/frame-aligned echo checks,
+the reusable shell entry point and code checks passed.
+
+| Existing checkpoint | LS-reference waveform RMSE | Waveform correlation |
+| --- | --- | --- |
+| Rec-RIR All loss | 0.00108549 | 0.986179 |
+| TF-Locoformer Sweep v2 | 0.00150266 | 0.975608 |
+| Pooled BiMamba Sweep v2 | 0.00141119 | 0.978652 |
+
+Each model used all 6000 source pairs with one global RMSE PIT assignment;
+every reported primary and secondary metric was finite. These are additional
+LS-reference results, not improvements over the old physical-reference scores.
+The checkpoint predictions were reused without new inference or training.
+Full comparisons and per-source rows are in
+`exp/ls_direct_reverb_evaluation_20261012/`; preparation logs, the 12-mixture
+smoke comparison, sensitivity checks and unit logs are in
+`exp/ls_direct_reverb_validation_20261012/`.
+
 Sweep v2 preserves full convolution tails and shared direct/reverb gain/timing.
 Each RIR pair is scaled by its direct absolute peak, without peak alignment.
 Nonzero RIR content exceeding 32000 samples is rejected. The recovered transfer

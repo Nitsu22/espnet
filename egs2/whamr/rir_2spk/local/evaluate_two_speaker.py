@@ -31,6 +31,8 @@ def main():
     parser.add_argument("--stage", choices=["all", "inference", "score"], default="all")
     parser.add_argument("--also_polarity_aligned", action="store_true",
                         help="Additionally save polarity-aligned scores for BUT comparisons")
+    parser.add_argument("--ls_reference_dir", type=Path,
+                        help="Also score against a prepared LS direct-reverb dump")
     args = parser.parse_args()
     if Path(args.checkpoint).name != args.checkpoint:
         raise ValueError("Checkpoint must be a filename within the experiment")
@@ -102,6 +104,12 @@ def main():
         aligned = score_command.copy()
         aligned[aligned.index("--out_dir") + 1] = str(output / "score_polarity_aligned")
         subprocess.run(aligned + ["--polarity_align"], check=True)
+    if args.ls_reference_dir:
+        subprocess.run([
+            sys.executable, str(recipe / "local/evaluate_ls_direct_reverb.py"),
+            "--reference_dir", str(args.ls_reference_dir.resolve()),
+            "--prediction", "checkpoint", str(output / "inference/rir.scp"),
+            "--out_dir", str(output / "score_ls_direct_reverb")], check=True)
     scoring_seconds = time.monotonic() - scoring_start
     for score_name in (["score", "score_polarity_aligned"]
                        if args.also_polarity_aligned else ["score"]):
