@@ -87,6 +87,33 @@ def test_recipe_stops_after_five_non_improving_epochs():
         ) == (epoch == 6)
 
 
+def test_runner_accepts_yaml_train_config_without_sourcing_it():
+    import subprocess
+
+    recipe = Path(__file__).resolve().parents[3] / "egs2/whamr/damsep_clean"
+    result = subprocess.run(
+        [
+            "bash",
+            "run.sh",
+            "--stage",
+            "6",
+            "--stop_stage",
+            "6",
+            "--ngpu",
+            "0",
+            "--train_config",
+            "conf/tuning/train_damsep_nf_8k_clean_only.yaml",
+        ],
+        cwd=recipe,
+        capture_output=True,
+        text=True,
+    )
+    # Stop at the expected resource check without performing any GPU/data work.
+    assert result.returncode == 2, result.stderr
+    assert "Stages 6 and 7 require at least one allocated GPU" in result.stderr
+    assert "command not found" not in result.stderr
+
+
 def test_shared_pit_reorders_all_three_outputs(cpu_model):
     torch.manual_seed(5)
     clean = torch.randn(2, 2, 640)

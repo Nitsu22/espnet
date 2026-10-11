@@ -7,7 +7,8 @@ stop_stage=8
 ngpu=1
 nj=4
 python=python3
-config=conf/tuning/train_damsep_nf_8k.yaml
+# parse_options.sh reserves --config for shell snippets, not model YAML.
+train_config=conf/tuning/train_damsep_nf_8k.yaml
 dumpdir=dump_clean
 reverb_dump=dump_reverb
 statsdir=exp/damsep_stats_8k
@@ -71,7 +72,7 @@ if (( stage <= 5 && stop_stage >= 5 )); then
     # extraction via model_conf.extract_feats_in_collect_stats=false.
     ${train_cmd} JOB=1:"${nj}" "${statsdir}/logdir/stats.JOB.log" \
         "${python}" -m espnet2.bin.damsep_train --collect_stats true \
-        --config "${config}" --ngpu 0 --num_workers 0 \
+        --config "${train_config}" --ngpu 0 --num_workers 0 \
         --batch_size 1 --valid_batch_size 1 "${args[@]}" \
         --train_shape_file "${statsdir}/logdir/train.JOB.scp" \
         --valid_shape_file "${statsdir}/logdir/valid.JOB.scp" \
@@ -88,7 +89,7 @@ if (( stage <= 6 && stop_stage >= 6 )); then
         --cmd "${cuda_cmd}" --log "${expdir}/train.log" --ngpu "${ngpu}" \
         --num_nodes 1 --init_file_prefix "${expdir}/.dist_init_" \
         --multiprocessing_distributed true -- \
-        "${python}" -m espnet2.bin.damsep_train --config "${config}" \
+        "${python}" -m espnet2.bin.damsep_train --config "${train_config}" \
         --output_dir "${expdir}" --resume "${resume}" \
         --batch_size "${ngpu}" --valid_batch_size "${ngpu}" --accum_grad "${accum_grad}" \
         --train_shape_file "${statsdir}/train/speech_mix_shape" \

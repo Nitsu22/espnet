@@ -205,7 +205,7 @@ Reuse the completed Stage 5 shapes, without collecting statistics again:
 
 ```bash
 bash run.sh --stage 6 --stop_stage 6 --ngpu 1 --accum_grad 1 \
-    --config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
+    --train_config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
     --expdir exp/damsep_nf_8k_clean_only
 qsub -g tga-shinoda qsub/train_clean_only_1gpu.sh
 ```

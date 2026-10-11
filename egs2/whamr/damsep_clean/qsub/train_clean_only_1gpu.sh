@@ -30,5 +30,5 @@ python local/check_training_inputs.py \
     --config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
     --report exp/damsep_nf_8k_clean_only/input_check.json --check_backward
 bash run.sh --stage 6 --stop_stage 6 --ngpu 1 --accum_grad 1 --resume true \
-    --config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
+    --train_config conf/tuning/train_damsep_nf_8k_clean_only.yaml \
     --expdir exp/damsep_nf_8k_clean_only
