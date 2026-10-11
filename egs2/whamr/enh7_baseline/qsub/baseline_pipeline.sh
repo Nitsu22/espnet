@@ -8,6 +8,8 @@ set -e
 . /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 set -euo pipefail
+export PATH="/apps/t4/rhel9/uge/latest/bin/lx-amd64:${PATH}"
+command -v qsub qacct >/dev/null
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export PYTHONPATH="${PWD}/../../..${PYTHONPATH:+:${PYTHONPATH}}"
 export NUMBA_CACHE_DIR="${TMPDIR:-/tmp}/nitsu_pipeline_numba_${JOB_ID}"
