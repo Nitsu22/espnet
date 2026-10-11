@@ -25,6 +25,7 @@ def main():
         raise ValueError('Use a new output')
     cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir','/tmp/two-spk-check'])
     assert not cfg.init_param and not cfg.use_amp
+    room_path = cfg.model_conf.get('predictor_conf', {}).get('room_path_factorized', False)
     torch.manual_seed(cfg.seed);np.random.seed(cfg.seed)
     model=RIRTask.build_model(cfg).cuda().train()
     proc=RIRTask.build_preprocess_fn(cfg,train=True)
@@ -57,6 +58,12 @@ def main():
         if parameter.requires_grad:
             assert parameter.grad is not None, name
             assert torch.isfinite(parameter.grad).all(), name
+    if room_path:
+        for component in ('room_pooling', 'room_path_fusion'):
+            gradients = [parameter.grad.abs().sum() for name, parameter in model.named_parameters()
+                         if parameter.requires_grad
+                         and name.startswith('ctf_predictor.' + component + '.')]
+            assert gradients and sum(gradients) > 0, component
     norm=torch.nn.utils.clip_grad_norm_(model.parameters(),cfg.grad_clip,error_if_nonfinite=True)
     opt.step();opt.zero_grad(set_to_none=True)
     torch.cuda.synchronize();seconds=time.perf_counter()-start
@@ -88,6 +95,23 @@ def main():
         permuted=model(**swapped)[0]
         torch.testing.assert_close(current,permuted,rtol=2e-5,atol=2e-6)
         rir=model.estimate_rir(batch['speech_mix'][0],rir_length=cfg.preprocessor_conf['rir_length'])
+        if room_path:
+            estimate, auxiliary = model.estimate_ctf_with_auxiliary(batch['speech_mix'][0])
+            room = auxiliary['room_code'].unsqueeze(0)
+            paths = auxiliary['path_codes'].unsqueeze(0)
+            decoded = model.ctf_predictor.decode_room_path(room, paths)
+            torch.testing.assert_close(decoded[0].flip(-1), estimate, rtol=2e-5, atol=2e-6)
+            changed_paths = paths.clone()
+            changed_paths[:, 0, :, 0] += 1
+            changed = model.ctf_predictor.decode_room_path(room, changed_paths)
+            torch.testing.assert_close(decoded[:, 1], changed[:, 1], rtol=0, atol=0)
+            assert not torch.allclose(decoded[:, 0], changed[:, 0])
+            swapped_paths = model.ctf_predictor.decode_room_path(room, paths.flip(1))
+            torch.testing.assert_close(swapped_paths, decoded.flip(1), rtol=2e-5, atol=2e-6)
+            changed_room = room.clone()
+            changed_room[..., 0] += 1
+            room_result = model.ctf_predictor.decode_room_path(changed_room, paths)
+            assert all(not torch.allclose(room_result[:, slot], decoded[:, slot]) for slot in (0, 1))
     assert rir.shape==(2,cfg.preprocessor_conf['rir_length']) and torch.isfinite(rir).all()
     valid_profile = []
     if args.valid_data_dir is not None:
@@ -129,6 +153,10 @@ def main():
                 losses={k:float(v) for k,v in stats.items()},teacher_permutation_invariant=True,
                 noise_free_mixture_verified=True,active_parameters_have_finite_gradients=True,
                 rir_shape=list(rir.shape))
+    if room_path:
+        report['room_path_structure_verified'] = True
+        report['room_path_branch_gradients_nonzero'] = True
+        report['auxiliary_shapes'] = {name: list(value.shape) for name, value in auxiliary.items()}
     if step_seconds:
         report['steady_update_seconds'] = float(np.median(step_seconds))
         report['timed_step_seconds'] = step_seconds

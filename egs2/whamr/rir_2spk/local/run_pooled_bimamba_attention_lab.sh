@@ -5,7 +5,19 @@ set -euo pipefail
 variant=$1
 gpu_index=$2
 result_recipe=$(realpath "$3")
-case "$variant" in post_speaker|post_joint|post_frequency|pre_speaker) ;; *) exit 2 ;; esac
+case "$variant" in
+    post_speaker|post_joint|post_frequency|pre_speaker)
+        experiment_kind=attention_ablation
+        experiment_date=20261011
+        expected_parameters=489964
+        ;;
+    room_path)
+        experiment_kind=room_path
+        experiment_date=20261012
+        expected_parameters=467052
+        ;;
+    *) exit 2 ;;
+esac
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
 recipe=$(cd "$(dirname "$0")/.." && pwd)
 cd "$recipe"
@@ -13,10 +25,10 @@ code_root=$(git rev-parse --show-toplevel)
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
 prefix=train_pooled_bimamba_2spk_nf_16k_sweep_v2
 config="conf/tuning/${prefix}_${variant}.yaml"
-run_dir="$result_recipe/exp/attention_ablation_training_20261011/$variant"
+run_dir="$result_recipe/exp/${experiment_kind}_training_${experiment_date}/$variant"
 stats_dir="$result_recipe/exp/rir_stats_${prefix}_${variant}"
 model_dir="$result_recipe/exp/rir_${prefix}_${variant}"
-eval_dir="$result_recipe/exp/attention_ablation_whamr_20261011/$variant"
+eval_dir="$result_recipe/exp/${experiment_kind}_whamr_${experiment_date}/$variant"
 test_data=$(realpath dump_nf_2spk_16k_min/raw/tt_rir_2spk_nf_min_16k)
 [[ -x "$python" && -f "$config" ]] || exit 1
 # The caller may create directories for launch.log; all state and model outputs
@@ -29,7 +41,7 @@ done
 mkdir -p "$run_dir" "$eval_dir"
 export CUDA_VISIBLE_DEVICES="$gpu_index"
 export TZ=Asia/Tokyo
-export NUMBA_CACHE_DIR="/tmp/nitsu-bimamba-attention-${variant}-numba"
+export NUMBA_CACHE_DIR="/tmp/nitsu-bimamba-${experiment_kind}-${variant}-numba"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export PYTHONPATH="$code_root${PYTHONPATH:+:$PYTHONPATH}"
 phase=initialization
@@ -103,15 +115,19 @@ set_phase gpu_check
     --data-dir dump_nf_2spk_16k_min/raw/tr_rir_2spk_nf_min_16k \
     --valid-data-dir dump_nf_2spk_16k_min/raw/cv_rir_2spk_nf_min_16k \
     --batch-size 4 --warmup-steps 1 --timed-steps 2 --output "$run_dir/gpu_check.json"
-"$python" - "$run_dir/gpu_check.json" <<'PY'
+"$python" - "$run_dir/gpu_check.json" "$expected_parameters" "$variant" <<'PY'
 import json, pathlib, sys
 report = json.loads(pathlib.Path(sys.argv[1]).read_text())
-if report['parameters'] != 489964:
-    raise ValueError(f"Unexpected attention-ablation parameter count: {report['parameters']}")
+if report['parameters'] != int(sys.argv[2]):
+    raise ValueError(f"Unexpected model parameter count: {report['parameters']}")
 for flag in ('teacher_permutation_invariant', 'noise_free_mixture_verified',
              'active_parameters_have_finite_gradients'):
     if report[flag] is not True:
         raise ValueError(f'GPU check failed: {flag}')
+if sys.argv[3] == 'room_path':
+    for flag in ('room_path_structure_verified', 'room_path_branch_gradients_nonzero'):
+        if report.get(flag) is not True:
+            raise ValueError(f'Room/path GPU check failed: {flag}')
 if report['rir_shape'] != [2, 32000]:
     raise ValueError('GPU inference did not return two two-second RIRs')
 PY

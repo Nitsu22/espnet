@@ -474,7 +474,7 @@ hashes and matching CSV aggregates. A later-stage failure records the failed
 phase and nonzero pipeline exit while preserving successful training markers.
 
 
-## Shared room and two path embeddings (structure only)
+## Shared room and two path embeddings
 
 `RoomPathPooledBiMambaCTFPredictor` extends the existing mixture encoder and
 weighted temporal pooling with a shared room embedding. It keeps the original
@@ -513,8 +513,8 @@ Select the structure with
 `conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_room_path.yaml`.
 The default remains the original predictor. The existing SweepCTF v2 objective,
 teachers, full response tail, PIT, padding behavior and ordinary-sweep RIR
-inference are reused. Model construction, shape checks and CPU verification
-are provided here; this addition does not launch training or evaluation.
+inference are reused. Model construction and CPU verification are supplemented by the explicit lab
+training/evaluation launcher described below.
 
 `encode_room_path()` exposes `room`, `path1` and `path2`.
 `decode_room_path(room, path)` accepts one path or stacked paths and returns
@@ -530,3 +530,39 @@ baseline. Common baseline parameters retain identical initial values under
 the same seed. Tests cover independent branch decoding, path permutation,
 shared-room gradients, unchanged paired-sweep objective/PIT and checkpoint
 and two-RIR inference round trips.
+
+
+### Room/path lab training and automatic WHAMR evaluation
+
+`run_pooled_bimamba_2spk_nf_16k_sweep_v2_room_path.sh` selects the room/path
+configuration with a separate experiment tag. The lab pipeline first checks
+real CUDA gradients, nonzero room/fusion gradients, paired-teacher PIT,
+independent path decoding, shared-room influence, two-RIR inference and
+validation including the longest utterance. These probe updates are discarded;
+Stage 6 starts from scratch with the original seed and common training settings.
+
+After checking the selected GPU is free and synchronizing the committed code,
+run this in a persistent session:
+
+```bash
+bash local/run_pooled_bimamba_room_path_lab.sh \
+  GPU_INDEX /absolute/path/to/original/egs2/whamr/rir_2spk
+```
+
+The launcher reuses the existing prepared NF-WHAMR 16 kHz dump. It automatically
+trains, selects `valid.loss.best.pth`, evaluates two smoke examples, then infers
+all 3,000 WHAMR test mixtures and scores all 6,000 source RIRs. Scoring is CPU
+only. The shared evaluator and finalizer check the original peak alignment,
+peak normalization, ordinary-sweep PIM, global source PIT, complete IDs and
+checkpoint/config provenance. The evaluation scope is WHAMR only.
+
+The existing attention-experiment runner now also routes `room_path`; its
+original four variants and parameter checks remain supported. Fresh room/path
+runs use `exp/room_path_training_20261012/room_path/` for phase/exit markers and
+GPU checks, `exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_room_path/` for
+weights and training logs, and `exp/room_path_whamr_20261012/room_path/whamr/`
+for predictions and scores. Existing run/model/stats/evaluation state is
+rejected rather than overwritten. Every failed phase saves a nonzero status;
+`evaluation_complete.json` appears only after successful validation of the
+full result. The actual selected best epoch is recorded without fixing an
+expected epoch in advance.
