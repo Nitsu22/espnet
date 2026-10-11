@@ -85,6 +85,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_bigdeltanet import (
     TFLocoformerBiGatedDeltaNetSeparator,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_bimamba import (
+    TFLocoformerBiMambaSeparator,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf import (
     TFLocoformerCTFSeparator,
 )
@@ -173,6 +176,7 @@ separator_choices = ClassChoices(
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
+        tflocoformer_nocashe_bimamba=TFLocoformerBiMambaSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
         tflocoformer_nocashe_aeafusion_first=TFLocoformerSeparatorNocasheAEAFusionFirst,
         tflocoformer_nocashe_film=TFLocoformerSeparatorNocasheFiLM,
