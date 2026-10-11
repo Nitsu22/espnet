@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 
@@ -145,6 +146,9 @@ def gpu(condition):
     folder = exp / ".pipeline"
     epoch, trained = training_state(exp)
     if not trained:
+        if (exp / "train.log").exists():
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exp / "train.log", folder / ("train_before_" + os.environ["JOB_ID"] + ".log"))
         if condition == "nf16":
             args = ["bash", "qsub/train_nf16k_tflocoformer_s_1gpu.sh"]
         else:
@@ -162,10 +166,17 @@ def gpu(condition):
         subset = "mix_both_reverb_min_8k" if condition == "whamr8" else (
             "mix_clean_reverb_min_16k" if condition == "nf16" else "mix_clean_reverb_min_8k")
         for split, count in (("cv", 5000), ("tt", 3000)):
+            dump = Path("dump_nf16k" if condition == "nf16" else (
+                "dump" if condition == "whamr8" else "dump_clean"))
+            source = dump / "raw" / (split + "_" + subset) / "wav.scp"
+            expected = {line.split(maxsplit=1)[0] for line in source.read_text().splitlines()}
             for speaker in (1, 2):
                 paths = list(exp.glob("*_{}_{}/spk{}.scp".format(split, subset, speaker)))
                 if len(paths) != 1 or len(paths[0].read_text().splitlines()) != count:
                     raise RuntimeError("Incomplete inference SCPs")
+                entries = [line.split(maxsplit=1) for line in paths[0].read_text().splitlines()]
+                if {uid for uid, _ in entries} != expected or any(not Path(wav).is_file() for _, wav in entries):
+                    raise RuntimeError("Inference IDs or output WAV files differ from inputs")
         save(folder / "inference.done.json", dict(epoch=epoch, model="valid.loss.best.pth"))
 
 
