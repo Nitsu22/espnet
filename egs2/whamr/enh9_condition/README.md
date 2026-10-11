@@ -84,7 +84,8 @@ qsub -g tga-shinoda qsub/train_oracle_ctf_concat_1gpu.sh true
 
 本学習は gpu_1×1・24時間・priority-5、上限見積もり3.84ポイント。
 これらは確定課金ではない。本学習の投入は準備・検証とは別に行う。
-学習前にCUDA検証のcommit/config/dump hash一致を確認する。
+学習前にCUDA検証時のモデル・実行コード、config/dump hashの一致を確認する。
+自動進行やドキュメントだけの変更では、同一の検証済みモデルを再利用できる。
 出力は `exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_concat_seed0`。
 
 ```bash
@@ -94,3 +95,27 @@ bash run.sh --stage 8 --stop_stage 8 --ngpu 0
 
 valid.loss.best.pth を採用し、cv/tt の2話者無響音声に対する SI-SNR/SDR 等を
 既存 ESPnet の採点で評価する。元 DAI-8 のモデル・出力は変更しない。
+
+## Stage 8までの自動進行
+
+専用checkoutで次を1回投入する。初期制御ジョブが学習と終了待ちの
+制御ジョブを登録する。学習完了後に推論、推論全8,000件の完了確認後に
+8並列のCPU採点へ進み、`RESULTS.md` と `.pipeline/score.done.json` を作る。
+
+```bash
+qsub -g tga-shinoda -l cpu_4=1 -l h_rt=00:10:00 -p -5 \
+    -N oracle_control qsub/oracle_ctf_pipeline.sh --phase control
+```
+
+学習の時間切れはSGE accountingとcheckpointのepoch進捗を確認して再開する。
+正常終了、max_epoch150またはpatience10の到達、best modelの整合を確認して
+Stage 7へ進む。時間切れ以外の異常、進捗のない再開、欠落した出力は停止する。
+自動再投入は学習12区間・推論2回・採点3回を上限とする。
+採点の再実行では、全IDと全指標が揃った区間を再利用する。
+
+各ジョブはpriority-5。学習gpu_1/24hは上限3.84ポイント/区間、
+推論gpu_1/4hは0.64、採点cpu_8/6hは0.144、
+制御cpu_4/10分は0.002/回。実行時間と再開回数は未確定で、
+全再試行上限を使った場合の上限見積もりは47.828ポイント。
+投入ごとのID・資源・上限見積もりは `.pipeline/jobs.json` に記録する。
+確定課金とは異なる。制御・実行中はこのcheckoutを更新しない。

@@ -18,16 +18,6 @@ export PYTHONPATH="${PWD}/../../..${PYTHONPATH:+:${PYTHONPATH}}"
 export NUMBA_CACHE_DIR="${TMPDIR:-/tmp}/oracle_ctf_numba_${JOB_ID}"
 export MPLCONFIGDIR="${TMPDIR:-/tmp}/oracle_ctf_mpl_${JOB_ID}"
 resume=${1:-false}
-python - <<'PY'
-import hashlib, json, subprocess
-from pathlib import Path
-p = json.loads(Path('exp/oracle_ctf_cuda_check.json').read_text())
-assert p['status'] == 'passed' and p['device'] == 'cuda'
-assert p['counts'] == {'tr': 20000, 'cv': 5000, 'tt': 3000}
-assert p['config_sha256'] == hashlib.sha256(Path('conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_concat.yaml').read_bytes()).hexdigest()
-assert p['manifest_sha256'] == hashlib.sha256(Path('dump_oracle_ctf_nf8k/preparation.json').read_bytes()).hexdigest()
-assert p['commit'] == subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-print('Verified CUDA readiness for this commit, config and dump')
-PY
+python local/check_oracle_ctf_readiness.py
 bash run_oracle_ctf_concat.sh --stage 6 --stop_stage 6 --ngpu 1 \
     --python "${CONDA_PREFIX}/bin/python" --resume "${resume}"

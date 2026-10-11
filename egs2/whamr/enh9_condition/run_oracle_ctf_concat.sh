@@ -78,8 +78,8 @@ for split in cv tt; do
     fi
     if (( stage <= 8 && stop_stage >= 8 )); then
         "${python}" -m espnet2.bin.enh_scoring \
-            --ref_scp "${folder}/spk1.scp" "${folder}/spk2.scp" \
-            --inf_scp "${out}/spk1.scp" "${out}/spk2.scp" \
+            --ref_scp "${folder}/spk1.scp" --ref_scp "${folder}/spk2.scp" \
+            --inf_scp "${out}/spk1.scp" --inf_scp "${out}/spk2.scp" \
             --key_file "${folder}/wav.scp" --ref_channel 0 --output_dir "${out}/score"
     fi
 done
