@@ -472,3 +472,61 @@ result recipe. Evaluation output is
 markers, complete IDs/PIT pairs, unchanged scoring settings, checkpoint/config
 hashes and matching CSV aggregates. A later-stage failure records the failed
 phase and nonzero pipeline exit while preserving successful training markers.
+
+
+## Shared room and two path embeddings (structure only)
+
+`RoomPathPooledBiMambaCTFPredictor` extends the existing mixture encoder and
+weighted temporal pooling with a shared room embedding. It keeps the original
+path-pooling hidden layers and two path-score heads, and adds one room-score
+head using the same hidden features. Each head independently applies softmax
+over time for every frequency and feature channel. Pooling therefore produces
+three frequency-resolved feature maps:
+
+```text
+shared Time/Frequency encoder
+  -> weighted temporal pooling
+       room:  [B, F, D]
+       path1: [B, F, D]
+       path2: [B, F, D]
+
+CTF1 = Decoder(room, path1)
+CTF2 = Decoder(room, path2)
+
+Decoder: Concat(room, path)
+  -> LayerNorm(2D) -> Linear(2D, D) -> SiLU
+  -> shared FrequencyAttentionBlock x2
+  -> shared complex CTF head
+```
+
+At the 16 kHz baseline settings, each feature map is `[B, 257, 64]` and each
+CTF is `[B, 257, 60]`. The room tensor is shared exactly between the two
+independent decoder branches. PIT assigns the two CTF outputs to the teachers;
+the corresponding path codes follow these output slots, while the room code
+has no speaker ordering. Decoder weights are shared, including
+frequency blocks and the output head. The decoder never reads the other path.
+Consequently, enabling speaker/joint post-pooling interaction or moving the
+frequency decoder before pooling is rejected for this structure.
+
+Select the structure with
+`model_conf.predictor_conf.room_path_factorized: true`, as in
+`conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_room_path.yaml`.
+The default remains the original predictor. The existing SweepCTF v2 objective,
+teachers, full response tail, PIT, padding behavior and ordinary-sweep RIR
+inference are reused. Model construction, shape checks and CPU verification
+are provided here; this addition does not launch training or evaluation.
+
+`encode_room_path()` exposes `room`, `path1` and `path2`.
+`decode_room_path(room, path)` accepts one path or stacked paths and returns
+complex CTFs. The existing `estimate_ctf_with_auxiliary()` inference API also
+returns `room_code` and `path_codes`. These embeddings have the requested
+sharing structure; no additional supervision establishes that they separate
+physical room properties from source/microphone path properties.
+
+With 64 features, pooling hidden size 32, four encoder blocks and two decoder
+blocks, the room-score head adds 2,112 parameters and the fusion adds 8,512.
+The total is 467,052 parameters (467,036 trainable), versus 456,428 for the
+baseline. Common baseline parameters retain identical initial values under
+the same seed. Tests cover independent branch decoding, path permutation,
+shared-room gradients, unchanged paired-sweep objective/PIT and checkpoint
+and two-RIR inference round trips.

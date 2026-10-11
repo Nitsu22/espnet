@@ -1,5 +1,6 @@
 """Pooled predictor with shared Sweep v2 PIT/PIM and optional DRR supervision."""
 from espnet2.rir.rec_rir.pooled_bimamba import PooledBiMambaCTFPredictor
+from espnet2.rir.rec_rir.pooled_bimamba_room_path import RoomPathPooledBiMambaCTFPredictor
 from espnet2.rir.rec_rir.tflocoformer_sweep_v2_pit import ESPnetTFLocoformerSweepV2PITModel
 
 
@@ -9,7 +10,12 @@ class ESPnetPooledBiMambaSweepV2PITModel(ESPnetTFLocoformerSweepV2PITModel):
         reserved = {'input_dim', 'num_spk', 'ctf_taps'} & conf.keys()
         if reserved:
             raise ValueError(f"Specify {sorted(reserved)} in model_conf, not predictor_conf")
-        predictor = PooledBiMambaCTFPredictor(input_dim=num_freqs, num_spk=num_spk,
-                                            ctf_taps=ctf_taps, **conf)
+        room_path_factorized = conf.pop("room_path_factorized", False)
+        if not isinstance(room_path_factorized, bool):
+            raise ValueError("room_path_factorized must be a boolean")
+        predictor_class = (RoomPathPooledBiMambaCTFPredictor
+                           if room_path_factorized else PooledBiMambaCTFPredictor)
+        predictor = predictor_class(input_dim=num_freqs, num_spk=num_spk,
+                                    ctf_taps=ctf_taps, **conf)
         super().__init__(num_freqs=num_freqs, num_spk=num_spk, ctf_taps=ctf_taps,
                          ctf_predictor=predictor, **kwargs)
