@@ -58,7 +58,9 @@ def main():
         result = {}
         for source, target in [('wav', 'speech_mix'), ('spk1', 'speech_ref1'),
                                ('spk2', 'speech_ref2')]:
-            wave, rate = sf.read(values[source][uid], always_2d=True)
+            wave, rate = sf.read(
+                values[source][uid], dtype=config.train_dtype, always_2d=True
+            )
             if rate != 8000:
                 raise ValueError('Unexpected sample rate')
             result[target] = wave
@@ -66,8 +68,8 @@ def main():
         return result
 
     training = maps('tr')
-    eligible = [uid for uid, path in training['wav'].items()
-                if sf.info(path).frames >= 32000]
+    eligible = [uid for uid in training['wav']
+                if manifest['baseline_audio']['tr'][uid]['wav.scp']['frames'] >= 32000]
     if len(eligible) < 4:
         raise ValueError('Need four full-crop examples for batch4 validation')
     examples = [(uid, preprocess(uid, example(training, uid))) for uid in eligible[:4]]
@@ -75,6 +77,8 @@ def main():
     batch = to_device(batch, args.device)
     if tuple(batch['speech_mix'].shape[:2]) != (4, 32000):
         raise ValueError('Expected a physical four-example, four-second crop')
+    if batch['speech_mix'].dtype != torch.float32:
+        raise ValueError('Keep the DAI-8 FP32 audio reader')
     if tuple(batch['rir_ctf'].shape) != (4, 60, 2, 129, 2):
         raise ValueError('CTF axes were changed by cropping/collation')
     if args.device == 'cuda':
@@ -97,7 +101,10 @@ def main():
     training_loss = float(loss.detach())
     del batch, examples, loss, optimizer
     validation = maps('cv')
-    longest = max(validation['wav'], key=lambda uid: sf.info(validation['wav'][uid]).frames)
+    longest = max(
+        validation['wav'],
+        key=lambda uid: manifest['baseline_audio']['cv'][uid]['wav.scp']['frames'],
+    )
     valid_preprocess = EnhancementRIRCTFTask.build_preprocess_fn(config, train=False)
     _, validation_batch = collate([(longest, valid_preprocess(longest, example(validation, longest)))])
     validation_batch = to_device(validation_batch, args.device)
