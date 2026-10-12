@@ -529,3 +529,68 @@ same ordinary-PIM model predictions. No comparison CSV is required.
 CPU verification is `python test/espnet2/rir/rec_rir/test_pooled_bimamba_frequency.py`.
 Its frequency-Mamba substitutes check layout and integration; real selective
 scan is verified by `local/check_two_speaker_training.py` on CUDA before a run.
+
+## Temporal local attention before BiMamba
+
+`train_pooled_bimamba_2spk_nf_16k_sweep_v2_time_local_attention125.yaml`
+adds one temporal attention block before each of the four existing time
+BiMamba blocks. The frequency modules remain the original light Conv/MLP
+before pooling and the two original frequency attention/Conv-FFN blocks
+after pooling. Encoder, two-speaker pooling, CTF head, shared Sweep v2
+direct/reverb teachers, full-tail loss and utterance PIT are unchanged.
+
+```
+Encoder
+  -> (temporal local attention -> temporal BiMamba -> light frequency) x4
+  -> two-slot weighted temporal pooling
+  -> shared frequency attention/Conv-FFN x2
+  -> complex CTF [B, 2, 257, 60]
+```
+
+Each local block uses LayerNorm, 64-dimensional features, four heads,
+temporal RoPE, an output projection and residual addition. The window is
+125 frames: 62 past frames, the current frame and 62 future frames. With
+the unchanged 256-sample hop at 16 kHz, this is +/-992 ms. This is the
+receptive field of each added block; the following BiMamba still processes
+the full observation sequence. The input crop is at most four seconds,
+and validation/inference retain the full observation. The CTF still has
+60 taps, independently of the attention window.
+
+The `TimeLocalAttention` implementation computes the exact symmetric
+window in bounded query blocks and independent frequency-sequence groups.
+It never creates a full long-input T-by-T attention matrix or mask. The
+default execution chunks are 64 queries and 64 sequences; with window125,
+each call uses at most 188 keys. Changing these chunks does not change
+the attention window. Nonexistent positions beyond tensor edges are
+excluded. Batch padding is intentionally treated like the existing
+baseline, including in BiMamba/pooling; this is not a padding fix.
+
+The configuration differs from the original baseline only by
+`predictor_conf.time_local_attention_window: 125`. Setting it to zero
+preserves legacy checkpoint keys and execution. Common initialization
+and RNG state are preserved when enabling the addition. The model has
+523,500 total parameters (523,484 trainable), including 67,072 new trainable
+parameters across the four local attention blocks.
+
+Run from this checkout's `egs2/whamr/rir_2spk` directory:
+
+```bash
+bash run_pooled_bimamba_2spk_nf_16k_sweep_v2_time_local_attention125.sh \
+  --stage 5 --stop_stage 6 --ngpu 1
+```
+
+Select an available physical GPU via `CUDA_VISIBLE_DEVICES` using the lab
+execution skill before running. For a worktree, use `--rir_exp` and
+`--rir_stats_dir` to place training artifacts in the main recipe's `exp/`
+when desired. Input shapes and output tags are distinct from the baseline.
+For CPU verification, run
+`python test/espnet2/rir/rec_rir/test_pooled_bimamba_time_local.py`; it checks
+an independent dense-softmax output/gradient reference, exact locality,
+chunk boundaries, legacy initialization, checkpoint loading and shared
+Sweep v2 PIT. Before training, verify the full YAML and real Mamba kernels
+with `local/check_two_speaker_training.py` on CUDA, including the longest
+validation observation. GPU scratch-update weights are discarded.
+
+WHAMR scoring should separately report the physical RIR and the fixed
+LS direct-reverb reference using the same ordinary-sweep PIM predictions.
+An extra comparison CSV is not needed.

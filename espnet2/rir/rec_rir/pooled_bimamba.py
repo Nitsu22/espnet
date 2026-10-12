@@ -13,6 +13,91 @@ from rotary_embedding_torch import RotaryEmbedding
 from espnet2.rir.rec_rir.model import _build_mamba
 
 
+class TimeLocalAttention(nn.Module):
+    """Residual temporal attention within an exact centered frame window.
+
+    Every frequency bin is an independent sequence. Query and sequence
+    batches are bounded separately, avoiding a full ``T x T`` attention
+    matrix or mask even for long validation utterances. RoPE positions are
+    absolute frame indices, independent of query chunk boundaries.
+
+    Only nonexistent positions beyond the sequence edges are excluded.
+    Batch padding remains visible, matching the existing predictor baseline.
+    """
+
+    def __init__(self, dim, heads, window, eps, query_chunk_size=64,
+                 sequence_batch_size=64):
+        super().__init__()
+        dimensions = (dim, heads, window, query_chunk_size, sequence_batch_size)
+        if any(isinstance(value, bool) or not isinstance(value, int)
+               or value <= 0 for value in dimensions):
+            raise ValueError("Local attention dimensions must be positive integers")
+        if window % 2 != 1:
+            raise ValueError("Local attention window must be odd")
+        if dim % heads or (dim // heads) % 2:
+            raise ValueError("Temporal RoPE requires an even head dimension and dim divisible by heads")
+        self.dim = dim
+        self.heads = heads
+        self.window = window
+        self.radius = window // 2
+        self.query_chunk_size = query_chunk_size
+        self.sequence_batch_size = sequence_batch_size
+        self.norm_attention = nn.LayerNorm(dim, eps=eps)
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.projection = nn.Linear(dim, dim)
+        head_dim = dim // heads
+        frequencies = 1.0 / (
+            10000 ** (torch.arange(0, head_dim, 2).float() / head_dim))
+        self.register_buffer("rope_frequencies", frequencies, persistent=False)
+
+    def _rotate_time_positions(self, tensor, positions):
+        angles = (positions.float()[:, None]
+                  * self.rope_frequencies.float()[None, :])
+        angles = angles.repeat_interleave(2, dim=-1).to(tensor)
+        paired = tensor.reshape(*tensor.shape[:-1], -1, 2)
+        rotated_half = torch.stack((-paired[..., 1], paired[..., 0]), -1)
+        rotated_half = rotated_half.flatten(-2)
+        return tensor * angles.cos() + rotated_half * angles.sin()
+
+    def forward(self, x):
+        if x.ndim != 4 or x.shape[-1] != self.dim:
+            raise ValueError("Expected features [B, T, F, dim]")
+        batch, frames, freqs, dim = x.shape
+        if min(batch, frames, freqs) <= 0:
+            raise ValueError("Local attention requires nonempty feature axes")
+        sequence = x.permute(0, 2, 1, 3).reshape(batch * freqs, frames, dim)
+        positions = torch.arange(frames, device=x.device)
+        updates = []
+        for sequence_start in range(0, batch * freqs, self.sequence_batch_size):
+            chunk = sequence[sequence_start:sequence_start + self.sequence_batch_size]
+            count = chunk.shape[0]
+            qkv = self.qkv(self.norm_attention(chunk)).reshape(
+                count, frames, 3, self.heads, dim // self.heads)
+            query, key, value = qkv.permute(2, 0, 3, 1, 4).unbind(0)
+            query = self._rotate_time_positions(query, positions)
+            key = self._rotate_time_positions(key, positions)
+            query_updates = []
+            for query_start in range(0, frames, self.query_chunk_size):
+                query_end = min(frames, query_start + self.query_chunk_size)
+                key_start = max(0, query_start - self.radius)
+                key_end = min(frames, query_end + self.radius)
+                # SDPA's boolean mask uses True for allowed key positions.
+                distance = (positions[query_start:query_end, None]
+                            - positions[None, key_start:key_end]).abs()
+                allowed = distance <= self.radius
+                update = F.scaled_dot_product_attention(
+                    query[:, :, query_start:query_end],
+                    key[:, :, key_start:key_end],
+                    value[:, :, key_start:key_end],
+                    attn_mask=allowed, dropout_p=0.0)
+                query_updates.append(update)
+            update = torch.cat(query_updates, dim=2)
+            update = update.transpose(1, 2).reshape(count, frames, dim)
+            updates.append(self.projection(update))
+        update = torch.cat(updates, dim=0)
+        return x + update.reshape(batch, freqs, frames, dim).permute(0, 2, 1, 3)
+
+
 class TimeBiMamba(nn.Module):
     def __init__(self, dim, d_state, d_conv, eps):
         super().__init__()
@@ -246,7 +331,10 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  pre_frequency_global=True, post_interaction="none",
                  post_interaction_order="after_frequency",
                  pre_frequency_module="light",
-                 post_frequency_module="attention"):
+                 post_frequency_module="attention",
+                 time_local_attention_window=0,
+                 time_local_attention_query_chunk_size=64,
+                 time_local_attention_sequence_batch_size=64):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -261,6 +349,17 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("frequency_refinement_position must be 'after_pool' or 'before_pool'")
         if time_module not in ("bimamba", "bilstm"):
             raise ValueError("time_module must be 'bimamba' or 'bilstm'")
+        if (isinstance(time_local_attention_window, bool)
+                or not isinstance(time_local_attention_window, int)
+                or time_local_attention_window < 0
+                or (time_local_attention_window > 0
+                    and time_local_attention_window % 2 != 1)):
+            raise ValueError("time_local_attention_window must be zero or a positive odd integer")
+        local_chunks = (time_local_attention_query_chunk_size,
+                        time_local_attention_sequence_batch_size)
+        if any(isinstance(value, bool) or not isinstance(value, int)
+               or value <= 0 for value in local_chunks):
+            raise ValueError("Local attention chunk sizes must be positive integers")
         if not isinstance(pooling_channelwise, bool):
             raise ValueError("pooling_channelwise must be a boolean")
         if not isinstance(pre_frequency_global, bool):
@@ -292,6 +391,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
                 raise ValueError("Frequency RoPE requires an even head dimension")
         time_indices = self._active_indices(time_block_indices, pre_layers, "time_block_indices")
         frequency_indices = self._active_indices(frequency_block_indices, pre_layers, "frequency_block_indices")
+        if time_local_attention_window and not time_indices:
+            raise ValueError("Local attention requires at least one active time stage")
         self.input_dim = input_dim
         self._num_spk = num_spk
         self.ctf_taps = ctf_taps
@@ -300,6 +401,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.post_interaction_order = post_interaction_order
         self.pre_frequency_module = pre_frequency_module
         self.post_frequency_module = post_frequency_module
+        self.time_local_attention_window = time_local_attention_window
+        self.time_local_attention_query_chunk_size = time_local_attention_query_chunk_size
+        self.time_local_attention_sequence_batch_size = time_local_attention_sequence_batch_size
         self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
@@ -361,6 +465,22 @@ class PooledBiMambaCTFPredictor(nn.Module):
                     lambda: FrequencyBiMambaBlock(
                         emb_dim, d_state, d_conv, eps, attention),
                 )
+        # Initialize the additive time modules last, with independent RNG
+        # streams. Enabling them leaves every shared weight and RNG state
+        # identical to the baseline; disabling adds no state-dict entries.
+        self.time_local_attention_blocks = nn.ModuleList()
+        if time_local_attention_window:
+            for index in range(pre_layers):
+                block = nn.Identity()
+                if index in time_indices:
+                    block = seeded_module(
+                        400009 + 97 * index,
+                        lambda: TimeLocalAttention(
+                            emb_dim, n_heads, time_local_attention_window, eps,
+                            time_local_attention_query_chunk_size,
+                            time_local_attention_sequence_batch_size),
+                    )
+                self.time_local_attention_blocks.append(block)
 
     @staticmethod
     def _active_indices(indices, layers, name):
@@ -377,8 +497,14 @@ class PooledBiMambaCTFPredictor(nn.Module):
         if input.ndim != 3 or not torch.is_complex(input) or input.shape[-1] != self.input_dim:
             raise ValueError("Expected complex STFT [B, T, input_dim]")
         x = self.encoder(torch.stack((input.real, input.imag), 1).float()).permute(0, 2, 3, 1)
-        for time_block, frequency_block in zip(self.time_blocks, self.frequency_blocks):
-            x = frequency_block(time_block(x))
+        if self.time_local_attention_window:
+            for local_block, time_block, frequency_block in zip(
+                    self.time_local_attention_blocks, self.time_blocks,
+                    self.frequency_blocks):
+                x = frequency_block(time_block(local_block(x)))
+        else:
+            for time_block, frequency_block in zip(self.time_blocks, self.frequency_blocks):
+                x = frequency_block(time_block(x))
         batch, frames, freqs, dim = x.shape
         if self.frequency_refinement_position == "before_pool":
             sequence = x.reshape(batch * frames, freqs, dim)
