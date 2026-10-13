@@ -10,11 +10,13 @@ cd "$recipe"
 code_root=$(git rev-parse --show-toplevel)
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
 variant=time_local_bimamba125
+run_suffix=${RIR_LAB_RUN_SUFFIX:-}
+[[ "$run_suffix" =~ ^(_retry[0-9]+)?$ ]] || exit 2
 prefix=train_pooled_bimamba_2spk_nf_16k_sweep_v2
 config="conf/tuning/${prefix}_${variant}.yaml"
-run_dir="$result_recipe/exp/time_local_bimamba_training_20261014/$variant"
-stats_dir="$result_recipe/exp/rir_stats_${prefix}_${variant}"
-model_dir="$result_recipe/exp/rir_${prefix}_${variant}"
+run_dir="$result_recipe/exp/time_local_bimamba_training_20261014/${variant}${run_suffix}"
+stats_dir="$result_recipe/exp/rir_stats_${prefix}_${variant}${run_suffix}"
+model_dir="$result_recipe/exp/rir_${prefix}_${variant}${run_suffix}"
 [[ -x "$python" && -f "$config" ]] || exit 1
 case "$run_dir" in /net/midgar/work2/nitsu/*) ;; *) exit 2 ;; esac
 for marker in "$run_dir" "$model_dir" "$stats_dir"; do

@@ -154,9 +154,17 @@ class TimeLocalBiMamba(nn.Module):
         xz = (xz * valid[..., None]).transpose(1, 2).contiguous()
         x, z = xz.chunk(2, dim=1)
         span = self.radius + 1
-        x = F.silu(F.conv1d(
-            x, mamba.conv1d.weight, mamba.conv1d.bias,
-            padding=mamba.d_conv - 1, groups=mamba.d_inner)[..., :span])
+        if x.is_cuda and mamba.d_conv in (2, 3, 4):
+            # Same causal depthwise operator as official Mamba. Generic
+            # grouped Conv1d backward is costly for many short windows.
+            from causal_conv1d import causal_conv1d_fn
+
+            x = causal_conv1d_fn(x, mamba.conv1d.weight[:, 0],
+                                mamba.conv1d.bias, activation="silu")
+        else:
+            x = F.silu(F.conv1d(
+                x, mamba.conv1d.weight, mamba.conv1d.bias,
+                padding=mamba.d_conv - 1, groups=mamba.d_inner)[..., :span])
         # Artificial prefixes must leave the SSM at zero, even when the
         # causal convolution has a nonzero bias. Real batch padding is kept.
         x = (x * valid[:, None, :]).contiguous()
