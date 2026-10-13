@@ -13,6 +13,7 @@ from espnet2.enh.damsep.espnet_model import (
     ESPnetDAMSEPModel,
     complex_convolve,
     negative_sdr,
+    ri_mag_loss,
 )
 from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
 
@@ -232,6 +233,67 @@ def test_clean_only_rejects_auxiliary_supervision(cpu_model):
         ESPnetDAMSEPModel(clean_only=True)
 
 
+def test_clean_reverb_supervision_without_ctf(cpu_model, monkeypatch):
+    model = ESPnetDAMSEPModel(
+        network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
+        loss_w_reverb=0.1,
+        loss_w_reconstruction=0,
+        estimate_ctf=False,
+    )
+    model.load_state_dict(cpu_model.state_dict())
+    model.eval()
+    cpu_model.eval()
+    mix = torch.randn(2, 640) * 0.02
+    with torch.no_grad():
+        actual = model.separate(mix)
+        full = cpu_model.separate(mix)
+    assert "rir" not in actual
+    for field in ("x_sep", "x_derev"):
+        torch.testing.assert_close(actual[field], full[field])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Two-source losses must not run CTF reconstruction")
+
+    for name in ("ctf_layers", "compress_CTF", "weight_layer", "decoder_CTF"):
+        module = getattr(model.network.recrir, name)
+        layers = module if isinstance(module, torch.nn.ModuleList) else [module]
+        for layer in layers:
+            layer.register_forward_pre_hook(forbidden)
+        assert all(not p.requires_grad for p in module.parameters())
+    monkeypatch.setattr("espnet2.enh.damsep.espnet_model.complex_convolve", forbidden)
+    model.train()
+    output = model.network(mix, estimate_ctf=False)
+    clean = output["x_derev"].detach() * 0.9 + torch.randn(2, 2, 640) * 1e-4
+    # Deliberately swap only the second example's clean teachers: reverberant
+    # supervision must follow that same clean-selected permutation.
+    clean[1] = clean[1].flip(0)
+    reverb = torch.randn_like(clean) * 0.02
+    loss, stats = model._loss(output, clean, reverb)
+    aligned = torch.stack([output["x_sep"][0], output["x_sep"][1].flip(0)])
+    expected_reverb = ri_mag_loss(
+        model.transforms.stft(aligned), model.transforms.stft(reverb)
+    ).mean()
+    torch.testing.assert_close(stats["pit_swap_ratio"], torch.tensor(0.5))
+    torch.testing.assert_close(stats["loss_reverb"], expected_reverb.detach())
+    torch.testing.assert_close(
+        loss.detach(), stats["loss_clean"] + 0.1 * expected_reverb.detach()
+    )
+    assert "loss_reconstruction" not in stats
+    loss.backward()
+    assert all(
+        p.grad is not None and torch.isfinite(p.grad).all()
+        for p in model.parameters()
+        if p.requires_grad
+    )
+    assert all(p.grad is None for p in model.parameters() if not p.requires_grad)
+    assert any(p.grad.abs().sum() > 0 for p in model.network.deconv.parameters())
+
+
+def test_disabled_ctf_rejects_reconstruction_loss(cpu_model):
+    with pytest.raises(ValueError, match="reconstruction requires"):
+        ESPnetDAMSEPModel(estimate_ctf=False)
+
+
 def test_padding_is_excluded_from_network_and_loss(cpu_model):
     cpu_model.eval()
     signals = [torch.randn(2, 768) * 0.01 for _ in range(5)]
@@ -410,8 +472,8 @@ def test_cpu_statistics_skip_network_and_mamba(tmp_path, monkeypatch):
     assert not list(stats.rglob("*.pth"))
 
 
-@pytest.mark.parametrize("clean_only", [False, True])
-def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean_only):
+@pytest.mark.parametrize("mode", ["full", "clean", "clean_reverb"])
+def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, mode):
     """Exercise the complete trainer/checkpoint/adapter path on real waveforms."""
     import argparse
 
@@ -421,6 +483,8 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean
     from espnet2.bin.enh_scoring import main as score_main
     from espnet2.tasks.damsep import DAMSEPTask
 
+    clean_only = mode == "clean"
+    estimate_ctf = mode == "full"
     rng = np.random.RandomState(19)
     clean = [rng.randn(640).astype(np.float32) * 0.02 for _ in (1, 2)]
     reverb = [
@@ -452,8 +516,9 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean
                 model_conf=dict(
                     network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
                     clean_only=clean_only,
+                    estimate_ctf=estimate_ctf,
                     loss_w_reverb=0.0 if clean_only else 0.1,
-                    loss_w_reconstruction=0.0 if clean_only else 0.5,
+                    loss_w_reconstruction=0.5 if estimate_ctf else 0.0,
                 ),
                 preprocessor_conf=dict(speech_segment=640, force_single_channel=True),
                 num_workers=0,
@@ -508,9 +573,13 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean
     if clean_only:
         assert not (dest / "ctf").exists() and not (dest / "reverb").exists()
         assert not (dest / "ctf.scp").exists()
-    else:
+    elif estimate_ctf:
         with np.load(dest / "ctf/example.npz") as data:
             assert data["ctf"].shape == (2, 257, 60) and np.isfinite(data["ctf"]).all()
+    else:
+        assert not (dest / "ctf").exists() and not (dest / "ctf.scp").exists()
+        assert (dest / "reverb/spk1.scp").exists()
+        assert (dest / "reverb/spk2.scp").exists()
     # Score the clean branch with the unchanged baseline scorer.
     score_main(
         [

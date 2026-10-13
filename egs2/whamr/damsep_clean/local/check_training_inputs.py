@@ -151,6 +151,9 @@ def main():
         peak_reserved_gib=torch.cuda.max_memory_reserved() / 2**30,
         stats={k: float(v) for k, v in stats.items()},
         clean_only=model.clean_only,
+        estimate_ctf=model.estimate_ctf,
+        loss_w_reverb=model.loss_w_reverb,
+        loss_w_reconstruction=model.loss_w_reconstruction,
         backward_check=backward_check,
     )
     args.report.parent.mkdir(parents=True, exist_ok=True)

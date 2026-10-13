@@ -74,7 +74,7 @@ def inference(args):
                         subtype="PCM_16" if args.normalize_output_wav else "FLOAT",
                     )
                     lists[branch, speaker].append(f"{uid} {dest}\n")
-            if not model.clean_only:
+            if model.estimate_ctf:
                 ctf_ri = output["rir"].reshape(2, 2, 257, 60).cpu().numpy()
                 ctf = ctf_ri[:, 0] + 1j * ctf_ri[:, 1]
                 if not np.isfinite(ctf).all():
@@ -87,7 +87,7 @@ def inference(args):
                 print(f"Inferred {i + 1}/{len(keys)} utterances", flush=True)
     for (branch, speaker), lines in lists.items():
         (args.output_dir / branch / f"spk{speaker}.scp").write_text("".join(lines))
-    if not model.clean_only:
+    if model.estimate_ctf:
         (args.output_dir / "ctf.scp").write_text("".join(ctf_list))
     (args.output_dir / "inference.json").write_text(
         json.dumps(
@@ -99,11 +99,12 @@ def inference(args):
                 count=len(keys),
                 normalize_output_wav=args.normalize_output_wav,
                 clean_only=model.clean_only,
-                ctf_shape=None if model.clean_only else [2, 257, 60],
+                estimate_ctf=model.estimate_ctf,
+                ctf_shape=[2, 257, 60] if model.estimate_ctf else None,
                 ctf_source_order=(
-                    None
-                    if model.clean_only
-                    else "matches output WAVs; no distance ordering"
+                    "matches output WAVs; no distance ordering"
+                    if model.estimate_ctf
+                    else None
                 ),
             ),
             indent=2,

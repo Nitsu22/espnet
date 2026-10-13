@@ -224,6 +224,33 @@ and `exp/damsep_stats_8k` via symbolic links in that checkout. Do not update
 the checkout used by a running job. Logs/checkpoints are under the separate
 checkout's `egs2/whamr/damsep_clean/exp/damsep_nf_8k_clean_only`.
 
+## Clean plus reverberant-source supervision
+
+`conf/tuning/train_damsep_nf_8k_clean_reverb.yaml` trains with
+`clean waveform negative-SNR + 0.1 * reverberant RI+Mag`, using the same
+clean-selected PIT permutation for both objectives. Validation uses the
+existing SI-SDR clean objective plus the weighted reverberant objective.
+CTF reconstruction has weight zero; `model_conf.estimate_ctf: false` skips
+the CTF branch and freezes its parameters. Both the SPMamba separator and
+shared dereverberation module remain active. Construction order is retained
+to preserve seed-zero initialization of the shared parameters.
+
+The data, four-second training crop, full-length validation, FP32, Adam,
+batch one, gradient clipping, scheduler and early stopping match the other
+two experiments. Reuse the existing dumps, Stage 5 statistics and Mamba
+overlay through links from a separate checkout; start this experiment from
+scratch in `exp/damsep_nf_8k_clean_reverb`.
+
+```bash
+qsub -g tga-shinoda qsub/train_clean_reverb_1gpu.sh
+```
+
+The script checks the longest validation utterance and a real training
+backward/Adam step on the GPU, then starts Stage 6. Resubmitting resumes only
+this experiment's checkpoint. It requests `gpu_1=1`, priority -5, 24 hours;
+the point upper estimate is `0.2 * 0.8 * 24 = 3.8400`.
+Inference exports both clean and reverberant WAVs, without CTF files.
+
 ## Evaluate the trained pair on TSUBAME
 
 From the separate clean-only checkout, `qsub/evaluate_pair_gpu.sh` runs Stage 7
