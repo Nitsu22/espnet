@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+recipe=$(cd "$(dirname "$0")" && pwd)
+cd "${recipe}"
+stage=1
+stop_stage=6
+resume=false
+ngpu=1
+num_nodes=1
+nj=4
+python=/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python
+dumpdir=dump_noisy_2spk_16k_min
+rir_config=conf/tuning/train_pooled_bimamba_2spk_noisy_16k_sweep_v2.yaml
+rir_tag=train_pooled_bimamba_2spk_noisy_16k_sweep_v2
+rir_exp=
+rir_args="--valid_batch_size 1"
+rir_model_type=pooled_bimamba_sweep_v2_pit
+batch_by_input_only=true
+speech_fold_length=160000
+rir_stats_dir=
+. utils/parse_options.sh
+[[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
+[[ -n ${rir_exp} ]] || rir_exp="exp/rir_${rir_tag}"
+case ${resume} in true|false) ;; *) exit 2 ;; esac
+if [[ ${stage} -le 1 && ${stop_stage} -ge 1 ]]; then
+    "${python}" local/prepare_two_speaker_dump.py --source data_rir_plus --output "${dumpdir}" --noise
+fi
+if [[ ${stop_stage} -lt 5 ]]; then exit 0; fi
+[[ -f ${dumpdir}/preparation.json ]] || { echo 'Run Stage 1 to prepare the dump first' >&2; exit 1; }
+"${python}" - "${dumpdir}/preparation.json" <<'PY_CHECK'
+import json, sys
+spec = json.load(open(sys.argv[1]))['spec']
+assert spec['noise'] is True and spec['sample_rate'] == '16k'
+assert spec['length'] == 'min' and spec['num_spk'] == 2
+PY_CHECK
+if [[ ${stage} -le 6 && ${stop_stage} -ge 6 ]]; then
+    if [[ ${resume} == false && -e ${rir_exp}/checkpoint.pth ]]; then
+        echo 'Existing checkpoint: use --resume true or a new --rir_exp' >&2; exit 1
+    fi
+    if [[ ${resume} == true && ! -f ${rir_exp}/checkpoint.pth ]]; then
+        echo 'Cannot resume without checkpoint.pth' >&2; exit 1
+    fi
+fi
+export NUMBA_CACHE_DIR=${NUMBA_CACHE_DIR:-/tmp/nitsu-rir1ch-numba}
+[[ -n ${rir_stats_dir} ]] || rir_stats_dir="exp/rir_stats_${rir_tag}"
+if [[ ${batch_by_input_only} == true && ${stage} -le 5 && ${stop_stage} -ge 5 ]]; then
+    "${python}" local/prepare_input_shapes.py --config "${rir_config}" --dump "${dumpdir}" --output "${rir_stats_dir}"
+    stage=6
+fi
+bash ./rir.sh --stage "${stage}" --stop_stage "${stop_stage}" \
+    --skip_data_prep true --resume "${resume}" --python "${python}" \
+    --fs 16k --ngpu "${ngpu}" --num_nodes "${num_nodes}" --nj "${nj}" \
+    --dumpdir "${dumpdir}" --train_set tr_rir_2spk_noisy_min_16k \
+    --valid_set cv_rir_2spk_noisy_min_16k --test_sets tt_rir_2spk_noisy_min_16k \
+    --rir_model_type "${rir_model_type}" --rir_config "${rir_config}" --rir_tag "${rir_tag}" \
+    --rir_exp "${rir_exp}" --rir_stats_dir "${rir_stats_dir}" \
+    --batch_by_input_only "${batch_by_input_only}" --speech_fold_length "${speech_fold_length}" --rir_fold_length 32000 --rir_args "${rir_args}"

@@ -32,6 +32,8 @@ def main():
     parser.add_argument('--sample-rate', choices=['8k', '16k'], default='16k')
     parser.add_argument('--length', choices=['min', 'max'], default='min')
     parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--noise', action='store_true',
+                        help='Use the existing two-speaker plus noise mixture')
     args = parser.parse_args()
     # A transferred self-contained dump has already had all audio SHA256s and
     # headers checked on the destination. Revalidate its indexes without needing
@@ -41,21 +43,24 @@ def main():
 
         portable = verify_metadata(args.output)
         saved = json.loads((args.output / 'preparation.json').read_text())
-        if portable['kind'] != 'nf' or saved['spec']['sample_rate'] != args.sample_rate or saved['spec']['length'] != args.length:
+        if args.noise or portable['kind'] != 'nf' or saved['spec']['sample_rate'] != args.sample_rate or saved['spec']['length'] != args.length:
             raise ValueError('Portable dump has different settings')
         print('Portable dump verified:', args.output)
         return
     source = args.source.resolve(strict=True)
     if not (source / 'generation_complete.json').exists():
         raise ValueError('Source generation is incomplete')
-    names = {'wav': 'mix_clean_reverb', 'speech_mix': 'mix_clean_reverb'}
+    mixture = 'mix_both_reverb' if args.noise else 'mix_clean_reverb'
+    names = {'wav': mixture, 'speech_mix': mixture}
+    if args.noise:
+        names['noise_ref'] = 'noise'
     for speaker in (1, 2):
         names.update({f'speech_direct{speaker}': f's{speaker}_anechoic',
                       f'speech_reverb{speaker}': f's{speaker}_reverb',
                       f'rir_ref{speaker}': f'rir{speaker}_reverb',
                       f'rir_direct{speaker}': f'rir{speaker}_anechoic'})
     spec = dict(source=str(source), sample_rate=args.sample_rate, length=args.length,
-                num_spk=2, channel=0, noise=False,
+                num_spk=2, channel=0, noise=args.noise,
                 script_sha256=digest(Path(__file__)), manifests={})
     for split in ('tr', 'cv', 'tt'):
         folder = source / 'manifests' / f'{split}_{args.length}_{args.sample_rate}'
@@ -67,7 +72,11 @@ def main():
         saved_spec = dict(saved['spec'])
         # This known indexer version produced the original local dump. The
         # portable-reuse branch leaves its data/index semantics unchanged.
-        if saved_spec.get('script_sha256') == 'b2cfc35054ff2c65965fcc51e7668ae2822d66a3a961c35fa2a9b0ee513035f0':
+        legacy_nf_hashes = {
+            'b2cfc35054ff2c65965fcc51e7668ae2822d66a3a961c35fa2a9b0ee513035f0',
+            '08720388d0188daa686982911f5ef0fc24a9559ea52590b76f5956d5afa23213',
+        }
+        if not args.noise and saved_spec.get('script_sha256') in legacy_nf_hashes:
             saved_spec['script_sha256'] = spec['script_sha256']
         if saved_spec != spec:
             raise ValueError('Existing dump has different source/settings; use a new output')
@@ -96,11 +105,14 @@ def main():
                 if any(headers[names[f'speech_{kind}{i}']].frames != n
                        for kind in ('direct', 'reverb') for i in (1, 2)):
                     raise ValueError(f'{uid}: direct/reverb lengths differ')
+                if args.noise and headers['noise'].frames != n:
+                    raise ValueError(f'{uid}: noise and mixture lengths differ')
                 return n
 
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
                 lengths = list(pool.map(inspect, ids))
-            dataset = f'{split}_rir_2spk_nf_{args.length}_{args.sample_rate}'
+            condition = 'noisy' if args.noise else 'nf'
+            dataset = f'{split}_rir_2spk_{condition}_{args.length}_{args.sample_rate}'
             dest = temporary / 'raw' / dataset
             dest.mkdir(parents=True)
             for name, original in names.items():

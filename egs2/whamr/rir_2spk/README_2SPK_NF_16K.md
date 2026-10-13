@@ -529,3 +529,27 @@ same ordinary-PIM model predictions. No comparison CSV is required.
 CPU verification is `python test/espnet2/rir/rec_rir/test_pooled_bimamba_frequency.py`.
 Its frequency-Mamba substitutes check layout and integration; real selective
 scan is verified by `local/check_two_speaker_training.py` on CUDA before a run.
+
+
+## BiMamba baseline with noisy WHAMR mixtures (2026-10-13)
+
+`run_pooled_bimamba_2spk_noisy_16k_sweep_v2.sh` trains the original baseline
+architecture from scratch on the existing `mix_both_reverb` mixture. The model,
+4-second crop, input-only folded batching, seed, optimizer, CTF length and full
+paired direct-sweep/reverb-sweep loss match the noise-free baseline. RIR teachers
+and speaker IDs are shared; only the mixture and noise condition differ.
+
+Stage 1 builds `dump_noisy_2spk_16k_min` indexes without copying audio. The raw
+splits are `tr/cv/tt_rir_2spk_noisy_min_16k`, with `noise_ref.scp` retained for
+component validation. Stage 5 prepares input-only shapes; Stage 6 trains. The
+standard entry rejects a noise-free dump. `local/run_pooled_bimamba_noisy_lab.sh`
+accepts GPU index and result recipe; it checks that the GPU is free, verifies
+noisy mixture components, finite updates and gradients, global teacher PIT,
+two-source RIR inference and full-length validation before starting training.
+The check updates are discarded, and training starts from seed 0.
+
+Results are saved in `exp/rir_train_pooled_bimamba_2spk_noisy_16k_sweep_v2`.
+Launch metadata, GPU validation and exit status are saved in
+`exp/noisy_baseline_training_20261013`. Evaluation can use the new noisy test
+split; for paired 16 kHz WHAMR comparisons, retain both the physical RIR and the
+existing LS direct-reverb reference, whose utterance IDs and RIR pairs match.
