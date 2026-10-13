@@ -99,6 +99,7 @@ def inference(args):
                 count=len(keys),
                 normalize_output_wav=args.normalize_output_wav,
                 clean_only=model.clean_only,
+                architecture=model.network.architecture,
                 ctf_shape=None if model.clean_only else [2, 257, 60],
                 ctf_source_order=(
                     None

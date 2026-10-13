@@ -457,6 +457,7 @@ class SPMamba(BaseModel):
         eps=1.0e-5,
         use_builtin_complex=False,
         sample_rate=16000,
+        architecture="damsep",
     ):
         super().__init__(sample_rate=sample_rate)
         self._model_args = {
@@ -477,7 +478,11 @@ class SPMamba(BaseModel):
             "eps": eps,
             "use_builtin_complex": use_builtin_complex,
             "sample_rate": sample_rate,
+            "architecture": architecture,
         }
+        if architecture not in ("damsep", "spmamba", "feature_dereverb"):
+            raise ValueError(f"Unknown architecture: {architecture}")
+        self.architecture = architecture
         self.n_srcs = n_srcs
         self.n_layers = n_layers
         self.n_imics = n_imics
@@ -513,6 +518,11 @@ class SPMamba(BaseModel):
             )
 
         self.deconv = nn.ConvTranspose2d(emb_dim, n_srcs * 2, ks, padding=padding)
+        # This expansion preserves the separator embedding and the released
+        # dereverberation hidden width without compressing to source RI bins.
+        self.feature_projection = (
+            nn.Linear(emb_dim, 64) if architecture == "feature_dereverb" else None
+        )
 
         # === Rec-RIR branch configs ===
         self.ctf_n_fft = 512
@@ -538,13 +548,15 @@ class SPMamba(BaseModel):
         )
 
         self.recrir = BiSpatialNet(
-            dim_input=2,
-            dim_output_spch=2,
+            dim_input=64 if architecture == "feature_dereverb" else 2,
+            dim_output_spch=n_srcs * 2 if architecture == "feature_dereverb" else 2,
             dim_output_CTF=120,  # 必须是偶数 -> L = 120/2 = 60
             dim_hidden=64,  # 这里本来是96
             dim_squeeze=8,
-            num_freqs=self.ctf_num_freqs,
-            num_layers_spch=6,
+            num_freqs=(
+                n_freqs if architecture == "feature_dereverb" else self.ctf_num_freqs
+            ),
+            num_layers_spch=0 if architecture == "feature_dereverb" else 6,
             num_layers_noise=2,
             encoder_kernel_size=5,
             dropout=(0, 0, 0),
@@ -553,6 +565,7 @@ class SPMamba(BaseModel):
             norms=["LN", "LN", "LN", "LN", "LN", "LN"],
             full_share=0,
             attention="mamba(16,4)",
+            bypass_encoder=architecture == "feature_dereverb",
         )
 
     def forward(
@@ -585,6 +598,32 @@ class SPMamba(BaseModel):
         for blk in self.blocks:
             x = blk(x)
 
+        if self.architecture == "feature_dereverb":
+            # [B,D,T,F] -> [B,F,T,64] -> [B,64,F,T]. No source
+            # spectrum/waveform is decoded and re-encoded between the blocks.
+            features = self.feature_projection(x.permute(0, 3, 2, 1))
+            _, clean_ri = self.recrir(features.permute(0, 3, 1, 2), estimate_ctf=False)
+            B, _, Freq, Tfrm = clean_ri.shape
+            # Shared mixture features require a joint two-source output head;
+            # the original speaker-shared, one-source decoder is insufficient.
+            clean_ri = clean_ri.reshape(B, self.n_srcs, 2, Freq, Tfrm)
+            clean_spec = new_complex_like(
+                mix_spec_mtf,
+                (
+                    clean_ri[:, :, 0].transpose(-1, -2),
+                    clean_ri[:, :, 1].transpose(-1, -2),
+                ),
+            )
+            clean_wav = self.dec(
+                clean_spec.reshape(-1, Tfrm, Freq),
+                ilens.repeat_interleave(self.n_srcs),
+            )[0]
+            clean_wav = (
+                self.fix_len(clean_wav.reshape(B, self.n_srcs, -1), n_samples)
+                * mix_std_
+            )
+            return {"x_sep": clean_wav, "x_derev": clean_wav}
+
         x = self.deconv(x)  # [B,2*S,T,F]
 
         B, _, Tfrm, Freq = x.shape
@@ -604,6 +643,11 @@ class SPMamba(BaseModel):
 
         # sep_wav is X1/X2 (reverberant)
         x_sep = sep_wav  # [B,S,T]
+
+        if self.architecture == "spmamba":
+            # Direct clean-waveform supervision uses the released separator
+            # decoder and never executes dereverberation or CTF estimation.
+            return {"x_sep": x_sep, "x_derev": x_sep}
 
         # ------- 2) Rec-RIR dereverb + CTF estimation (shared across speakers) -------
         BS = B * self.n_srcs

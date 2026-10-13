@@ -232,6 +232,123 @@ def test_clean_only_rejects_auxiliary_supervision(cpu_model):
         ESPnetDAMSEPModel(clean_only=True)
 
 
+@pytest.mark.parametrize("architecture", ["spmamba", "feature_dereverb"])
+def test_architecture_ablations_route_features_and_backpropagate(
+    cpu_model, monkeypatch, architecture
+):
+    torch.manual_seed(31)
+    model = ESPnetDAMSEPModel(
+        network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
+        architecture=architecture,
+        clean_only=True,
+        loss_w_reverb=0,
+        loss_w_reconstruction=0,
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("An ablated decoder/encoder or CTF path was executed")
+
+    skipped = [model.network.ctf_enc, model.network.ctf_dec]
+    if architecture == "spmamba":
+        skipped.append(model.network.recrir)
+        assert all(not p.requires_grad for p in model.network.recrir.parameters())
+    else:
+        skipped.extend([model.network.deconv, model.network.recrir.encoder])
+        assert isinstance(model.network.recrir.encoder, torch.nn.Identity)
+        assert model.network.feature_projection.in_features == 8
+        assert model.network.feature_projection.out_features == 64
+        assert model.network.recrir.decoder_rev[-1].out_features == 4
+        assert all(not p.requires_grad for p in model.network.deconv.parameters())
+        for name in ("ctf_layers", "compress_CTF", "weight_layer", "decoder_CTF"):
+            module = getattr(model.network.recrir, name)
+            skipped.extend(
+                list(module) if isinstance(module, torch.nn.ModuleList) else [module]
+            )
+            assert all(not p.requires_grad for p in module.parameters())
+    for module in skipped:
+        module.register_forward_pre_hook(forbidden)
+    monkeypatch.setattr(model.transforms, "stft", forbidden)
+
+    mix = torch.randn(2, 641) * 0.02
+    clean = torch.randn(2, 2, 641) * 0.01
+    # Batch two and an odd sample count must survive decoding and PIT.
+    output = model.network(mix, estimate_ctf=False)
+    assert output["x_derev"].shape == (2, 2, 641)
+    assert output["x_sep"] is output["x_derev"]
+    assert "rir" not in output
+    loss, stats = model._loss(output, clean, torch.full_like(clean, float("nan")))
+    assert torch.isfinite(loss)
+    assert set(stats) == {"loss", "loss_clean", "pit_swap_ratio"}
+    reordered_loss, _ = model._loss(
+        {k: v.flip(1) for k, v in output.items()},
+        clean,
+        torch.full_like(clean, float("nan")),
+    )
+    torch.testing.assert_close(loss, reordered_loss)
+    loss.backward()
+    missing = [
+        name
+        for name, p in model.named_parameters()
+        if p.requires_grad and p.grad is None
+    ]
+    assert not missing, missing
+    assert all(
+        torch.isfinite(p.grad).all() for p in model.parameters() if p.requires_grad
+    )
+    assert all(p.grad is None for p in model.parameters() if not p.requires_grad)
+    prefixes = ["conv", "blocks"]
+    prefixes += (
+        ["deconv"]
+        if architecture == "spmamba"
+        else ["feature_projection", "recrir.noise_layers", "recrir.decoder_rev"]
+    )
+    for prefix in prefixes:
+        assert any(
+            p.grad.abs().sum() > 0
+            for name, p in model.network.named_parameters()
+            if name.startswith(prefix) and p.requires_grad
+        ), prefix
+
+    model.eval()
+    with torch.no_grad():
+        batched = model.separate(mix)["x_derev"]
+        single = torch.cat([model.separate(x[None])["x_derev"] for x in mix])
+        torch.testing.assert_close(batched, single, atol=1e-5, rtol=1e-4)
+        quiet = model.separate(mix * 1e-6)["x_derev"]
+        torch.testing.assert_close(quiet, batched * 1e-6, atol=1e-10, rtol=1e-4)
+        silent = model.separate(torch.zeros_like(mix))["x_derev"]
+        assert torch.isfinite(silent).all() and torch.count_nonzero(silent) == 0
+
+
+def test_architecture_ablations_preserve_common_initialization(cpu_model):
+    models = {}
+    for architecture in ("damsep", "spmamba", "feature_dereverb"):
+        torch.manual_seed(0)
+        models[architecture] = ESPnetDAMSEPModel(
+            architecture=architecture,
+            clean_only=True,
+            loss_w_reverb=0,
+            loss_w_reconstruction=0,
+        )
+    reference = models["damsep"].network.state_dict()
+    for architecture in ("spmamba", "feature_dereverb"):
+        state = models[architecture].network.state_dict()
+        for name, value in reference.items():
+            if name.startswith(("conv.", "blocks.", "deconv.")):
+                torch.testing.assert_close(state[name], value, rtol=0, atol=0)
+        assert len(models[architecture].network.blocks) == 6
+
+
+@pytest.mark.parametrize("architecture", ["spmamba", "feature_dereverb"])
+def test_architecture_ablations_require_clean_objective(cpu_model, architecture):
+    with pytest.raises(ValueError, match="require clean_only"):
+        ESPnetDAMSEPModel(architecture=architecture)
+    with pytest.raises(ValueError, match="auxiliary loss weights"):
+        ESPnetDAMSEPModel(architecture=architecture, clean_only=True)
+    with pytest.raises(ValueError, match="Unknown DAMSEP architecture"):
+        ESPnetDAMSEPModel(architecture="not_an_architecture")
+
+
 def test_padding_is_excluded_from_network_and_loss(cpu_model):
     cpu_model.eval()
     signals = [torch.randn(2, 768) * 0.01 for _ in range(5)]
@@ -410,8 +527,18 @@ def test_cpu_statistics_skip_network_and_mamba(tmp_path, monkeypatch):
     assert not list(stats.rglob("*.pth"))
 
 
-@pytest.mark.parametrize("clean_only", [False, True])
-def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean_only):
+@pytest.mark.parametrize(
+    "architecture,clean_only",
+    [
+        ("damsep", False),
+        ("damsep", True),
+        ("spmamba", True),
+        ("feature_dereverb", True),
+    ],
+)
+def test_native_training_resume_inference_and_scoring(
+    cpu_model, tmp_path, architecture, clean_only
+):
     """Exercise the complete trainer/checkpoint/adapter path on real waveforms."""
     import argparse
 
@@ -452,6 +579,7 @@ def test_native_training_resume_inference_and_scoring(cpu_model, tmp_path, clean
                 model_conf=dict(
                     network_conf=dict(n_layers=1, emb_dim=8, emb_ks=2),
                     clean_only=clean_only,
+                    architecture=architecture,
                     loss_w_reverb=0.0 if clean_only else 0.1,
                     loss_w_reconstruction=0.0 if clean_only else 0.5,
                 ),

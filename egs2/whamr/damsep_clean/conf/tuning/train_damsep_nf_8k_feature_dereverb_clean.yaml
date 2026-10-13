@@ -1,0 +1,65 @@
+# Fresh NF-WHAMR architecture ablation; all training settings match clean-only.
+batch_size: 1
+batch_type: unsorted
+best_model_criterion:
+- - valid
+  - loss
+  - min
+early_stopping_criterion:
+- valid
+- loss
+- min
+grad_clip: 5.0
+keep_nbest_models: 1
+log_interval: 50
+max_epoch: 500
+model_conf:
+  clean_only: true
+  extract_feats_in_collect_stats: false
+  loss_hop_length: 128
+  loss_n_fft: 512
+  loss_w_reconstruction: 0.0
+  loss_w_reverb: 0.0
+  loss_win_length: 256
+  loss_window: sqrthann
+  network_conf:
+    activation: prelu
+    attn_approx_qk_dim: 512
+    attn_n_head: 4
+    emb_dim: 16
+    emb_hs: 1
+    emb_ks: 8
+    eps: 1.0e-05
+    input_dim: 64
+    lstm_hidden_units: 256
+    n_fft: 256
+    n_imics: 1
+    n_layers: 6
+    n_srcs: 2
+    sample_rate: 8000
+    stride: 64
+    use_builtin_complex: false
+    window: hann
+  validation_scale_invariant: true
+  architecture: feature_dereverb
+num_att_plot: 0
+num_workers: 4
+optim: adam
+optim_conf:
+  lr: 0.001
+  weight_decay: 0.0
+patience: 4
+preprocessor_conf:
+  avoid_allzero_segment: true
+  force_single_channel: true
+  speech_segment: 32000
+scheduler: reducelronplateau
+scheduler_conf:
+  factor: 0.5
+  patience: 5
+seed: 0
+use_amp: false
+val_scheduler_criterion:
+- valid
+- loss
+valid_batch_size: 1

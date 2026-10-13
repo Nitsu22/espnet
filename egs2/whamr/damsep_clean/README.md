@@ -226,6 +226,10 @@ checkout's `egs2/whamr/damsep_clean/exp/damsep_nf_8k_clean_only`.
 
 ## Verification
 
+Two fresh architecture ablations, including automatic TSUBAME continuation,
+inference and CPU scoring, are described in
+[ARCHITECTURE_ABLATIONS.md](ARCHITECTURE_ABLATIONS.md).
+
 Run model/loss/data tests from the repository root:
 
 ```bash

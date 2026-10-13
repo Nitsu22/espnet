@@ -24,6 +24,7 @@ def main():
         "--report", type=Path, default=Path("exp/damsep_nf_8k/input_check.json")
     )
     parser.add_argument("--check_backward", action="store_true")
+    parser.add_argument("--check_inference", action="store_true")
     args = parser.parse_args()
     checked = json.loads((args.statsdir / "data_check.json").read_text())
     for path, digest in checked["source_hashes"].items():
@@ -139,6 +140,26 @@ def main():
             finite_gradients=True,
             optimizer_step=True,
         )
+    inference_check = None
+    if args.check_inference:
+        # Test-set utterances can exceed the longest validation utterance.
+        # Run the same CUDA separation path used by Stage 7 before training.
+        test_paths = read_scp(Path("dump_clean/raw/tt_mix_clean_reverb_min_8k/wav.scp"))
+        test_uid = max(test_paths, key=lambda key: sf.info(test_paths[key]).frames)
+        audio, rate = sf.read(test_paths[test_uid], dtype="float32", always_2d=True)
+        if rate != 8000 or not np.isfinite(audio).all():
+            raise RuntimeError(f"Invalid test audio: {test_uid}")
+        model.eval()
+        with torch.no_grad():
+            estimate = model.separate(
+                torch.from_numpy(audio[:, 0].copy())[None].cuda()
+            )["x_derev"]
+        if estimate.shape != (1, 2, len(audio)) or not torch.isfinite(estimate).all():
+            raise RuntimeError("Invalid longest-test CUDA separation output")
+        torch.cuda.synchronize()
+        inference_check = dict(
+            status="passed", uid=test_uid, samples=len(audio), seconds=len(audio) / 8000
+        )
     report = dict(
         status="passed",
         purpose="Stage 5 consistency and longest full-length validation CUDA check",
@@ -151,7 +172,9 @@ def main():
         peak_reserved_gib=torch.cuda.max_memory_reserved() / 2**30,
         stats={k: float(v) for k, v in stats.items()},
         clean_only=model.clean_only,
+        architecture=model.network.architecture,
         backward_check=backward_check,
+        inference_check=inference_check,
     )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n")

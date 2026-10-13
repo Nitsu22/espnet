@@ -71,6 +71,7 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
         loss_window: str = "sqrthann",
         extract_feats_in_collect_stats: bool = False,
         clean_only: bool = False,
+        architecture: str = "damsep",
     ):
         super().__init__()
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
@@ -105,9 +106,19 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
             raise ValueError(
                 "clean_only requires both auxiliary loss weights to be zero"
             )
+        if architecture not in ("damsep", "spmamba", "feature_dereverb"):
+            raise ValueError(f"Unknown DAMSEP architecture: {architecture}")
+        if architecture != "damsep" and not clean_only:
+            raise ValueError("Architecture ablations require clean_only=True")
+        conf["architecture"] = architecture
         self.network = SPMamba(**conf)
         self.clean_only = clean_only
-        if clean_only:
+        self.architecture = architecture
+        if architecture == "spmamba":
+            # Preserve the common backbone initialization, but the entire
+            # dereverberation/CTF branch is inactive in the direct separator.
+            self.network.recrir.requires_grad_(False)
+        elif clean_only:
             # Retain construction/initialization order for the shared clean
             # path, but exclude unused CTF parameters from gradient updates.
             for module in (
@@ -117,6 +128,10 @@ class ESPnetDAMSEPModel(AbsESPnetModel):
                 self.network.recrir.weight_layer,
             ):
                 module.requires_grad_(False)
+            if architecture == "feature_dereverb":
+                # The shared features reach dereverberation before the
+                # separator's complex-spectrum decoder.
+                self.network.deconv.requires_grad_(False)
         self.num_spk = 2
         self.loss_w_reverb = loss_w_reverb
         self.loss_w_reconstruction = loss_w_reconstruction

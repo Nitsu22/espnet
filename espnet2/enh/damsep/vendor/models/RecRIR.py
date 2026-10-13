@@ -391,19 +391,27 @@ class BiSpatialNet(nn.Module):
         full_share: int = 0,  # share from layer 0
         attention: str = "mhsa(251)",  # mhsa(frames), ret(factor)
         mamba_expand: int = 2,
+        bypass_encoder: bool = False,
     ):
         super().__init__()
 
-        self.padding_size = (0, (encoder_kernel_size - 1) // 2)
-        self.encoder = nn.Sequential(
-            nn.Conv2d(
-                in_channels=dim_input,
-                out_channels=dim_hidden,
-                padding=0,
-                kernel_size=(1, encoder_kernel_size),
-            ),
-            nn.PReLU(),
-        )
+        self.bypass_encoder = bypass_encoder
+        if bypass_encoder:
+            if dim_input != dim_hidden:
+                raise ValueError("Pre-encoded features must match dim_hidden")
+            self.padding_size = (0, 0)
+            self.encoder = nn.Identity()
+        else:
+            self.padding_size = (0, (encoder_kernel_size - 1) // 2)
+            self.encoder = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=dim_input,
+                    out_channels=dim_hidden,
+                    padding=0,
+                    kernel_size=(1, encoder_kernel_size),
+                ),
+                nn.PReLU(),
+            )
 
         full = None
         noise_layers = []
@@ -483,7 +491,8 @@ class BiSpatialNet(nn.Module):
         )
 
         # encoder
-        x = self.encoder(input_pad).permute(0, 2, 3, 1)  # [B,F,T,H]
+        encoded = input_pad if self.bypass_encoder else self.encoder(input_pad)
+        x = encoded.permute(0, 2, 3, 1)  # [B,F,T,H]
         B, F, T, H = x.shape
 
         # dereverb branch（保留）
