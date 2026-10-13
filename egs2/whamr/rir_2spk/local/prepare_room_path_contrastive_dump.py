@@ -318,7 +318,59 @@ def write_indexes(output, index_root, sources, manifests):
     return hashes
 
 
-def verify_dump(output, check_hashes=True):
+def verify_record(task):
+    r, split, output, index_root, indexes, lengths, pool, check_hashes = task
+    uid = r["utterance_id"]
+    seen_dry = set()
+    for name, item in r["streams"].items():
+        rel = Path(item["path"])
+        if rel.is_absolute() or ".." in rel.parts:
+            raise ValueError("Nonlocal manifest path")
+        absolute = Path(indexes[name][uid])
+        if absolute != index_root / rel:
+            raise ValueError("Index is not internal: " + str(absolute))
+        path = output / rel
+        if path.is_symlink():
+            raise ValueError("Audio must be a real copied file: " + str(path))
+        info = sf.info(path)
+        if info.subtype != "FLOAT":
+            raise ValueError("Expected FLOAT WAV: " + str(path))
+        audio = read_audio(path, lengths[uid] if name.startswith("speech_") else None)
+        if name == "speech_mix_view2" and np.max(np.abs(audio)) > 0.990001:
+            raise ValueError("View2 exceeds its common peak limit")
+        if check_hashes and sha256(path) != item["sha256"]:
+            raise ValueError("Audio checksum mismatch: " + str(path))
+    if indexes["wav"][uid] != indexes["speech_mix"][uid]:
+        raise ValueError("wav and mixture differ")
+    if split != "tt":
+        view = r["view2"]
+        speakers = [s["speaker"] for s in view["sources"]]
+        if len(set(speakers)) != 2 or set(speakers) & set(r["original_speakers"]):
+            raise ValueError("View2 speaker exclusion failed: " + uid)
+        if view["position_order"] != ["rir_ref1", "rir_ref2"] or view["noise"]:
+            raise ValueError("Invalid view2 physical condition")
+        for source in view["sources"]:
+            if source["path"] not in pool:
+                raise ValueError("Dry source outside its original split")
+            if speaker_id(source["path"]) != source["speaker"]:
+                raise ValueError("Dry speaker provenance mismatch")
+            seen_dry.add(source["path"])
+            if source["padding_samples"] != 0 or source["crop_samples"] != lengths[uid]:
+                raise ValueError("Unexpected crop/padding")
+    return seen_dry
+
+
+def verify_records(tasks, workers):
+    if workers == 1:
+        yield from map(verify_record, tasks)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            yield from executor.map(verify_record, tasks)
+
+
+def verify_dump(output, check_hashes=True, workers=1):
+    if not 1 <= workers <= 4:
+        raise ValueError("workers must be between 1 and 4")
     output = Path(output).resolve()
     preparation = json.loads((output / "preparation.json").read_text())
     index_root = Path(preparation["index_root"])
@@ -340,43 +392,10 @@ def verify_dump(output, check_hashes=True):
         if len(records) != len(ids) or {r["utterance_id"] for r in records} != ids:
             raise ValueError("Manifest key mismatch in " + split)
         seen_dry[split] = set()
-        for r in records:
-            uid = r["utterance_id"]
-            for name, item in r["streams"].items():
-                rel = Path(item["path"])
-                if rel.is_absolute() or ".." in rel.parts:
-                    raise ValueError("Nonlocal manifest path")
-                absolute = Path(indexes[name][uid])
-                if absolute != index_root / rel:
-                    raise ValueError("Index is not internal: " + str(absolute))
-                path = output / rel
-                if path.is_symlink():
-                    raise ValueError("Audio must be a real copied file: " + str(path))
-                info = sf.info(path)
-                if info.subtype != "FLOAT":
-                    raise ValueError("Expected FLOAT WAV: " + str(path))
-                audio = read_audio(path, lengths[uid] if name.startswith("speech_") else None)
-                if name == "speech_mix_view2" and np.max(np.abs(audio)) > 0.990001:
-                    raise ValueError("View2 exceeds its common peak limit")
-                if check_hashes and sha256(path) != item["sha256"]:
-                    raise ValueError("Audio checksum mismatch: " + str(path))
-            if indexes["wav"][uid] != indexes["speech_mix"][uid]:
-                raise ValueError("wav and mixture differ")
-            if split != "tt":
-                view = r["view2"]
-                speakers = [s["speaker"] for s in view["sources"]]
-                if len(set(speakers)) != 2 or set(speakers) & set(r["original_speakers"]):
-                    raise ValueError("View2 speaker exclusion failed: " + uid)
-                if view["position_order"] != ["rir_ref1", "rir_ref2"] or view["noise"]:
-                    raise ValueError("Invalid view2 physical condition")
-                for source in view["sources"]:
-                    if source["path"] not in pool_sets[split]:
-                        raise ValueError("Dry source outside its original split")
-                    if speaker_id(source["path"]) != source["speaker"]:
-                        raise ValueError("Dry speaker provenance mismatch")
-                    seen_dry[split].add(source["path"])
-                    if source["padding_samples"] != 0 or source["crop_samples"] != lengths[uid]:
-                        raise ValueError("Unexpected crop/padding")
+        tasks = ((r, split, output, index_root, indexes, lengths,
+                  pool_sets[split], check_hashes) for r in records)
+        for record_dry in verify_records(tasks, workers):
+            seen_dry[split].update(record_dry)
         counts[split] = len(records)
         print(json.dumps({"verified_split": split, "count": len(records)}), flush=True)
     if seen_dry["tr"] & seen_dry["cv"]:
@@ -403,15 +422,17 @@ def main():
     parser.add_argument("--estimate-only", action="store_true")
     parser.add_argument("--verify-existing", type=Path)
     args = parser.parse_args()
+    if not 1 <= args.workers <= 4:
+        parser.error("workers must be between 1 and 4")
     if args.verify_existing:
-        result = verify_dump(args.verify_existing)
+        result = verify_dump(args.verify_existing, workers=args.workers)
         atomic_json(args.verify_existing / "verification.json", result)
         print(json.dumps(result), flush=True)
         return
     if args.source_dump is None or args.metadata_root is None:
         parser.error("--source-dump and --metadata-root are required")
-    if args.workers < 1 or (args.limit is not None and args.limit < 1):
-        parser.error("workers and limit must be positive")
+    if args.limit is not None and args.limit < 1:
+        parser.error("limit must be positive")
     sources, dry_pools = load_sources(args.source_dump, args.metadata_root, args.limit)
     capacity = estimate(sources)
     print(json.dumps({"estimate": capacity}), flush=True)
@@ -474,7 +495,7 @@ def main():
         "Original/dry source paths in provenance are historical, never runtime dependencies.\n"
         "Teacher RIRs and source ordering are shared across views. Channel 0 is selected by training.\n"
         "room_id identifies a fixed RIR pair, not a position-independent physical room class.\n")
-    result = verify_dump(output)
+    result = verify_dump(output, workers=args.workers)
     atomic_json(output / "verification.json", result)
     atomic_json(output / "completion.json", result)
     print(json.dumps(result), flush=True)

@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import threading
 
 import numpy as np
 import unittest
@@ -105,8 +106,10 @@ def check_end_to_end_staged_dump_and_integrity(tmp_path):
     argv = [str(SCRIPT), "--source-dump", str(source),
                                       "--metadata-root", str(metadata), "--output-dir", str(output),
                                       "--index-root", str(final), "--limit", "2", "--workers", "2"]
-    with patch.object(sys, "argv", argv):
-        generator.main()
+    with patch.object(generator, "verify_dump", wraps=generator.verify_dump) as verify:
+        with patch.object(sys, "argv", argv):
+            generator.main()
+        verify.assert_called_once_with(output, workers=2)
     preparation = json.loads((output / "preparation.json").read_text())
     assert preparation["spec"] == {"sample_rate": "16k", "num_spk": 2, "length": "min", "noise": False}
     assert preparation["counts"] == {"tr": 2, "cv": 2, "tt": 2}
@@ -133,19 +136,51 @@ def check_end_to_end_staged_dump_and_integrity(tmp_path):
     assert np.max(np.abs(saved)) <= 0.99 + 1e-7
     assert not (output / "raw/tt_rir_2spk_nf_min_16k/speech_mix_view2.scp").exists()
     output.rename(final)
-    assert generator.verify_dump(final)["self_contained"]
+    # Serial and parallel verification return the same complete report.
+    # The barrier proves separate records really run concurrently.
+    verify_record = generator.verify_record
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    started = []
+
+    def concurrent_record(task):
+        with lock:
+            started.append(threading.get_ident())
+            first_pair = len(started) <= 2
+        if first_pair:
+            barrier.wait(timeout=10)
+        return verify_record(task)
+
+    with patch.object(generator.time, "time", return_value=1234567890.0):
+        serial = generator.verify_dump(final)
+        assert serial["self_contained"]
+        with patch.object(generator, "verify_record", side_effect=concurrent_record):
+            assert generator.verify_dump(final, workers=2) == serial
+        assert len(set(started[:2])) == 2
+        for workers in (3, 4):
+            assert generator.verify_dump(final, workers=workers) == serial
     # The published dump verifies even when original/dry sources are unavailable.
     import shutil
     shutil.rmtree(source)
     shutil.rmtree(tmp_path / "original_audio")
     shutil.rmtree(tmp_path / "dry")
-    assert generator.verify_dump(final)["counts"]["tr"] == 2
+    argv = [str(SCRIPT), "--verify-existing", str(final), "--workers", "4"]
+    with patch.object(generator, "verify_dump", wraps=generator.verify_dump) as verify:
+        with patch.object(sys, "argv", argv):
+            generator.main()
+        verify.assert_called_once_with(final, workers=4)
+    assert json.loads((final / "verification.json").read_text())["counts"]["tr"] == 2
     item = records[0]["streams"]["speech_mix_view2"]
     path = final / item["path"]
     audio, rate = sf.read(path)
     sf.write(path, audio * 0.9, rate, subtype="FLOAT")
-    with unittest.TestCase().assertRaisesRegex(ValueError, "checksum"):
-        generator.verify_dump(final)
+    for workers in (1, 2, 3, 4):
+        with unittest.TestCase().assertRaisesRegex(ValueError, "checksum"):
+            generator.verify_dump(final, workers=workers)
+    with patch.object(generator.time, "time", return_value=1234567890.0):
+        serial = generator.verify_dump(final, check_hashes=False)
+        assert not serial["checked_audio_hashes"]
+        assert generator.verify_dump(final, check_hashes=False, workers=4) == serial
 
 
 def check_reject_cross_split_dry_leakage(tmp_path):
@@ -179,6 +214,18 @@ class PairedDumpTest(unittest.TestCase):
         base.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=base) as tmp:
             check_reject_cross_split_dry_leakage(Path(tmp))
+
+    def test_verification_worker_bounds(self):
+        for workers in (-1, 0, 5):
+            with self.subTest(workers=workers):
+                with self.assertRaisesRegex(ValueError, "workers must be between 1 and 4"):
+                    generator.verify_dump(ROOT / "unused_dump", workers=workers)
+                argv = [str(SCRIPT), "--verify-existing", str(ROOT / "unused_dump"),
+                        "--workers", str(workers)]
+                with patch.object(sys, "argv", argv):
+                    with self.assertRaises(SystemExit) as error:
+                        generator.main()
+                self.assertEqual(error.exception.code, 2)
 
 
 if __name__ == "__main__":
