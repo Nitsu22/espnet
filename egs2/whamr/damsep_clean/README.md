@@ -224,6 +224,26 @@ and `exp/damsep_stats_8k` via symbolic links in that checkout. Do not update
 the checkout used by a running job. Logs/checkpoints are under the separate
 checkout's `egs2/whamr/damsep_clean/exp/damsep_nf_8k_clean_only`.
 
+## Evaluate the trained pair on TSUBAME
+
+From the separate clean-only checkout, `qsub/evaluate_pair_gpu.sh` runs Stage 7
+for the full-loss and clean-only experiments sequentially on one GPU. It reads
+each saved `config.yaml` and `valid.loss.best.pth`, evaluates all 3,000 NF-WHAMR
+test mixtures, and uses the baseline's 0.9 peak normalization and PCM16 output.
+The original experiment's source checkout is not updated.
+
+Submit `qsub/evaluate_pair_cpu.sh` with `-hold_jid <inference_job_id>` for Stage 8.
+It verifies the inference report, exact test IDs and all output WAVs before
+scoring, since a dependency does not guarantee successful inference. The job
+uses `cpu_8=1`, four scoring workers with one BLAS thread each, and scores both
+experiments with the standard ESPnet enhancement scorer. Outputs remain under
+each experiment's `enhanced_tt/{clean,reverb}/scoring`; clean-only has only the
+clean branch. Both scripts accept experiment directories as positional arguments.
+
+The GPU job requests two hours at priority -5 (point upper estimate 0.3200);
+CPU scoring requests four hours at priority -5 (upper estimate 0.0960).
+The combined upper estimate is 0.4160, not a confirmed charge.
+
 ## Verification
 
 Run model/loss/data tests from the repository root:
