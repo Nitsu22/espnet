@@ -193,7 +193,7 @@ class TimeLocalBiMamba(nn.Module):
         # return_last_state is not differentiable and must not be used here.
         return F.linear(y[:, :, -1], mamba.out_proj.weight, mamba.out_proj.bias)
 
-    def _direction(self, sequence, mamba):
+    def _direction_group(self, sequence, mamba):
         projected = F.linear(sequence, mamba.in_proj.weight, mamba.in_proj.bias)
         count, frames, _ = sequence.shape
         activated = F.silu(F.conv1d(
@@ -215,6 +215,12 @@ class TimeLocalBiMamba(nn.Module):
                 update = run(*shared)
             updates.append(update)
         return torch.cat(updates).reshape(count, frames, self.dim)
+
+    def _direction(self, sequence, mamba):
+        # Keep checkpoint inputs and each gather's backward buffers local to
+        # 64 independent sequences, rather than the full B*F tensor.
+        return torch.cat([self._direction_group(sequence[first:first + 64], mamba)
+                          for first in range(0, sequence.shape[0], 64)], dim=0)
 
     def forward(self, x):
         if x.ndim != 4 or x.shape[-1] != self.dim or min(x.shape[:3]) <= 0:

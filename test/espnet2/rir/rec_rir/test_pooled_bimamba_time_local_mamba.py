@@ -116,6 +116,22 @@ def test_no_outside_window_batch_or_frequency_dependency():
     assert gradients.count_nonzero() == 0
 
 
+def test_sequence_groups_preserve_output_and_gradients_at_group_boundaries():
+    with patch('espnet2.rir.rec_rir.pooled_bimamba._build_mamba', cpu_mamba):
+        block = TimeLocalBiMamba(4, 2, 3, 5, 1e-5, 257)
+    reference = copy.deepcopy(block)
+    x = torch.randn(2, 7, 65, 4, requires_grad=True)
+    ref = x.detach().clone().requires_grad_()
+    with patch.object(TimeLocalBiMamba, '_selective_scan', staticmethod(reference_scan)):
+        actual, expected = block(x), per_frame_oracle(reference, ref)
+        torch.testing.assert_close(actual, expected, rtol=2e-5, atol=3e-6)
+        actual.square().sum().backward()
+        expected.square().sum().backward()
+    torch.testing.assert_close(x.grad, ref.grad, rtol=1e-4, atol=1e-5)
+    for a, b in zip(block.parameters(), reference.parameters()):
+        torch.testing.assert_close(a.grad, b.grad, rtol=2e-4, atol=1e-4)
+
+
 SMALL = dict(emb_dim=8, pre_layers=2, post_layers=1, d_state=2, d_conv=3,
              freq_bottleneck=4, freq_rank=4, local_kernel=3, pooling_hidden=4,
              n_heads=2, ffn_dim=8, head_dim=8)

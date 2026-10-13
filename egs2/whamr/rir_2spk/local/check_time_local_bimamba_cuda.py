@@ -30,10 +30,11 @@ def main():
         raise ValueError('Use a fresh validation output')
     torch.manual_seed(0)
     results = []
-    for frames, window, chunk in ((11, 5, 7), (129, 125, 257)):
+    for frames, window, chunk, freqs in ((11, 5, 7, 2), (129, 125, 257, 2),
+                                       (7, 5, 257, 129)):
         block = TimeLocalBiMamba(8, 4, 4, window, 1e-5, chunk).cuda().train()
         reference = copy.deepcopy(block)
-        x = torch.randn(1, frames, 2, 8, device='cuda', requires_grad=True)
+        x = torch.randn(1, frames, freqs, 8, device='cuda', requires_grad=True)
         ref_x = x.detach().clone().requires_grad_()
         actual, expected = block(x), oracle(reference, ref_x)
         torch.testing.assert_close(actual, expected, rtol=3e-5, atol=3e-6)
