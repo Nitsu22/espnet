@@ -8,6 +8,7 @@ from collections import OrderedDict
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 from rotary_embedding_torch import RotaryEmbedding
 
 from espnet2.rir.rec_rir.model import _build_mamba
@@ -95,6 +96,108 @@ class TimeLocalAttention(nn.Module):
             update = update.transpose(1, 2).reshape(count, frames, dim)
             updates.append(self.projection(update))
         update = torch.cat(updates, dim=0)
+        return x + update.reshape(batch, freqs, frames, dim).permute(0, 2, 1, 3)
+
+
+class TimeLocalBiMamba(nn.Module):
+    """Independent zero-state Mamba windows, returning their center features.
+
+    A causal Mamba's center output needs only the left half of its window;
+    the reversed branch needs only the right half. Both include the center.
+    This computes exactly the center of a clipped bidirectional window,
+    without computing the unused second half of either causal sequence.
+    Pointwise input projections are shared across overlapping windows.
+    Activation checkpointing recomputes bounded batches of windows so their
+    selective-scan activations are not all retained during training.
+
+    Missing positions beyond sequence edges are zero-state prefix padding,
+    with convolution bias/activation masked before the scan. Batch padding
+    inside the sequence remains visible, as in the local-attention baseline.
+    """
+
+    def __init__(self, dim, d_state, d_conv, window, eps,
+                 window_batch_size=2048, activation_checkpoint=True):
+        super().__init__()
+        if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0
+               for v in (dim, d_state, d_conv, window, window_batch_size)):
+            raise ValueError("Local BiMamba dimensions must be positive integers")
+        if window % 2 != 1:
+            raise ValueError("Local BiMamba window must be odd")
+        if not isinstance(activation_checkpoint, bool):
+            raise ValueError("activation_checkpoint must be boolean")
+        self.dim = dim
+        self.window = window
+        self.radius = window // 2
+        self.window_batch_size = window_batch_size
+        self.activation_checkpoint = activation_checkpoint
+        self.norm = nn.LayerNorm(dim, eps=eps)
+        specification = f"mamba({d_state},{d_conv})"
+        self.forward_mamba = _build_mamba(dim, specification)
+        self.backward_mamba = _build_mamba(dim, specification)
+        self.projection = nn.Linear(2 * dim, dim)
+
+    @staticmethod
+    def _selective_scan(*args, **kwargs):
+        from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
+
+        return selective_scan_fn(*args, **kwargs)
+
+    def _window_endpoints(self, projected, mamba, start, end):
+        frames = projected.shape[1]
+        targets = torch.arange(start, end, device=projected.device)
+        sequence_index = torch.div(targets, frames, rounding_mode="floor")
+        positions = targets.remainder(frames)[:, None] + torch.arange(
+            -self.radius, 1, device=projected.device)[None, :]
+        valid = positions >= 0
+        # No tensor proportional to all overlapping windows is materialized.
+        xz = projected[sequence_index[:, None], positions.clamp_min(0)]
+        xz = (xz * valid[..., None]).transpose(1, 2).contiguous()
+        x, z = xz.chunk(2, dim=1)
+        span = self.radius + 1
+        x = F.silu(F.conv1d(
+            x, mamba.conv1d.weight, mamba.conv1d.bias,
+            padding=mamba.d_conv - 1, groups=mamba.d_inner)[..., :span])
+        # Artificial prefixes must leave the SSM at zero, even when the
+        # causal convolution has a nonzero bias. Real batch padding is kept.
+        x = (x * valid[:, None, :]).contiguous()
+        parameters = F.linear(x.transpose(1, 2), mamba.x_proj.weight)
+        delta, b, c = torch.split(
+            parameters, [mamba.dt_rank, mamba.d_state, mamba.d_state], -1)
+        delta = F.linear(delta, mamba.dt_proj.weight).transpose(1, 2).contiguous()
+        y = self._selective_scan(
+            x, delta, -torch.exp(mamba.A_log.float()),
+            b.transpose(1, 2).contiguous(), c.transpose(1, 2).contiguous(),
+            mamba.D.float(), z=z, delta_bias=mamba.dt_proj.bias.float(),
+            delta_softplus=True)
+        # Use the last output, whose gradient is supported by selective_scan;
+        # return_last_state is not differentiable and must not be used here.
+        return F.linear(y[:, :, -1], mamba.out_proj.weight, mamba.out_proj.bias)
+
+    def _direction(self, sequence, mamba):
+        projected = F.linear(sequence, mamba.in_proj.weight, mamba.in_proj.bias)
+        count, frames, _ = sequence.shape
+        updates = []
+        for start in range(0, count * frames, self.window_batch_size):
+            end = min(count * frames, start + self.window_batch_size)
+
+            def run(values, module=mamba, first=start, last=end):
+                return self._window_endpoints(values, module, first, last)
+
+            if self.activation_checkpoint and self.training and torch.is_grad_enabled():
+                update = checkpoint(run, projected, use_reentrant=False)
+            else:
+                update = run(projected)
+            updates.append(update)
+        return torch.cat(updates).reshape(count, frames, self.dim)
+
+    def forward(self, x):
+        if x.ndim != 4 or x.shape[-1] != self.dim or min(x.shape[:3]) <= 0:
+            raise ValueError("Expected nonempty features [B, T, F, dim]")
+        batch, frames, freqs, dim = x.shape
+        sequence = self.norm(x).permute(0, 2, 1, 3).reshape(batch * freqs, frames, dim)
+        forward = self._direction(sequence, self.forward_mamba)
+        backward = self._direction(sequence.flip(1), self.backward_mamba).flip(1)
+        update = self.projection(torch.cat((forward, backward), -1))
         return x + update.reshape(batch, freqs, frames, dim).permute(0, 2, 1, 3)
 
 
@@ -334,7 +437,10 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  post_frequency_module="attention",
                  time_local_attention_window=0,
                  time_local_attention_query_chunk_size=64,
-                 time_local_attention_sequence_batch_size=64):
+                 time_local_attention_sequence_batch_size=64,
+                 time_local_bimamba_window=0,
+                 time_local_bimamba_window_batch_size=2048,
+                 time_local_bimamba_checkpoint=True):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -360,6 +466,19 @@ class PooledBiMambaCTFPredictor(nn.Module):
         if any(isinstance(value, bool) or not isinstance(value, int)
                or value <= 0 for value in local_chunks):
             raise ValueError("Local attention chunk sizes must be positive integers")
+        if (isinstance(time_local_bimamba_window, bool)
+                or not isinstance(time_local_bimamba_window, int)
+                or time_local_bimamba_window < 0
+                or (time_local_bimamba_window and time_local_bimamba_window % 2 != 1)):
+            raise ValueError("time_local_bimamba_window must be zero or a positive odd integer")
+        if (isinstance(time_local_bimamba_window_batch_size, bool)
+                or not isinstance(time_local_bimamba_window_batch_size, int)
+                or time_local_bimamba_window_batch_size <= 0):
+            raise ValueError("Local BiMamba window batch size must be a positive integer")
+        if not isinstance(time_local_bimamba_checkpoint, bool):
+            raise ValueError("Local BiMamba checkpoint must be boolean")
+        if time_local_attention_window and time_local_bimamba_window:
+            raise ValueError("Choose either local attention or local BiMamba")
         if not isinstance(pooling_channelwise, bool):
             raise ValueError("pooling_channelwise must be a boolean")
         if not isinstance(pre_frequency_global, bool):
@@ -393,6 +512,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
         frequency_indices = self._active_indices(frequency_block_indices, pre_layers, "frequency_block_indices")
         if time_local_attention_window and not time_indices:
             raise ValueError("Local attention requires at least one active time stage")
+        if time_local_bimamba_window and not time_indices:
+            raise ValueError("Local BiMamba requires at least one active time stage")
         self.input_dim = input_dim
         self._num_spk = num_spk
         self.ctf_taps = ctf_taps
@@ -404,6 +525,7 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.time_local_attention_window = time_local_attention_window
         self.time_local_attention_query_chunk_size = time_local_attention_query_chunk_size
         self.time_local_attention_sequence_batch_size = time_local_attention_sequence_batch_size
+        self.time_local_bimamba_window = time_local_bimamba_window
         self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
@@ -481,6 +603,19 @@ class PooledBiMambaCTFPredictor(nn.Module):
                             time_local_attention_sequence_batch_size),
                     )
                 self.time_local_attention_blocks.append(block)
+        self.time_local_bimamba_blocks = nn.ModuleList()
+        if time_local_bimamba_window:
+            for index in range(pre_layers):
+                block = nn.Identity()
+                if index in time_indices:
+                    block = seeded_module(
+                        500009 + 97 * index,
+                        lambda: TimeLocalBiMamba(
+                            emb_dim, d_state, d_conv, time_local_bimamba_window,
+                            eps, time_local_bimamba_window_batch_size,
+                            time_local_bimamba_checkpoint),
+                    )
+                self.time_local_bimamba_blocks.append(block)
 
     @staticmethod
     def _active_indices(indices, layers, name):
@@ -497,9 +632,11 @@ class PooledBiMambaCTFPredictor(nn.Module):
         if input.ndim != 3 or not torch.is_complex(input) or input.shape[-1] != self.input_dim:
             raise ValueError("Expected complex STFT [B, T, input_dim]")
         x = self.encoder(torch.stack((input.real, input.imag), 1).float()).permute(0, 2, 3, 1)
-        if self.time_local_attention_window:
+        if self.time_local_attention_window or self.time_local_bimamba_window:
+            local_blocks = (self.time_local_attention_blocks if self.time_local_attention_window
+                            else self.time_local_bimamba_blocks)
             for local_block, time_block, frequency_block in zip(
-                    self.time_local_attention_blocks, self.time_blocks,
+                    local_blocks, self.time_blocks,
                     self.frequency_blocks):
                 x = frequency_block(time_block(local_block(x)))
         else:
