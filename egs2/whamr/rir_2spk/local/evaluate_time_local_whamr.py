@@ -118,14 +118,11 @@ def main():
     if len(ls_rows) != 3000 or {r[0] for r in ls_rows} != ids:
         raise ValueError("LS reference IDs differ")
     output.mkdir(parents=True)
-    phase = "ls_reference_validation"
+    phase = "gpu_check"
     try:
         ls_env = dict(os.environ)
         ls_env["PYTHONPATH"] = str(args.ls_helper_dir.resolve().parents[3])
         ls_env["CUDA_VISIBLE_DEVICES"] = ""
-        subprocess.run([sys.executable, str(args.ls_helper_dir / "prepare_ls_rir_reference.py"),
-                        "--mode", "validate", "--output", str(args.ls_reference_dir)],
-                       env=ls_env, check=True)
         require_free_gpu(args.gpu_index)
         env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(args.gpu_index),
                    PYTHONPATH=str(repo), TZ="Asia/Tokyo")
@@ -170,6 +167,12 @@ def main():
                 or metadata["inference"] != "ordinary sweep PIM"
                 or digest(output / "whamr/config.yaml") != trained["config_sha256"]):
             raise ValueError("Inference checkpoint/config/protocol differs")
+        # Check the immutable LS files after GPU inference has released its
+        # device, so a slow shared-filesystem audit does not delay GPU startup.
+        phase = "ls_reference_validation"
+        subprocess.run([sys.executable, str(args.ls_helper_dir / "prepare_ls_rir_reference.py"),
+                        "--mode", "validate", "--output", str(args.ls_reference_dir)],
+                       env=ls_env, check=True)
         phase = "ls_scoring"
         ls_score = output / "whamr/score_ls_direct_reverb"
         subprocess.run([sys.executable, str(recipe / "local/score_rir_pit.py"),
