@@ -40,7 +40,7 @@ class RoomPathPooledBiMambaCTFPredictor(PooledBiMambaCTFPredictor):
             nn.SiLU(),
         )
 
-    def encode_room_path(self, input, ilens=None):
+    def encode_room_path(self, input, ilens=None, return_pre_slot_codes=False):
         """Return one shared room code and two separate path-slot codes."""
         if (not isinstance(input, torch.Tensor) or input.ndim != 3
                 or not torch.is_complex(input) or input.shape[-1] != self.input_dim):
@@ -56,10 +56,14 @@ class RoomPathPooledBiMambaCTFPredictor(PooledBiMambaCTFPredictor):
             batch, frames, freqs, self.num_spk, self.pooling_channels)
         # Keep the baseline's full-time-axis softmax, including batch padding.
         paths = (path_scores.softmax(dim=1) * x.unsqueeze(3)).sum(1)
-        paths = paths.permute(0, 2, 1, 3) + self.slot_embeddings[None, :, None, :]
+        pre_slot_paths = paths.permute(0, 2, 1, 3)
+        paths = pre_slot_paths + self.slot_embeddings[None, :, None, :]
         room_scores = self.room_pooling(hidden)
         room = (room_scores.softmax(dim=1) * x).sum(1)
-        return OrderedDict(room=room, path1=paths[:, 0], path2=paths[:, 1])
+        codes = OrderedDict(room=room, path1=paths[:, 0], path2=paths[:, 1])
+        if return_pre_slot_codes:
+            codes["pre_slot_path_codes"] = pre_slot_paths
+        return codes
 
     def decode_room_path(self, room, path):
         """Decode one path ``[B,F,D]`` or multiple paths ``[B,S,F,D]``.
@@ -93,7 +97,11 @@ class RoomPathPooledBiMambaCTFPredictor(PooledBiMambaCTFPredictor):
         return ctf[:, 0] if single_path else ctf
 
     def forward(self, input, ilens=None, additional=None):
-        codes = self.encode_room_path(input, ilens)
+        return_pre_slot_codes = bool((additional or {}).get("return_pre_slot_codes", False))
+        codes = self.encode_room_path(input, ilens, return_pre_slot_codes)
         paths = torch.stack((codes["path1"], codes["path2"]), dim=1)
         ctf = self.decode_room_path(codes["room"], paths)
-        return ctf, ilens, OrderedDict(room_code=codes["room"], path_codes=paths)
+        auxiliary = OrderedDict(room_code=codes["room"], path_codes=paths)
+        if return_pre_slot_codes:
+            auxiliary["pre_slot_path_codes"] = codes["pre_slot_path_codes"]
+        return ctf, ilens, auxiliary
