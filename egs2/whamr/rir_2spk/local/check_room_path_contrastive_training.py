@@ -49,6 +49,9 @@ def main():
     os.environ["NUMBA_CACHE_DIR"] = str(runtime / "numba")
     os.environ["MPLCONFIGDIR"] = str(runtime / "matplotlib")
     os.environ["XDG_CACHE_HOME"] = str(runtime / "cache")
+    os.environ["TORCH_EXTENSIONS_DIR"] = str(runtime / "torch_extensions")
+    os.environ["CUDA_CACHE_PATH"] = str(runtime / "cuda")
+    (runtime / "cuda").mkdir(parents=True, exist_ok=True)
 
     import numpy as np
     import soundfile as sf
