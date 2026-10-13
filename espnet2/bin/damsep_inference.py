@@ -30,6 +30,7 @@ def inference(args):
         args.train_config, args.model_file, args.device
     )
     model.eval()
+    ctf_enabled = getattr(model, "ctf_enabled", not model.clean_only)
     mixtures = {}
     for line in args.wav_scp.read_text().splitlines():
         uid, path = line.split(maxsplit=1)
@@ -74,7 +75,7 @@ def inference(args):
                         subtype="PCM_16" if args.normalize_output_wav else "FLOAT",
                     )
                     lists[branch, speaker].append(f"{uid} {dest}\n")
-            if not model.clean_only:
+            if ctf_enabled:
                 ctf_ri = output["rir"].reshape(2, 2, 257, 60).cpu().numpy()
                 ctf = ctf_ri[:, 0] + 1j * ctf_ri[:, 1]
                 if not np.isfinite(ctf).all():
@@ -87,7 +88,7 @@ def inference(args):
                 print(f"Inferred {i + 1}/{len(keys)} utterances", flush=True)
     for (branch, speaker), lines in lists.items():
         (args.output_dir / branch / f"spk{speaker}.scp").write_text("".join(lines))
-    if not model.clean_only:
+    if ctf_enabled:
         (args.output_dir / "ctf.scp").write_text("".join(ctf_list))
     (args.output_dir / "inference.json").write_text(
         json.dumps(
@@ -99,10 +100,11 @@ def inference(args):
                 count=len(keys),
                 normalize_output_wav=args.normalize_output_wav,
                 clean_only=model.clean_only,
-                ctf_shape=None if model.clean_only else [2, 257, 60],
+                ctf_enabled=ctf_enabled,
+                ctf_shape=[2, 257, 60] if ctf_enabled else None,
                 ctf_source_order=(
                     None
-                    if model.clean_only
+                    if not ctf_enabled
                     else "matches output WAVs; no distance ordering"
                 ),
             ),

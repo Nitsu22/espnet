@@ -20,7 +20,15 @@ class DAMSEPTask(AbsTask):
 
     @classmethod
     def build_model(cls, args):
-        return ESPnetDAMSEPModel(**args.model_conf)
+        conf = dict(args.model_conf)
+        backbone = conf.pop("backbone", "spmamba")
+        if backbone == "tflocoformer":
+            from espnet2.enh.damsep.tflocoformer import ESPnetTFLocoformerDAMSEPModel
+
+            return ESPnetTFLocoformerDAMSEPModel(**conf)
+        if backbone != "spmamba":
+            raise ValueError(f"Unknown DAMSEP backbone: {backbone}")
+        return ESPnetDAMSEPModel(**conf)
 
     @classmethod
     def build_collate_fn(cls, args, train):

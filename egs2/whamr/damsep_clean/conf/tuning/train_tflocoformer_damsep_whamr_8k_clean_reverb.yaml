@@ -1,0 +1,65 @@
+# Noisy WHAMR TF-Locoformer-S + shared DAMSEP; baseline clean SI-SNR/AdamW.
+seed: 0
+max_epoch: 150
+use_amp: false
+train_dtype: float32
+grad_clip: 5.0
+batch_size: 4
+num_workers: 4
+num_att_plot: 0
+log_interval: 50
+valid_batch_size: 1
+optim: adamw
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.01
+scheduler: warmupreducelronplateau
+scheduler_conf:
+  warmup_steps: 4000
+  mode: min
+  factor: 0.5
+  patience: 3
+patience: 10
+batch_type: unsorted
+preprocessor_conf:
+  speech_segment: 32000
+  force_single_channel: true
+  avoid_allzero_segment: true
+model_conf:
+  backbone: tflocoformer
+  separator_conf:
+    num_spk: 2
+    n_layers: 4
+    emb_dim: 96
+    norm_type: rmsgroupnorm
+    num_groups: 4
+    tf_order: ft
+    n_heads: 4
+    flash_attention: false
+    ffn_type:
+    - swiglu_conv1d
+    - swiglu_conv1d
+    ffn_hidden_dim:
+    - 128
+    - 128
+    conv1d_kernel: 8
+    conv1d_shift: 1
+    dropout: 0.0
+    eps: 1.0e-05
+  loss_w_reverb: 0.1
+  loss_w_reconstruction: 0.0
+  si_snr_eps: 1.0e-07
+  extract_feats_in_collect_stats: false
+early_stopping_criterion:
+- valid
+- loss_clean
+- min
+val_scheduler_criterion:
+- valid
+- loss_clean
+best_model_criterion:
+- - valid
+  - loss_clean
+  - min
+keep_nbest_models: 1
