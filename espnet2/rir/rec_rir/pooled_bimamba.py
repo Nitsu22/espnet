@@ -154,13 +154,17 @@ class TimeLocalBiMamba(nn.Module):
         xz = (xz * valid[..., None]).transpose(1, 2).contiguous()
         x, z = xz.chunk(2, dim=1)
         span = self.radius + 1
-        if x.is_cuda and mamba.d_conv in (2, 3, 4):
-            # Same causal depthwise operator as official Mamba. Generic
-            # grouped Conv1d backward is costly for many short windows.
-            from causal_conv1d import causal_conv1d_fn
-
-            x = causal_conv1d_fn(x, mamba.conv1d.weight[:, 0],
-                                mamba.conv1d.bias, activation="silu")
+        if mamba.d_conv <= 4:
+            # The usual optional causal_conv1d extension is not required.
+            # Explicit short-tap products avoid CuDNN's expensive grouped
+            # Conv1d backward for many short independent windows.
+            padded = F.pad(x, (mamba.d_conv - 1, 0))
+            x = sum(padded[..., tap:tap + span]
+                    * mamba.conv1d.weight[None, :, 0, tap, None]
+                    for tap in range(mamba.d_conv))
+            if mamba.conv1d.bias is not None:
+                x = x + mamba.conv1d.bias[None, :, None]
+            x = F.silu(x)
         else:
             x = F.silu(F.conv1d(
                 x, mamba.conv1d.weight, mamba.conv1d.bias,
