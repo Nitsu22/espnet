@@ -38,6 +38,7 @@ AdamW replacing the DAMSEP paper's training SNR and Adam.
 Existing artifacts are linked, never regenerated:
 
 - `dump_whamr` -> existing `../enh1/dump` noisy mixture and clean teachers.
+- `dump` -> the same noisy dump, to resolve its SCPs' original relative WAV paths.
 - `dump_clean` -> existing `../enh4_clean/dump_clean`, for source checks only.
 - `dump_reverb` -> existing `../enh_rir/dump_ctf_joint`, speech-only reverb teachers.
 - `exp/tflocoformer_damsep_stats_8k` -> the existing five-series DAMSEP statistics.
