@@ -106,7 +106,8 @@ class TimeLocalBiMamba(nn.Module):
     the reversed branch needs only the right half. Both include the center.
     This computes exactly the center of a clipped bidirectional window,
     without computing the unused second half of either causal sequence.
-    Pointwise input projections are shared across overlapping windows.
+    Input projections and scan parameters are shared across overlapping
+    windows, except for their convolution prefixes, which are reset exactly.
     Activation checkpointing recomputes bounded batches of windows so their
     selective-scan activations are not all retained during training.
 
@@ -142,44 +143,51 @@ class TimeLocalBiMamba(nn.Module):
 
         return selective_scan_fn(*args, **kwargs)
 
-    def _window_endpoints(self, projected, mamba, start, end):
+    @staticmethod
+    def _project_scan_parameters(x, mamba):
+        parameters = F.linear(x, mamba.x_proj.weight)
+        delta, b, c = torch.split(
+            parameters, [mamba.dt_rank, mamba.d_state, mamba.d_state], -1)
+        return F.linear(delta, mamba.dt_proj.weight), b, c
+
+    def _window_endpoints(self, projected, activated, delta, b, c, mamba, start, end):
         frames = projected.shape[1]
         targets = torch.arange(start, end, device=projected.device)
         sequence_index = torch.div(targets, frames, rounding_mode="floor")
         positions = targets.remainder(frames)[:, None] + torch.arange(
             -self.radius, 1, device=projected.device)[None, :]
         valid = positions >= 0
-        # No tensor proportional to all overlapping windows is materialized.
-        xz = projected[sequence_index[:, None], positions.clamp_min(0)]
-        xz = (xz * valid[..., None]).transpose(1, 2).contiguous()
-        x, z = xz.chunk(2, dim=1)
+        indices = positions.clamp_min(0)
+        def gather(values):
+            return values[sequence_index[:, None], indices] * valid[..., None]
+
+        x, delta, b, c = map(gather, (activated, delta, b, c))
+        z = gather(projected[..., mamba.d_inner:])
         span = self.radius + 1
-        if mamba.d_conv <= 4:
-            # The usual optional causal_conv1d extension is not required.
-            # Explicit short-tap products avoid CuDNN's expensive grouped
-            # Conv1d backward for many short independent windows.
-            padded = F.pad(x, (mamba.d_conv - 1, 0))
-            x = sum(padded[..., tap:tap + span]
-                    * mamba.conv1d.weight[None, :, 0, tap, None]
-                    for tap in range(mamba.d_conv))
+        boundary = min(mamba.d_conv - 1, span)
+        if boundary:
+            # After d_conv-1 steps the convolution depends only on real
+            # samples inside this window, so all remaining scan parameters
+            # can be shared. Recompute its prefix with a zero conv state.
+            raw = projected[sequence_index[:, None], indices[:, :boundary], :mamba.d_inner]
+            raw = (raw * valid[:, :boundary, None]).transpose(1, 2)
+            padded = F.pad(raw, (mamba.d_conv - 1, 0))
+            prefix = sum(padded[..., tap:tap + boundary]
+                         * mamba.conv1d.weight[None, :, 0, tap, None]
+                         for tap in range(mamba.d_conv))
             if mamba.conv1d.bias is not None:
-                x = x + mamba.conv1d.bias[None, :, None]
-            x = F.silu(x)
-        else:
-            x = F.silu(F.conv1d(
-                x, mamba.conv1d.weight, mamba.conv1d.bias,
-                padding=mamba.d_conv - 1, groups=mamba.d_inner)[..., :span])
-        # Artificial prefixes must leave the SSM at zero, even when the
-        # causal convolution has a nonzero bias. Real batch padding is kept.
-        x = (x * valid[:, None, :]).contiguous()
-        parameters = F.linear(x.transpose(1, 2), mamba.x_proj.weight)
-        delta, b, c = torch.split(
-            parameters, [mamba.dt_rank, mamba.d_state, mamba.d_state], -1)
-        delta = F.linear(delta, mamba.dt_proj.weight).transpose(1, 2).contiguous()
+                prefix = prefix + mamba.conv1d.bias[None, :, None]
+            prefix = F.silu(prefix).transpose(1, 2) * valid[:, :boundary, None]
+            prefix_delta, prefix_b, prefix_c = self._project_scan_parameters(prefix, mamba)
+            x = torch.cat((prefix, x[:, boundary:]), 1)
+            delta = torch.cat((prefix_delta, delta[:, boundary:]), 1)
+            b = torch.cat((prefix_b, b[:, boundary:]), 1)
+            c = torch.cat((prefix_c, c[:, boundary:]), 1)
         y = self._selective_scan(
-            x, delta, -torch.exp(mamba.A_log.float()),
+            x.transpose(1, 2).contiguous(), delta.transpose(1, 2).contiguous(),
+            -torch.exp(mamba.A_log.float()),
             b.transpose(1, 2).contiguous(), c.transpose(1, 2).contiguous(),
-            mamba.D.float(), z=z, delta_bias=mamba.dt_proj.bias.float(),
+            mamba.D.float(), z=z.transpose(1, 2).contiguous(), delta_bias=mamba.dt_proj.bias.float(),
             delta_softplus=True)
         # Use the last output, whose gradient is supported by selective_scan;
         # return_last_state is not differentiable and must not be used here.
@@ -188,17 +196,23 @@ class TimeLocalBiMamba(nn.Module):
     def _direction(self, sequence, mamba):
         projected = F.linear(sequence, mamba.in_proj.weight, mamba.in_proj.bias)
         count, frames, _ = sequence.shape
+        activated = F.silu(F.conv1d(
+            projected[..., :mamba.d_inner].transpose(1, 2),
+            mamba.conv1d.weight, mamba.conv1d.bias, padding=mamba.d_conv - 1,
+            groups=mamba.d_inner)[..., :frames]).transpose(1, 2)
+        delta, b, c = self._project_scan_parameters(activated, mamba)
+        shared = (projected, activated, delta, b, c)
         updates = []
         for start in range(0, count * frames, self.window_batch_size):
             end = min(count * frames, start + self.window_batch_size)
 
-            def run(values, module=mamba, first=start, last=end):
-                return self._window_endpoints(values, module, first, last)
+            def run(p, u, dt, b, c, module=mamba, first=start, last=end):
+                return self._window_endpoints(p, u, dt, b, c, module, first, last)
 
             if self.activation_checkpoint and self.training and torch.is_grad_enabled():
-                update = checkpoint(run, projected, use_reentrant=False)
+                update = checkpoint(run, *shared, use_reentrant=False)
             else:
-                update = run(projected)
+                update = run(*shared)
             updates.append(update)
         return torch.cat(updates).reshape(count, frames, self.dim)
 
