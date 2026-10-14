@@ -81,10 +81,10 @@ def main():
         raise ValueError("Scheduler selection must use valid.loss_sweep")
     if [list(value) for value in cfg.best_model_criterion] != [["valid", "loss_sweep", "min"]]:
         raise ValueError("Best checkpoint selection must use valid.loss_sweep (min)")
-    if (cfg.model_conf.get("lambda_room", 0.01) <= 0
-            or cfg.model_conf.get("lambda_path", 0.01) <= 0
+    if (cfg.model_conf.get("lambda_room", 0.01) < 0
+            or cfg.model_conf.get("lambda_path", 0.01) < 0
             or cfg.model_conf.get("validation_contrastive", False)):
-        raise ValueError("Check the both-loss variant with primary-view-only validation")
+        raise ValueError("Check nonnegative loss weights and primary-view-only validation")
     if cfg.optim != "adamw":
         raise ValueError("This readiness check expects the recipe's AdamW optimizer")
 
@@ -155,8 +155,14 @@ def main():
         values = [parameter.grad.abs().sum() for name, parameter in model.named_parameters()
                   if parameter.requires_grad and name.startswith(component + ".")]
         total = sum(values)
-        if not values or not torch.isfinite(total) or total <= 0:
-            raise AssertionError(f"No nonzero finite gradient in {component}")
+        if not values or not torch.isfinite(total):
+            raise AssertionError(f"Missing or nonfinite gradient in {component}")
+        coefficient = {"room_projection": model.lambda_room,
+                       "path_projection": model.lambda_path}.get(component, 1.0)
+        if coefficient > 0 and total <= 0:
+            raise AssertionError(f"No nonzero gradient in active {component}")
+        if coefficient == 0 and total != 0:
+            raise AssertionError(f"Disabled projection receives gradient: {component}")
         gradients[component] = float(total)
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip,
                                          error_if_nonfinite=True)
@@ -185,7 +191,8 @@ def main():
     torch.cuda.synchronize()
     inference_seconds = time.perf_counter() - start
     report = dict(
-        status="passed", config=str(args.config), data_dir=str(args.data_dir),
+        status="passed", lambda_room=model.lambda_room, lambda_path=model.lambda_path,
+        config=str(args.config), data_dir=str(args.data_dir),
         config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(), seed=cfg.seed,
         gpu=torch.cuda.get_device_name(), cuda_version=torch.version.cuda,
         torch_version=torch.__version__, device_index=torch.cuda.current_device(),

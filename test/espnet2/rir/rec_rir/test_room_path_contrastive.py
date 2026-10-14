@@ -177,6 +177,38 @@ def test_zero_weight_control_and_single_view_validation_match_baseline():
         assert actual_rirs.shape == (2, 256) and torch.isfinite(actual_rirs).all()
 
 
+def test_single_loss_ablations_preserve_initialization_and_disable_only_own_projection():
+    batch = _batch()
+    torch.manual_seed(727)
+    both = _model().train()
+    both_state = both.state_dict()
+    for active in ("room", "path"):
+        weights = dict(lambda_room=0.01 if active == "room" else 0.0,
+                       lambda_path=0.01 if active == "path" else 0.0)
+        torch.manual_seed(727)
+        model = _model(**weights).train()
+        for name, tensor in model.state_dict().items():
+            torch.testing.assert_close(tensor, both_state[name], rtol=0, atol=0)
+        loss, stats, _ = model(**batch)
+        torch.testing.assert_close(loss, stats["loss_sweep"] + 0.01 * stats[f"loss_{active}"])
+        loss.backward()
+        for component in ("room_projection", "path_projection"):
+            gradients = [p.grad for name, p in model.named_parameters()
+                         if name.startswith(component + ".") and p.requires_grad]
+            assert gradients and all(g is not None and torch.isfinite(g).all()
+                                     for g in gradients)
+            total = sum(g.abs().sum() for g in gradients)
+            assert (total > 0) if component == active + "_projection" else (total == 0)
+        for component in ("ctf_predictor.room_pooling", "ctf_predictor.pooling",
+                          "ctf_predictor.room_path_fusion"):
+            gradients = [p.grad for name, p in model.named_parameters()
+                         if name.startswith(component + ".") and p.requires_grad]
+            assert gradients and sum(g.abs().sum() for g in gradients) > 0
+        model.eval()
+        valid_loss, valid_stats, _ = model(**batch)
+        torch.testing.assert_close(valid_loss, valid_stats["loss_sweep"], rtol=0, atol=0)
+
+
 def test_preprocessor_independent_crops_shared_rirs_and_common_collation():
     processor = RecRIRRoomPathContrastivePreprocessor(True, speech_segment=128, rir_length=256)
     data = {"speech_mix": np.arange(1, 257, dtype=float),
