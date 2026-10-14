@@ -19,8 +19,11 @@ config="conf/tuning/${prefix}_${variant}.yaml"
 run_dir="$result_recipe/exp/bilstm_frequency_training_20261015/$variant"
 stats_dir="$result_recipe/exp/rir_stats_${prefix}_${variant}"
 model_dir="$result_recipe/exp/rir_${prefix}_${variant}"
+evaluation_dir="$result_recipe/exp/bilstm_frequency_whamr_20261015/$variant"
+ls_code_root="$result_recipe/exp/frequency_ls_eval_code_20261014"
 [[ -x "$python" && -f "$config" ]] || exit 1
-for marker in "$run_dir" "$model_dir" "$stats_dir"; do
+[[ -f "$ls_code_root/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" ]] || exit 1
+for marker in "$run_dir" "$model_dir" "$stats_dir" "$evaluation_dir"; do
     [[ ! -e "$marker" ]] || { echo "Existing output: $marker" >&2; exit 1; }
 done
 mkdir -p "$run_dir/.tmp"
@@ -104,5 +107,34 @@ report = dict(finished_at=datetime.datetime.now().astimezone().isoformat(),
               checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
               config_sha256=hashlib.sha256(config.read_bytes()).hexdigest())
 (run_dir / 'training_complete.json').write_text(json.dumps(report, indent=2) + '\n')
+PY
+phase=whamr_inference_and_physical_scoring
+"$python" -B local/evaluate_two_speaker.py --experiment "$model_dir" \
+    --data "$result_recipe/dump_nf_2spk_16k_min/raw/tt_rir_2spk_nf_min_16k" \
+    --output "$evaluation_dir/whamr" --device cuda:0
+phase=ls_scoring
+PYTHONPATH="$ls_code_root" "$python" -B \
+    "$ls_code_root/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" \
+    --reference_dir "$result_recipe/dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_16k" \
+    --prediction "$variant" "$evaluation_dir/whamr/inference/rir.scp" \
+    --out_dir "$evaluation_dir/ls" --no_comparison_csv
+"$python" -B - "$run_dir" "$evaluation_dir" <<'PY'
+import datetime
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+run_dir, evaluation_dir = map(Path, sys.argv[1:])
+report = json.loads((evaluation_dir / 'ls/comparison.json').read_text())
+assert report['count'] == 3000 and report['source_pairs'] == 6000
+assert not (evaluation_dir / 'ls/comparison.csv').exists()
+(run_dir / 'evaluation_complete.json').write_text(json.dumps(dict(
+    finished_at=datetime.datetime.now().astimezone().isoformat(),
+    count=report['count'], source_pairs=report['source_pairs'],
+    evaluation_directory=str(evaluation_dir),
+    reference_preparation_sha256=report['reference_preparation_sha256'],
+    comparison_sha256=hashlib.sha256((evaluation_dir / 'ls/comparison.json').read_bytes()).hexdigest(),
+), indent=2) + '\n')
 PY
 phase=complete
