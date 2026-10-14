@@ -26,7 +26,8 @@ def prediction_index(path):
     return path, entries
 
 
-def evaluate(reference_dir, predictions, output, allow_limited=False):
+def evaluate(reference_dir, predictions, output, allow_limited=False,
+             write_comparison_csv=True):
     reference_dir, output = Path(reference_dir).resolve(), Path(output).resolve()
     reference = validate_dump(reference_dir, allow_limited=allow_limited)
     config = reference["config"]
@@ -156,13 +157,14 @@ def evaluate(reference_dir, predictions, output, allow_limited=False):
         report["models"][name] = model
     (output / "comparison.json").write_text(json.dumps(report, indent=2) + "\n")
     keys = ("rmse_mean", "corr_mean", "rt60_mae", "drr_mae", "c50_mae")
-    with (output / "comparison.csv").open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["model"] + list(keys))
-        writer.writeheader()
-        writer.writerows(
-            dict(model=name, **{key: model["metrics"][key] for key in keys})
-            for name, model in report["models"].items()
-        )
+    if write_comparison_csv:
+        with (output / "comparison.csv").open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=["model"] + list(keys))
+            writer.writeheader()
+            writer.writerows(
+                dict(model=name, **{key: model["metrics"][key] for key in keys})
+                for name, model in report["models"].items()
+            )
     (output / "evaluation_complete.json").write_text(
         json.dumps(
             dict(
@@ -188,6 +190,8 @@ def main():
         metavar=("MODEL_LABEL", "PREDICTION_SCP_OR_DIR"),
     )
     parser.add_argument("--out_dir", type=Path, required=True)
+    parser.add_argument("--no_comparison_csv", action="store_true",
+                        help="Keep JSON reports and per-source diagnostics only")
     parser.add_argument(
         "--allow_limited",
         action="store_true",
@@ -195,7 +199,8 @@ def main():
     )
     args = parser.parse_args()
     report = evaluate(
-        args.reference_dir, args.prediction, args.out_dir, args.allow_limited
+        args.reference_dir, args.prediction, args.out_dir, args.allow_limited,
+        write_comparison_csv=not args.no_comparison_csv
     )
     print(
         json.dumps(

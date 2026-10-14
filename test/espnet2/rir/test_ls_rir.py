@@ -190,6 +190,13 @@ class TestLSRIR(unittest.TestCase):
         per_source = (tmp_path / "score/models/00/per_source.csv").read_text()
         assert ",1,0,1," in per_source and ",1,1,0," in per_source
         assert (tmp_path / "score/evaluation_complete.json").is_file()
+        json_only = scorer.evaluate(
+            output, [("swapped", prediction)], tmp_path / "json_only",
+            write_comparison_csv=False,
+        )
+        self.assertEqual(json_only["models"]["swapped"]["metrics"], summary)
+        assert not (tmp_path / "json_only/comparison.csv").exists()
+        assert (tmp_path / "json_only/evaluation_complete.json").is_file()
         # A damaged reference must prevent publication/scoring.
         reference = Path(rows[1])
         reference.write_bytes(reference.read_bytes() + b"corrupt")
