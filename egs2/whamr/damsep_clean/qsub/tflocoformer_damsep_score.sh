@@ -12,6 +12,14 @@ set -e
 . /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 set -euo pipefail
+# Keep all runtime writes in this user's approved experiment storage.
+export TMPDIR="${PWD}/exp/.runtime/tfdamsep_${JOB_ID}"
+mkdir -p "${TMPDIR}"
+trap 'rm -rf -- "${TMPDIR}"' EXIT
+export PYTHONDONTWRITEBYTECODE=1
+export XDG_CACHE_HOME="${TMPDIR}/cache"
+export CUDA_CACHE_PATH="${TMPDIR}/cuda"
+export TORCH_EXTENSIONS_DIR="${TMPDIR}/torch_extensions"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export PYTHONPATH="${PWD}/../../..:${PWD}/.deps/mamba-cu118-torch21-py310${PYTHONPATH:+:${PYTHONPATH}}"
 export NUMBA_CACHE_DIR="${TMPDIR:-/tmp}/nitsu_tfdamsep_score_numba_${JOB_ID}"

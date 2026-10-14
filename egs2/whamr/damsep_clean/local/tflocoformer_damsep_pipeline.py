@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -26,6 +27,18 @@ VARIANTS = {
 GPU_SECONDS = 24 * 3600
 MAX_GPU_CHUNKS = 25
 METRICS = ("SI_SNR", "SDR", "SIR", "SAR", "STOI")
+SCHEDULER_DIR = Path("/apps/t4/rhel9/uge/latest/bin/lx-amd64")
+
+
+def scheduler_program(name):
+    """Batch-node PATH may omit the installed UGE binaries."""
+    found = shutil.which(name)
+    if found is not None:
+        return found
+    installed = SCHEDULER_DIR / name
+    if installed.is_file() and os.access(installed, os.X_OK):
+        return str(installed)
+    raise RuntimeError(f"Scheduler command unavailable: {name}; checked {installed}")
 
 
 def now():
@@ -40,6 +53,8 @@ def write_json(path, value):
 
 
 def run_command(command, **kwargs):
+    if command[0] in ("qsub", "qrls", "qstat", "qacct"):
+        command = [scheduler_program(command[0]), *command[1:]]
     return subprocess.run(command, check=True, text=True, **kwargs)
 
 
@@ -285,6 +300,75 @@ class Pipeline:
             "valid.loss_clean.best.pth",
         ]
 
+    def recover(self):
+        """Recover a failed controller without changing model/config or duplicating jobs."""
+        with self.locked_state() as state:
+            if state.get("phase") != "failed":
+                raise RuntimeError("Recovery requires a failed pipeline")
+            if (
+                hashlib.sha256(self.config.read_bytes()).hexdigest()
+                != state["config_sha256"]
+            ):
+                raise RuntimeError(
+                    "Recovery cannot change the experiment configuration"
+                )
+            for entry in state["jobs"]:
+                result = subprocess.run(
+                    [scheduler_program("qstat"), "-j", entry["id"]],
+                    capture_output=True,
+                    text=True,
+                )
+                if re.search(r"^job_number:", result.stdout, re.M):
+                    raise RuntimeError(
+                        f"Pipeline job {entry['id']} is still queued/running"
+                    )
+            result = self.accounting(state["current_gpu_job"])
+            if not is_walltime(result):
+                raise RuntimeError(
+                    "Recovery requires a scheduler-confirmed GPU walltime stop"
+                )
+            checkpoint = self.exp / "checkpoint.pth"
+            previous = state.get("checkpoint_before_job")
+            if not checkpoint_exists(checkpoint) or (
+                previous is not None and checkpoint.stat().st_mtime_ns <= previous
+            ):
+                raise RuntimeError("Recovery requires saved checkpoint progress")
+            current = commit()
+            changed = run_command(
+                ["git", "diff", "--name-only", state["commit"], current],
+                capture_output=True,
+            ).stdout.splitlines()
+            allowed = {
+                "egs2/whamr/damsep_clean/local/tflocoformer_damsep_pipeline.py",
+                "egs2/whamr/damsep_clean/README_TFLOCOFORMER_WHAMR.md",
+                "test/espnet2/enh/test_tflocoformer_damsep_pipeline.py",
+            }
+            allowed.update(
+                f"egs2/whamr/damsep_clean/qsub/tflocoformer_damsep_{kind}.sh"
+                for kind in ("gpu", "control", "score", "data", "scheduler_check")
+            )
+            if set(changed) - allowed:
+                raise RuntimeError("Recovery cannot change model/training/data code")
+            state.setdefault("recovery_history", []).append(
+                dict(
+                    recovered_at=now(),
+                    previous_failure=state.get("failure"),
+                    old_commit=state["commit"],
+                    new_commit=current,
+                    gpu_job=state["current_gpu_job"],
+                    accounting=result,
+                )
+            )
+            gpu = next(j for j in state["jobs"] if j["id"] == state["current_gpu_job"])
+            gpu.update(
+                accounting=result,
+                handled=True,
+                continuation_reason="recovered_controller",
+            )
+            state.update(commit=current, phase="training")
+            state.pop("failure", None)
+            self.enqueue_gpu(state)
+
     def stage(self, stage, job):
         log = self.directory / f"stage{stage}.{job}.log"
         with log.open("w") as output:
@@ -411,7 +495,10 @@ class Pipeline:
     def accounting(self, job):
         for attempt in range(7):
             result = subprocess.run(
-                ["qacct", "-j", job], cwd=self.recipe, capture_output=True, text=True
+                [scheduler_program("qacct"), "-j", job],
+                cwd=self.recipe,
+                capture_output=True,
+                text=True,
             )
             if result.returncode == 0:
                 try:
@@ -546,7 +633,9 @@ class Pipeline:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("submit", "gpu", "control", "score"))
+    parser.add_argument(
+        "action", choices=("submit", "gpu", "control", "score", "recover")
+    )
     parser.add_argument("--variant", choices=tuple(VARIANTS), required=True)
     parser.add_argument("--group", default="tga-shinoda")
     parser.add_argument("--gpu-job")
@@ -555,6 +644,8 @@ def main():
     try:
         if args.action == "submit":
             pipeline.submit(args.group)
+        elif args.action == "recover":
+            pipeline.recover()
         elif args.action == "gpu":
             pipeline.gpu()
         elif args.action == "control":
@@ -566,7 +657,7 @@ def main():
     except Exception as error:
         # A duplicate submission must never mark an existing active pipeline as
         # failed. Execution failures, however, remain visible in its state file.
-        if args.action != "submit":
+        if args.action not in ("submit", "recover"):
             pipeline.record_failure(f"{type(error).__name__}: {error}")
         raise
 

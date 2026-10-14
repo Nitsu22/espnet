@@ -83,6 +83,14 @@ then CPU scoring upper0.0960 total. Continuations are additional allocations;
 convergence time and confirmed charges are not yet known. The shared initial
 CPU data check is cpu_4=1 / 10min (upper0.0020 additional points).
 
+UGE commands are resolved explicitly when the compute-node PATH omits them;
+the control script also checks their availability before running. If a
+controller failed after a confirmed GPU walltime stop, `recover --variant ...`
+can resume the existing pipeline after a runtime-only code fix. Recovery refuses
+active jobs, modified model/configuration code, or missing checkpoint progress,
+and preserves the old failure/accounting history. Per-job TMPDIR and caches stay
+in the user's `exp/.runtime/` storage and are cleaned on normal process exit.
+
 Clean test scoring uses the unchanged ESPnet enhancement scorer and the same
 PCM16/0.9 peak normalization as the baseline. The existing noisy WHAMR S
 baseline's test SI-SNR11.46 / SDR12.47 dB is an absolute score, not improvement.
