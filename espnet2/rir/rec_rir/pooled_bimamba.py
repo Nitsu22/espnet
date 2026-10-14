@@ -159,6 +159,37 @@ class FramewiseFrequencyBlock(nn.Module):
         return output.reshape(batch, frames, freqs, dim)
 
 
+class FrequencyBiLSTMBlock(nn.Module):
+    """Frequency BiLSTM with the same residual Conv-FFN as other mixers.
+
+    Speakers share one block. The recurrent axis is frequency, independent
+    of the observation-time and speaker axes. FFN weights come from the
+    seeded attention placeholder used by the existing BiMamba ablation.
+    """
+
+    def __init__(self, dim, eps, ffn_source):
+        super().__init__()
+        if ffn_source.ffn_in.in_features != dim:
+            raise ValueError("Frequency BiLSTM and FFN dimensions differ")
+        self.dim = dim
+        self.norm_lstm = nn.LayerNorm(dim, eps=eps)
+        self.lstm = nn.LSTM(dim, dim, batch_first=True, bidirectional=True)
+        self.projection = nn.Linear(2 * dim, dim)
+        self.norm_ffn = ffn_source.norm_ffn
+        self.ffn_in = ffn_source.ffn_in
+        self.local = ffn_source.local
+        self.ffn_out = ffn_source.ffn_out
+
+    def forward(self, x):
+        if x.ndim != 3 or x.shape[-1] != self.dim:
+            raise ValueError("Expected frequency sequences [N, F, dim]")
+        update, _ = self.lstm(self.norm_lstm(x).contiguous())
+        x = x + self.projection(update)
+        update = F.glu(self.ffn_in(self.norm_ffn(x)), dim=-1)
+        update = F.silu(self.local(update.transpose(1, 2)).transpose(1, 2))
+        return x + self.ffn_out(update)
+
+
 class PostPoolingAttention(nn.Module):
     """Attention-only residual over speakers, frequencies, or their union.
 
@@ -265,15 +296,15 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("pooling_channelwise must be a boolean")
         if not isinstance(pre_frequency_global, bool):
             raise ValueError("pre_frequency_global must be a boolean")
-        if pre_frequency_module not in ("light", "attention", "bimamba"):
-            raise ValueError("pre_frequency_module must be 'light', 'attention', or 'bimamba'")
-        if post_frequency_module not in ("attention", "bimamba"):
-            raise ValueError("post_frequency_module must be 'attention' or 'bimamba'")
+        if pre_frequency_module not in ("light", "attention", "bimamba", "bilstm"):
+            raise ValueError("pre_frequency_module must be 'light', 'attention', 'bimamba', or 'bilstm'")
+        if post_frequency_module not in ("attention", "bimamba", "bilstm"):
+            raise ValueError("post_frequency_module must be 'attention', 'bimamba', or 'bilstm'")
         if pre_frequency_module != "light" and not pre_frequency_global:
             raise ValueError("pre_frequency_global selects a branch of the light module only")
-        if post_frequency_module == "bimamba":
+        if post_frequency_module != "attention":
             if not post_attention:
-                raise ValueError("post_attention=False cannot select a BiMamba replacement")
+                raise ValueError("post_attention=False cannot select a recurrent replacement")
             if post_layers == 0:
                 raise ValueError("A post-frequency replacement requires positive post_layers")
         if post_interaction not in ("none", "speaker", "joint", "frequency"):
@@ -353,6 +384,11 @@ class PooledBiMambaCTFPredictor(nn.Module):
                         lambda: FrequencyBiMambaBlock(
                             emb_dim, d_state, d_conv, eps, attention),
                     )
+                elif pre_frequency_module == "bilstm":
+                    sequence = seeded_module(
+                        400009 + 97 * index,
+                        lambda: FrequencyBiLSTMBlock(emb_dim, eps, attention),
+                    )
                 self.frequency_blocks[index] = FramewiseFrequencyBlock(sequence)
         if post_frequency_module == "bimamba":
             for index, attention in enumerate(self.post_blocks):
@@ -360,6 +396,12 @@ class PooledBiMambaCTFPredictor(nn.Module):
                     300007 + 97 * index,
                     lambda: FrequencyBiMambaBlock(
                         emb_dim, d_state, d_conv, eps, attention),
+                )
+        elif post_frequency_module == "bilstm":
+            for index, attention in enumerate(self.post_blocks):
+                self.post_blocks[index] = seeded_module(
+                    500009 + 97 * index,
+                    lambda: FrequencyBiLSTMBlock(emb_dim, eps, attention),
                 )
 
     @staticmethod
