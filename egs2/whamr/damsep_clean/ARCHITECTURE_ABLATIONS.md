@@ -85,3 +85,17 @@ PIT, common seed-0 backbone weights, native save/resume and clean-only
 inference/scoring. Pipeline tests exercise resource requests, timeout
 continuation, failure gating and score-completion checks. CUDA checks run
 inside the charged allocation before production training.
+
+## Scheduler environment and controller recovery
+
+Compute-node scripts explicitly add the TSUBAME scheduler tools to PATH.
+Job scratch and caches use the recipe's private `exp/.job_tmp/ablation_JOB_ID`
+directory, which is removed on normal exit or by the successor controller
+after a hard walltime termination.
+
+The previously missing `qacct` controller failure can be recovered with
+`python local/ablation_pipeline.py recover-control --variant VARIANT`.
+This requires all old jobs to have ended, confirmed GPU walltime termination
+and an existing checkpoint. Configuration and model/training code changes
+are rejected; only pipeline/environment repairs are allowed. The source
+commit change and previous failure remain in the recovery history.

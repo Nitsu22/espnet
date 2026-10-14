@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -401,6 +402,67 @@ class Pipeline:
                 time.sleep(5)
         raise RuntimeError(f"Accounting for job {job} is unavailable after 30 seconds")
 
+    def recover_control(self):
+        """Recover only the known missing-qacct controller failure."""
+        with self.locked_state() as state:
+            if state.get(
+                "phase"
+            ) != "failed" or "No such file or directory: 'qacct'" not in state.get(
+                "failure", ""
+            ):
+                raise RuntimeError(
+                    "Recovery requires the missing-qacct controller failure"
+                )
+            jobs = ",".join(entry["id"] for entry in state["jobs"])
+            status = subprocess.run(
+                ["qstat", "-j", jobs], capture_output=True, text=True
+            )
+            if re.search(r"^job_number:", status.stdout, re.MULTILINE):
+                raise RuntimeError("Recovery requires all previous jobs to have ended")
+            if (
+                hashlib.sha256(self.config.read_bytes()).hexdigest()
+                != state["config_sha256"]
+            ):
+                raise RuntimeError("Recovery cannot change the experiment config")
+            allowed = {
+                "egs2/whamr/damsep_clean/local/ablation_pipeline.py",
+                "egs2/whamr/damsep_clean/qsub/ablation_gpu.sh",
+                "egs2/whamr/damsep_clean/qsub/ablation_control.sh",
+                "egs2/whamr/damsep_clean/qsub/ablation_score.sh",
+                "egs2/whamr/damsep_clean/ARCHITECTURE_ABLATIONS.md",
+                "test/espnet2/enh/test_damsep_pipeline.py",
+            }
+            changed = set(
+                run_command(
+                    ["git", "diff", "--name-only", state["commit"], "HEAD"],
+                    capture_output=True,
+                ).stdout.splitlines()
+            )
+            if not changed <= allowed:
+                raise RuntimeError("Recovery cannot change model or training code")
+            job = state["current_gpu_job"]
+            if not is_walltime(self.accounting(job)) or not checkpoint_exists(
+                self.exp / "checkpoint.pth"
+            ):
+                raise RuntimeError(
+                    "Recovery requires a walltime-terminated GPU with a checkpoint"
+                )
+            if self.marker("training").exists():
+                raise RuntimeError("This recovery is for interrupted training only")
+            state.setdefault("recovery_history", []).append(
+                {
+                    "recovered_at": now(),
+                    "old_commit": state["commit"],
+                    "new_commit": commit(),
+                    "failure": state["failure"],
+                }
+            )
+            state["commit"] = commit()
+            state["phase"] = "training"
+            state.pop("failure", None)
+            state.pop("failed_at", None)
+        self.control(job)
+
     def control(self, job):
         with self.locked_state() as state:
             self.verify_source(state)
@@ -417,6 +479,13 @@ class Pipeline:
                 )
             result = self.accounting(job)
             gpu["accounting"] = result
+            # A hard walltime kill can prevent the GPU script's EXIT trap.
+            # Its private scratch lives on the shared, permitted recipe path.
+            scratch = self.recipe / "exp/.job_tmp" / f"ablation_{job}"
+            if scratch.exists():
+                if scratch.is_symlink() or scratch.stat().st_uid != os.getuid():
+                    raise RuntimeError("Refusing to clean scratch not owned by this user")
+                shutil.rmtree(scratch)
             phase = state["phase"]
             if result["failed"] == 0 and result["exit_status"] == 0:
                 if (
@@ -525,7 +594,9 @@ class Pipeline:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("submit", "gpu", "control", "score"))
+    parser.add_argument(
+        "action", choices=("submit", "gpu", "control", "score", "recover-control")
+    )
     parser.add_argument("--variant", choices=tuple(VARIANTS), required=True)
     parser.add_argument("--group", default="tga-shinoda")
     parser.add_argument("--gpu-job")
@@ -534,6 +605,8 @@ def main():
     try:
         if args.action == "submit":
             pipeline.submit(args.group)
+        elif args.action == "recover-control":
+            pipeline.recover_control()
         elif args.action == "gpu":
             pipeline.gpu()
         elif args.action == "control":

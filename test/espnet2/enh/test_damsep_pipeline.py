@@ -269,3 +269,72 @@ def test_accounting_parser_distinguishes_oom_and_time_limit():
     assert PIPELINE.is_walltime(parsed)
     parsed["ru_wallclock"] = 10
     assert not PIPELINE.is_walltime(parsed)
+
+
+def test_recover_missing_scheduler_controller_continues_saved_training(
+    pipeline, monkeypatch
+):
+    instance, calls = pipeline
+    with instance.locked_state() as saved:
+        saved["phase"] = "failed"
+        saved["failure"] = (
+            "FileNotFoundError: [Errno 2] No such file or directory: 'qacct'"
+        )
+    (instance.exp / "checkpoint.pth").write_bytes(b"checkpoint")
+    monkeypatch.setattr(
+        PIPELINE.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        instance,
+        "accounting",
+        lambda job: {"failed": 44, "exit_status": 137, "ru_wallclock": 86390.0},
+    )
+    instance.recover_control()
+    recovered = state(instance)
+    assert recovered["phase"] == "gpu_queued"
+    assert recovered["current_gpu_job"] == "102"
+    assert len(recovered["recovery_history"]) == 1
+    assert recovered["jobs"][0]["handled"]
+    assert "failure" not in recovered
+    assert [call[0] for call in calls[-3:]] == ["qsub", "qsub", "qrls"]
+
+
+def test_recover_controller_refuses_active_job(pipeline, monkeypatch):
+    instance, calls = pipeline
+    with instance.locked_state() as saved:
+        saved["phase"] = "failed"
+        saved["failure"] = "No such file or directory: 'qacct'"
+    monkeypatch.setattr(
+        PIPELINE.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            a[0], 0, stdout="job_number: 101\n", stderr=""
+        ),
+    )
+    with pytest.raises(RuntimeError, match="previous jobs"):
+        instance.recover_control()
+    assert len(calls) == 3
+
+
+def test_recover_controller_refuses_model_changes(pipeline, monkeypatch):
+    instance, calls = pipeline
+    with instance.locked_state() as saved:
+        saved["phase"] = "failed"
+        saved["failure"] = "No such file or directory: 'qacct'"
+    monkeypatch.setattr(
+        PIPELINE.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        PIPELINE,
+        "run_command",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout="espnet2/enh/damsep/espnet_model.py\n", stderr=""
+        ),
+    )
+    with pytest.raises(RuntimeError, match="model or training code"):
+        instance.recover_control()
+    assert len(calls) == 3
