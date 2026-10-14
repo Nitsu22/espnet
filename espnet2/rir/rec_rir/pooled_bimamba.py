@@ -13,8 +13,21 @@ from rotary_embedding_torch import RotaryEmbedding
 from espnet2.rir.rec_rir.model import _build_mamba
 
 
+def _local_attention_context(window, past_frames, future_frames):
+    """Resolve centered defaults or an explicit asymmetric frame window."""
+    if past_frames is None and future_frames is None:
+        return window // 2, window // 2
+    values = (past_frames, future_frames)
+    if any(isinstance(value, bool) or not isinstance(value, int)
+           or value < 0 for value in values):
+        raise ValueError("Supply both past_frames and future_frames as nonnegative integers")
+    if window == 0 or past_frames + 1 + future_frames != window:
+        raise ValueError("Local attention window must equal past_frames + 1 + future_frames")
+    return past_frames, future_frames
+
+
 class TimeLocalAttention(nn.Module):
-    """Residual temporal attention within an exact centered frame window.
+    """Residual temporal attention within an exact, optionally asymmetric frame window.
 
     Every frequency bin is an independent sequence. Query and sequence
     batches are bounded separately, avoiding a full ``T x T`` attention
@@ -26,7 +39,7 @@ class TimeLocalAttention(nn.Module):
     """
 
     def __init__(self, dim, heads, window, eps, query_chunk_size=64,
-                 sequence_batch_size=64):
+                 sequence_batch_size=64, past_frames=None, future_frames=None):
         super().__init__()
         dimensions = (dim, heads, window, query_chunk_size, sequence_batch_size)
         if any(isinstance(value, bool) or not isinstance(value, int)
@@ -39,7 +52,9 @@ class TimeLocalAttention(nn.Module):
         self.dim = dim
         self.heads = heads
         self.window = window
-        self.radius = window // 2
+        self.radius = window // 2  # Legacy centered-window metadata.
+        self.past_frames, self.future_frames = _local_attention_context(
+            window, past_frames, future_frames)
         self.query_chunk_size = query_chunk_size
         self.sequence_batch_size = sequence_batch_size
         self.norm_attention = nn.LayerNorm(dim, eps=eps)
@@ -79,12 +94,14 @@ class TimeLocalAttention(nn.Module):
             query_updates = []
             for query_start in range(0, frames, self.query_chunk_size):
                 query_end = min(frames, query_start + self.query_chunk_size)
-                key_start = max(0, query_start - self.radius)
-                key_end = min(frames, query_end + self.radius)
+                key_start = max(0, query_start - self.past_frames)
+                key_end = min(frames, query_end + self.future_frames)
                 # SDPA's boolean mask uses True for allowed key positions.
-                distance = (positions[query_start:query_end, None]
-                            - positions[None, key_start:key_end]).abs()
-                allowed = distance <= self.radius
+                # Positive offsets refer to future keys; negative to past keys.
+                offset = (positions[None, key_start:key_end]
+                          - positions[query_start:query_end, None])
+                allowed = ((offset >= -self.past_frames)
+                           & (offset <= self.future_frames))
                 update = F.scaled_dot_product_attention(
                     query[:, :, query_start:query_end],
                     key[:, :, key_start:key_end],
@@ -334,7 +351,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  post_frequency_module="attention",
                  time_local_attention_window=0,
                  time_local_attention_query_chunk_size=64,
-                 time_local_attention_sequence_batch_size=64):
+                 time_local_attention_sequence_batch_size=64,
+                 time_local_attention_past_frames=None,
+                 time_local_attention_future_frames=None):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -355,6 +374,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                 or (time_local_attention_window > 0
                     and time_local_attention_window % 2 != 1)):
             raise ValueError("time_local_attention_window must be zero or a positive odd integer")
+        _local_attention_context(time_local_attention_window,
+                                 time_local_attention_past_frames,
+                                 time_local_attention_future_frames)
         local_chunks = (time_local_attention_query_chunk_size,
                         time_local_attention_sequence_batch_size)
         if any(isinstance(value, bool) or not isinstance(value, int)
@@ -401,6 +423,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.post_interaction_order = post_interaction_order
         self.pre_frequency_module = pre_frequency_module
         self.post_frequency_module = post_frequency_module
+        self.time_local_attention_past_frames = time_local_attention_past_frames
+        self.time_local_attention_future_frames = time_local_attention_future_frames
         self.time_local_attention_window = time_local_attention_window
         self.time_local_attention_query_chunk_size = time_local_attention_query_chunk_size
         self.time_local_attention_sequence_batch_size = time_local_attention_sequence_batch_size
@@ -478,7 +502,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                         lambda: TimeLocalAttention(
                             emb_dim, n_heads, time_local_attention_window, eps,
                             time_local_attention_query_chunk_size,
-                            time_local_attention_sequence_batch_size),
+                            time_local_attention_sequence_batch_size,
+                            past_frames=time_local_attention_past_frames,
+                            future_frames=time_local_attention_future_frames),
                     )
                 self.time_local_attention_blocks.append(block)
 

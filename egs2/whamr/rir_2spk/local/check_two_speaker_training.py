@@ -23,7 +23,7 @@ def main():
     args=parser.parse_args()
     if args.output.exists():
         raise ValueError('Use a new output')
-    cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir','/tmp/two-spk-check'])
+    cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir',str(args.output.parent/'scratch_model')])
     assert not cfg.init_param and not cfg.use_amp
     torch.manual_seed(cfg.seed);np.random.seed(cfg.seed)
     model=RIRTask.build_model(cfg).cuda().train()
@@ -125,6 +125,7 @@ def main():
     report=dict(config=str(args.config),config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
                 gpu=torch.cuda.get_device_name(),batch_size=args.batch_size,utterances=ids,
                 parameters=sum(p.numel() for p in model.parameters()),
+                trainable_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad),
                 first_update_seconds=seconds,peak_allocated_bytes=peak,gradient_norm=float(norm),
                 losses={k:float(v) for k,v in stats.items()},teacher_permutation_invariant=True,
                 noise_free_mixture_verified=True,active_parameters_have_finite_gradients=True,

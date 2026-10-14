@@ -63,7 +63,7 @@ def sweep_model(**options):
 
 
 def dense_reference(block, x):
-    """Full-T explicit attention oracle, with a symmetric temporal band."""
+    """Full-T explicit attention oracle, with an explicit temporal band."""
     batch, frames, freqs, dim = x.shape
     sequence = x.permute(0, 2, 1, 3).reshape(batch * freqs, frames, dim)
     normalized = F.layer_norm(
@@ -89,8 +89,9 @@ def dense_reference(block, x):
 
     query, key = rotate(query), rotate(key)
     logits = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(head_dim)
-    distance = (positions[:, None] - positions[None, :]).abs()
-    logits = logits.masked_fill(distance > block.window // 2, -torch.inf)
+    offsets = positions[None, :] - positions[:, None]
+    allowed = ((offsets >= -block.past_frames) & (offsets <= block.future_frames))
+    logits = logits.masked_fill(~allowed, -torch.inf)
     update = torch.matmul(logits.softmax(-1), value)
     update = update.transpose(1, 2).reshape(batch * freqs, frames, dim)
     update = F.linear(update, block.projection.weight, block.projection.bias)
@@ -101,14 +102,16 @@ def dense_reference(block, x):
 def test_local_matches_dense_output_and_gradients_across_chunk_boundaries():
     # Window 1, windows larger than the sequence, and a long sequence cover
     # edges, nonzero RoPE offsets, unequal final chunks and sequence batches.
-    for frames, window, query_chunk, sequence_batch in (
-        (11, 1, 3, 2), (13, 3, 4, 3), (9, 125, 2, 1),
-        (133, 125, 17, 4),
+    for frames, window, query_chunk, sequence_batch, past, future in (
+        (11, 1, 3, 2, None, None), (13, 3, 4, 3, None, None),
+        (9, 125, 2, 1, None, None), (133, 125, 17, 4, None, None),
+        (133, 81, 17, 4, 16, 64), (133, 81, 19, 4, 64, 16),
+        (11, 81, 3, 2, 16, 64), (11, 5, 3, 2, 0, 4),
     ):
         torch.manual_seed(11)
         block = TimeLocalAttention(
             8, 2, window, 1e-5, query_chunk_size=query_chunk,
-            sequence_batch_size=sequence_batch,
+            sequence_batch_size=sequence_batch, past_frames=past, future_frames=future,
         )
         oracle = copy.deepcopy(block)
         x = torch.randn(2, frames, 3, 8, requires_grad=True)
@@ -180,7 +183,10 @@ def test_disabled_default_common_weights_and_rng_are_preserved():
     models, rng_states = [], []
     with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", substitute):
         for options in ({}, {"time_local_attention_window": 0},
-                        {"time_local_attention_window": 125}):
+                        {"time_local_attention_window": 125},
+                        {"time_local_attention_window": 81,
+                         "time_local_attention_past_frames": 16,
+                         "time_local_attention_future_frames": 64}):
             torch.manual_seed(17)
             models.append(predictor(**options).eval())
             rng_states.append(torch.get_rng_state())
@@ -250,7 +256,7 @@ def test_config_changes_only_local_time_attention_window():
     assert actual == expected
 
 
-def test_local_attention_shared_sweep_pit_gradients_checkpoint_and_two_rirs():
+def check_sweep_pit(**context):
     torch.manual_seed(23)
     batch = dict(speech_mix=torch.randn(2, 256),
                  speech_mix_lengths=torch.tensor([256, 192]))
@@ -265,6 +271,7 @@ def test_local_attention_shared_sweep_pit_gradients_checkpoint_and_two_rirs():
     options = dict(time_local_attention_window=5,
                    time_local_attention_query_chunk_size=3,
                    time_local_attention_sequence_batch_size=7)
+    options.update(context)
     model, reference = sweep_model(**options).train(), sweep_model().eval()
     loss, stats, count = model(**batch)
     assert torch.isfinite(loss) and count == 2
@@ -296,6 +303,75 @@ def test_local_attention_shared_sweep_pit_gradients_checkpoint_and_two_rirs():
         torch.testing.assert_close(before, clone.estimate_ctf(batch["speech_mix"][0]))
         rirs = clone.estimate_rir(batch["speech_mix"][0], rir_length=256)
         assert rirs.shape == (2, 256) and torch.isfinite(rirs).all()
+
+
+
+def test_local_attention_shared_sweep_pit_gradients_checkpoint_and_two_rirs():
+    check_sweep_pit()
+    check_sweep_pit(time_local_attention_past_frames=1,
+                    time_local_attention_future_frames=3)
+
+
+def test_asymmetric_window_direction_edges_and_independence():
+    torch.manual_seed(29)
+    block = TimeLocalAttention(8, 2, 81, 1e-5, query_chunk_size=17,
+                               sequence_batch_size=2, past_frames=16, future_frames=64)
+    x = torch.randn(2, 133, 3, 8)
+    output = block(x)
+    # At t=40, the allowed times are 24..104 inclusive; not a centered window.
+    for batch, frame, frequency in ((0, 23, 1), (0, 105, 1),
+                                     (1, 40, 1), (0, 40, 2)):
+        changed = x.clone()
+        changed[batch, frame, frequency, 0] += 8
+        torch.testing.assert_close(block(changed)[0, 40, 1], output[0, 40, 1],
+                                   rtol=0, atol=0)
+    for frame in (24, 104):
+        changed = x.clone()
+        changed[0, frame, 1, 0] += 8
+        assert (block(changed)[0, 40, 1] - output[0, 40, 1]).abs().max() > 1e-6
+    differentiable = x.clone().requires_grad_()
+    block(differentiable)[0, 40, 1].square().sum().backward()
+    gradient = differentiable.grad.abs().sum(-1)
+    assert gradient[0, 24, 1] > 0 and gradient[0, 104, 1] > 0
+    gradient[0, 24:105, 1] = 0
+    assert torch.count_nonzero(gradient) == 0
+
+
+def test_asymmetric_configuration_and_symmetric_checkpoint_compatibility():
+    configs = Path(__file__).resolve().parents[4] / "egs2/whamr/rir_2spk/conf/tuning"
+    prefix = "train_pooled_bimamba_2spk_nf_16k_sweep_v2_time_local_attention"
+    expected = yaml.safe_load((configs / f"{prefix}125.yaml").read_text())
+    actual = yaml.safe_load((configs / f"{prefix}_p16_f64.yaml").read_text())
+    expected["model_conf"]["predictor_conf"].update(
+        time_local_attention_window=81, time_local_attention_past_frames=16,
+        time_local_attention_future_frames=64)
+    assert actual == expected
+    with patch("espnet2.rir.rec_rir.pooled_bimamba._build_mamba", substitute):
+        torch.manual_seed(31)
+        symmetric = predictor(time_local_attention_window=125)
+        torch.manual_seed(31)
+        asymmetric = predictor(time_local_attention_window=81,
+                               time_local_attention_past_frames=16,
+                               time_local_attention_future_frames=64)
+    assert symmetric.state_dict().keys() == asymmetric.state_dict().keys()
+    for key, value in symmetric.state_dict().items():
+        torch.testing.assert_close(value, asymmetric.state_dict()[key], rtol=0, atol=0)
+    implicit = TimeLocalAttention(8, 2, 125, 1e-5)
+    explicit = TimeLocalAttention(8, 2, 125, 1e-5, past_frames=62, future_frames=62)
+    explicit.load_state_dict(implicit.state_dict(), strict=True)
+    x = torch.randn(2, 133, 3, 8)
+    torch.testing.assert_close(implicit(x), explicit(x), rtol=0, atol=0)
+    for past, future in ((None, 64), (16, None), (-1, 81), (True, 79),
+                         (16.0, 64), (16, 63)):
+        with unittest.TestCase().assertRaises(ValueError):
+            TimeLocalAttention(8, 2, 81, 1e-5, past_frames=past, future_frames=future)
+        with unittest.TestCase().assertRaises(ValueError):
+            predictor(time_local_attention_window=81,
+                      time_local_attention_past_frames=past,
+                      time_local_attention_future_frames=future)
+    with unittest.TestCase().assertRaises(ValueError):
+        predictor(time_local_attention_window=0, time_local_attention_past_frames=0,
+                  time_local_attention_future_frames=0)
 
 
 if __name__ == "__main__":
