@@ -98,7 +98,30 @@
       "notes": "固定16kHz LS direct-reverb参照、2秒RIR、全発話channel0、ordinary Sweep PIM、ピーク合わせ・ピーク正規化・RMSE PIT。全指標6,000有効。LS参照は相対伝達の形状評価で、DRR・RT60・C50は物理部屋パラメータではなく相対フィルタの診断量。Rec-RIRはAll loss、他はSweep v2であり、手法全体の比較。単一seed・単一best。パラメータRec-RIR3150172/TF-Locoformer2603921/BiMamba456428。"
     },
     {
-      "slide": 3,
+      "title": "BiMambaの基本構成",
+      "status": "MODEL",
+      "sources": [
+        "pooled_bimamba.py",
+        "学習config"
+      ],
+      "notes": "基準モデルの実装に基づく。STFTは16kHz、FFT/window512、hop256、sqrthann、257周波数。実部・虚部をConv2D 2→64chへ入力。前段は時間BiMamba→軽量周波数ブロックを4段。時間BiMambaは各周波数で独立にLN→順方向Mambaと逆方向Mamba（入力時間反転後、出力を逆反転）→concat→Linear128→64→残差。Mamba d_state16/d_conv4/expand2。軽量周波数はdepthwise Conv幅5と低ランク全帯域MLP（bottleneck16/rank16）。時間Poolingは話者・周波数・チャネル別にsoftmax重みを学習し、2話者分の学習可能slot embeddingを加算。後段は周波数Attention4heads＋Conv-FFN128を2段、話者間で重み共有。headはLN→Linear64→128→SiLU→Linear128→120、real/imagを複素60tapに組み立て、出力[B,2,257,60]。通常Sweep PIMによる2秒RIR復元はCTF予測器の後段。\n実装：\n/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/rir/rec_rir/pooled_bimamba.py\n/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/rir/rec_rir/model.py\n/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/frequency_module_code_20261012/espnet2/rir/rec_rir/pooled_bimamba.py\n/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/time_local_attention_code_20261012/espnet2/rir/rec_rir/pooled_bimamba.py",
+      "slide": 3
+    },
+    {
+      "title": "BiMambaの比較構成とハイパーパラメータ",
+      "status": "CONFIG",
+      "sources": [
+        "学習config",
+        "DAI-45",
+        "DAI-49",
+        "DAI-50",
+        "DAI-54"
+      ],
+      "notes": "LS比較表の5構成に対応する設定。前段は時間＋周波数処理、後段はPooling後の周波数処理。周波数BiMambaのConv-FFNは比較用FrequencyAttentionBlockと共通。局所Attention125は各時間BiMamba直前へ挿入し、4heads・窓125frames（前後62、hop16msで±992ms）、時間RoPE。後続BiMambaは大域的なのでモデル全体が局所的とはしない。共通はFP32、4秒crop、train folded batch4、valid batch1、seed0、AdamW lr.001/eps1e-8/weight_decay0、grad_clip1、cosine warm restarts T0=5000/Tmult1/eta_min0、最大100epoch/patience10、SweepCTF v2 RIMag/PIT。2-blockは速度比較が記録した当該レシピのconfigを使用（学習元はTSUBAME）。\n設定ファイル：\nBiMamba 基準: /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2/config.yaml\n前段2＋後段2: /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/frequency_module_code_20261012/egs2/whamr/rir_2spk/conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_2blocks.yaml\n後段周波数BiMamba: /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_freq_post_bimamba/config.yaml\n前後周波数BiMamba: /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_freq_both_bimamba/config.yaml\n時間局所Attention125: /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_time_local_attention125/config.yaml",
+      "slide": 4
+    },
+    {
+      "slide": 5,
       "title": "BiMambaの構成比較（LS参照）",
       "status": "TEST",
       "sources": [
@@ -110,7 +133,7 @@
       "notes": "各3,000混合・6,000 RIR、同一16kHz LS参照。前段2+後段2、後段Freq BiMamba、前後Freq BiMamba、時間局所Attention125を比較。基準比で前後Freq BiMambaのLS RMSEが13.5519%低下するがDRR/C50/RT60は同時改善しない。列はRMSE、相関、DRR MAE dB、RT60 MAE s、C50 MAE dB。すべて通常Sweep PIM・ピーク合わせ/正規化・RMSE PIT。単一seed。"
     },
     {
-      "slide": 4,
+      "slide": 6,
       "title": "推定CTFによる音声分離",
       "status": "TEST",
       "sources": [
@@ -121,7 +144,7 @@
       "notes": "Sは同実効batch8でBaseline17.58、推定CTF18.14。MはBaseline20.132、推定CTF20.068、best146/119epoch。MのSDRは21.309→21.675。S/Mで実行時期、初期化修正、GPU等が異なるためサイズだけの厳密比較ではない。単一seed。"
     },
     {
-      "slide": 5,
+      "slide": 7,
       "title": "DAMSEPの損失比較",
       "status": "TEST",
       "sources": [
@@ -133,7 +156,7 @@
       "notes": "3損失はclean、残響、CTF再構成（重み1/.1/.5）。同モデル、FP32、H100 1枚、batch1 accum1 seed0。best/ESは3損失29/34epoch、cleanのみ10/15epoch。test SI-SNR13.50対11.19、SDR14.76対12.71。停止epoch差も含む実験全体の観測で、CTF再構成項単独の効果とは言えない。既存TF-Locoformer-S18.28はenh4_cleanの別学習条件。"
     },
     {
-      "slide": 6,
+      "slide": 8,
       "title": "room/path対照学習の比較条件",
       "status": "IN PROGRESS",
       "sources": [
@@ -146,7 +169,7 @@
       "notes": "λroom/pathは両.01/.01、room.01/0、path0/.01、なし0/0。同じcontrastive dump、seed0、4秒、paired batch2=4波形、479788 params。validationはprimary view、対照損失を含めずvalid.loss_sweep。今回RIR推定の数値はLS参照の確定testのみを掲載する方針で、途中validの数値は含めない。状況は10/15の元レポート確認時点で、現在ジョブを再照会したものではない。"
     },
     {
-      "slide": 7,
+      "slide": 9,
       "title": "まとめと次の比較",
       "status": "NEXT",
       "sources": [
@@ -156,5 +179,119 @@
       ],
       "notes": "軽量CTFモデルのLS参照性能、CTF条件付け、DAMSEPの結果を整理。固定BiMamba条件付きSの採点は元レポート10/15 14:08時点で結果待ち。room/path4条件は学習終了後LS参照のみで比較。DAMSEPは2損失対3損失でCTF項の寄与を確認。新しい分離器の結果はこのデッキの対象外。"
     }
-  ]
+  ],
+  "bimamba_model_configs": {
+    "BiMamba 基準": {
+      "config": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2/config.yaml",
+      "predictor_conf": {
+        "emb_dim": 64,
+        "pre_layers": 4,
+        "post_layers": 2,
+        "d_state": 16,
+        "d_conv": 4,
+        "freq_bottleneck": 16,
+        "freq_rank": 16,
+        "local_kernel": 5,
+        "pooling_hidden": 32,
+        "n_heads": 4,
+        "ffn_dim": 128,
+        "head_dim": 128,
+        "slot_embedding_std": 0.02,
+        "eps": 1e-05
+      },
+      "parameters": 456428
+    },
+    "前段2＋後段2": {
+      "config": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/frequency_module_code_20261012/egs2/whamr/rir_2spk/conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_2blocks.yaml",
+      "predictor_conf": {
+        "emb_dim": 64,
+        "pre_layers": 2,
+        "post_layers": 2,
+        "d_state": 16,
+        "d_conv": 4,
+        "freq_bottleneck": 16,
+        "freq_rank": 16,
+        "local_kernel": 5,
+        "pooling_hidden": 32,
+        "n_heads": 4,
+        "ffn_dim": 128,
+        "head_dim": 128,
+        "slot_embedding_std": 0.02,
+        "eps": 1e-05
+      },
+      "parameters": 286570
+    },
+    "後段周波数BiMamba": {
+      "config": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_freq_post_bimamba/config.yaml",
+      "predictor_conf": {
+        "pre_frequency_module": "light",
+        "post_frequency_module": "bimamba",
+        "emb_dim": 64,
+        "pre_layers": 4,
+        "post_layers": 2,
+        "d_state": 16,
+        "d_conv": 4,
+        "freq_bottleneck": 16,
+        "freq_rank": 16,
+        "local_kernel": 5,
+        "pooling_hidden": 32,
+        "n_heads": 4,
+        "ffn_dim": 128,
+        "head_dim": 128,
+        "slot_embedding_std": 0.02,
+        "eps": 1e-05
+      },
+      "parameters": 570204
+    },
+    "前後周波数BiMamba": {
+      "config": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_freq_both_bimamba/config.yaml",
+      "predictor_conf": {
+        "pre_frequency_module": "bimamba",
+        "post_frequency_module": "bimamba",
+        "emb_dim": 64,
+        "pre_layers": 4,
+        "post_layers": 2,
+        "d_state": 16,
+        "d_conv": 4,
+        "freq_bottleneck": 16,
+        "freq_rank": 16,
+        "local_kernel": 5,
+        "pooling_hidden": 32,
+        "n_heads": 4,
+        "ffn_dim": 128,
+        "head_dim": 128,
+        "slot_embedding_std": 0.02,
+        "eps": 1e-05
+      },
+      "parameters": 922968
+    },
+    "時間局所Attention125": {
+      "config": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_sweep_v2_time_local_attention125/config.yaml",
+      "predictor_conf": {
+        "time_local_attention_window": 125,
+        "emb_dim": 64,
+        "pre_layers": 4,
+        "post_layers": 2,
+        "d_state": 16,
+        "d_conv": 4,
+        "freq_bottleneck": 16,
+        "freq_rank": 16,
+        "local_kernel": 5,
+        "pooling_hidden": 32,
+        "n_heads": 4,
+        "ffn_dim": 128,
+        "head_dim": 128,
+        "slot_embedding_std": 0.02,
+        "eps": 1e-05
+      },
+      "parameters": 523500
+    }
+  },
+  "bimamba_code_sources": [
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/rir/rec_rir/pooled_bimamba.py",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/rir/rec_rir/model.py",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/frequency_module_code_20261012/espnet2/rir/rec_rir/pooled_bimamba.py",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/time_local_attention_code_20261012/espnet2/rir/rec_rir/pooled_bimamba.py"
+  ],
+  "architecture_diagram": "native_editable_powerpoint_shapes"
 }
