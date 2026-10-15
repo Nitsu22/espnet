@@ -16,7 +16,11 @@ expdir=exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_film_all_seed0
 pipeline=exp/bimamba_nf8k_pipeline
 logs=${pipeline}/job_${JOB_ID}
 mkdir -p "${logs}"
-trap 'code=$?; printf "%s\n" "$code" > "${logs}/exit_status"; date -Is' EXIT
+[[ ${JOB_ID} =~ ^[0-9]+$ ]]
+task_tmp=${PWD}/${logs}/tmp
+mkdir "${task_tmp}"
+export TMPDIR=${task_tmp}
+trap 'code=$?; printf "%s\n" "$code" > "${logs}/exit_status"; rm -rf -- "${task_tmp}"; date -Is' EXIT
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 shared=/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet
 export PYTHONPATH="${PWD}/../../..:${shared}/egs2/whamr/damsep_clean/.deps/mamba-cu118-torch21-py310${PYTHONPATH:+:${PYTHONPATH}}"
