@@ -53,3 +53,12 @@ override `h_rt` and pass the same allocation duration in seconds followed by
 CPU tests exercise axes/tap order, padding, PIT gradients, source preservation,
 Oracle/Baseline configuration parity, same-seed separator initialization, and
 both full and segmented inference. CUDA-only Mamba kernels are tested in-job.
+
+For the node_q continuation check, use
+`qsub -g tga-shinoda qsub/train_nf8k_bimamba_ctf_concat_s_nodeq.sh`.
+This requests only `node_q=1` for 24 hours and requires the existing checkpoint;
+it reuses the same GPU check and Stage 6 code without changing the model, batch,
+precision, worker count, or optimizer. Allocation/GPU UUID/memory/process
+snapshots are saved under `exp/bimamba_nf8k_concat_jobs/job_<ID>/`, and the CUDA
+probe prints its own PID/namespace and free memory before building the model.
+These are read-only diagnostics, not changes to GPU selection or isolation.

@@ -51,6 +51,21 @@ trap cleanup EXIT
 date -Is
 hostname
 git rev-parse HEAD | tee "${logs}/commit.txt"
+# Read-only allocation diagnostics. Never change the scheduler's GPU mapping.
+{
+    printf 'shell_pid=%s parent_pid=%s\n' "$$" "${PPID}"
+    printf 'CUDA_VISIBLE_DEVICES=%s\n' "${CUDA_VISIBLE_DEVICES-<unset>}"
+    printf 'NVIDIA_VISIBLE_DEVICES=%s\n' "${NVIDIA_VISIBLE_DEVICES-<unset>}"
+    sed -n '/^NSpid:/p' "/proc/$$/status"
+} > "${logs}/process_environment.txt"
+qstat -j "${JOB_ID}" > "${logs}/scheduler.txt" 2>&1 || true
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi -L > "${logs}/gpu_devices.txt" 2>&1 || true
+    nvidia-smi --query-gpu=index,uuid,pci.bus_id,name,memory.total,memory.used,memory.free,mig.mode.current \
+        --format=csv > "${logs}/gpu_before.txt" 2>&1 || true
+    nvidia-smi --query-compute-apps=pid,gpu_uuid,used_gpu_memory \
+        --format=csv > "${logs}/gpu_processes_before.txt" 2>&1 || true
+fi
 test -s exp/bimamba_nf8k_baseline_inputs/preparation.json
 python local/check_bimamba_conditioning_training.py \
     --config conf/tuning/train_enh_tflocoformer_s_nf8k_bimamba_ctf_concat.yaml \

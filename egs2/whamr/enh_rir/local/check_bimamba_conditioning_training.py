@@ -7,6 +7,7 @@ does not save trained separation weights or modify the source BiMamba model.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,20 @@ def main():
     args = parser.parse_args()
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise RuntimeError("Use exactly one allocated CUDA device for this probe")
+    free, total = torch.cuda.mem_get_info()
+    # Capture the actual CUDA view before an OOM can prevent report creation.
+    # PID namespaces can differ from the IDs reported by nvidia-smi.
+    diagnostics = dict(
+        pid=os.getpid(), parent_pid=os.getppid(),
+        cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
+        nvidia_visible_devices=os.environ.get("NVIDIA_VISIBLE_DEVICES"),
+        device=torch.cuda.get_device_name(0),
+        cuda_free_before_model_gib=free / 2**30,
+        cuda_total_gib=total / 2**30,
+        pid_namespace=[line for line in Path("/proc/self/status").read_text().splitlines()
+                       if line.startswith("NSpid:")],
+    )
+    print("CUDA startup: " + json.dumps(diagnostics), flush=True)
     options = EnhancementTask.get_parser().parse_args(
         ["--config", args.config, "--output_dir", str(args.output.parent), "--ngpu", "1"]
     )
@@ -103,6 +118,7 @@ def main():
         frozen_weights_unchanged=True,
         source_sha256=model.bimamba_sha256,
         sample_rate=sample_rate,
+        cuda_startup=diagnostics,
     )
     model.zero_grad(set_to_none=True)
     del optimizer, loss, train
