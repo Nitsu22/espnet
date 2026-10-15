@@ -1,52 +1,128 @@
 {
   "report": "https://chatgpt.com/space/page_7274532747808191b5d98eaa8c387e2b",
   "snapshot_date": "2026-10-15",
+  "rir_result_reference": "ls_direct_reverb_only",
+  "new_separator_results_included": false,
+  "rir_metrics": [
+    "RMSE",
+    "correlation",
+    "DRR MAE dB",
+    "RT60 MAE s",
+    "C50 MAE dB"
+  ],
+  "local_sources": [
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/ls_direct_reverb_evaluation_20261012/comparison.json",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/frequency_ls_evaluation_20261014/comparison.json",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/ls_direct_reverb_comparison_20261012/2blocks_ls/models/00/summary.json",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk/exp/time_local_attention_whamr_20261013_retry1/whamr/score_ls_direct_reverb/summary.json"
+  ],
+  "ls_baseline": {
+    "Rec-RIR": {
+      "rmse_mean": 0.001085485781790164,
+      "corr_mean": 0.9861786243653312,
+      "drr_mae": 0.9608125806215133,
+      "rt60_mae": 0.0627988633641912,
+      "c50_mae": 0.8942021467884484
+    },
+    "TF-Locoformer": {
+      "rmse_mean": 0.001502657895536726,
+      "corr_mean": 0.9756076215411952,
+      "drr_mae": 1.4794091260230446,
+      "rt60_mae": 0.07826633746873954,
+      "c50_mae": 1.6928865563933226
+    },
+    "BiMamba": {
+      "rmse_mean": 0.001411190698751476,
+      "corr_mean": 0.9786515948250996,
+      "drr_mae": 1.076339866800883,
+      "rt60_mae": 0.0653661323933927,
+      "c50_mae": 1.1027714557937704
+    }
+  },
+  "ls_variants": {
+    "BiMamba 基準": {
+      "rmse_mean": 0.001411190698751476,
+      "corr_mean": 0.9786515948250996,
+      "drr_mae": 1.076339866800883,
+      "rt60_mae": 0.0653661323933927,
+      "c50_mae": 1.1027714557937704
+    },
+    "前段2＋後段2": {
+      "rmse_mean": 0.0017082663829653055,
+      "corr_mean": 0.9677788379408614,
+      "drr_mae": 1.5720311275024474,
+      "rt60_mae": 0.07258912741826594,
+      "c50_mae": 1.40140107204032
+    },
+    "後段周波数BiMamba": {
+      "rmse_mean": 0.0013556490222357861,
+      "corr_mean": 0.9803457725046204,
+      "drr_mae": 1.005383333444904,
+      "rt60_mae": 0.06696846504365343,
+      "c50_mae": 1.0067859487057094
+    },
+    "前後周波数BiMamba": {
+      "rmse_mean": 0.0012199478746766476,
+      "corr_mean": 0.9842204503487237,
+      "drr_mae": 1.0835519206816544,
+      "rt60_mae": 0.06716908969782118,
+      "c50_mae": 1.120134071494971
+    },
+    "時間局所Attention125": {
+      "rmse_mean": 0.0013664176251031576,
+      "corr_mean": 0.9800321179915068,
+      "drr_mae": 1.0704972470204466,
+      "rt60_mae": 0.07061359515842185,
+      "c50_mae": 1.0458792268332557
+    }
+  },
   "slides": [
     {
       "slide": 1,
-      "title": "CTF推定と音声分離",
+      "title": "RIR/CTF推定と音声分離",
       "status": "OVERVIEW",
       "sources": [
         "Linear実験進捗レポート"
       ],
-      "notes": "研究関連70 Issue（親課題など17件、子Issue53件）を対象とした報告の簡潔版。過去の確定testと途中validを区別する。Linearと参照先成果物による10月15日のスナップショット。"
+      "notes": "元レポートの簡潔版。RIR推定の定量結果は固定LS direct-reverb参照のみ。新しい分離器の結果は含めない。記録日時は元レポートの確認時点。"
     },
     {
       "slide": 2,
-      "title": "BiMambaは約0.46Mパラメータ",
+      "title": "RIR推定の基準性能（LS参照）",
       "status": "TEST",
       "sources": [
         "DAI-10",
-        "基準モデル比較結果"
+        "DAI-38",
+        "DAI-45"
       ],
-      "notes": "Rec-RIR All loss: 3,150,172 params, RMSE .0047832408。TF-Locoformer Sweep v2: 2,603,921, .0049075850。BiMamba:456,428,.0048784958。Rec-RIRより85.51%少ないparams、物理RIR RMSEは約1.99%大きい。Rec-RIRは学習損失が異なるため手法全体の比較。16kHz、full input ch0、ordinary Sweep PIM、2秒RIR、peak合わせ・正規化・RMSE PIT。単一best、seed0。元結果: egs2/whamr/rir_2spk/exp/pooled_bimamba_evaluation_20261007/comparison.json。"
+      "notes": "固定16kHz LS direct-reverb参照、2秒RIR、全発話channel0、ordinary Sweep PIM、ピーク合わせ・ピーク正規化・RMSE PIT。全指標6,000有効。LS参照は相対伝達の形状評価で、DRR・RT60・C50は物理部屋パラメータではなく相対フィルタの診断量。Rec-RIRはAll loss、他はSweep v2であり、手法全体の比較。単一seed・単一best。パラメータRec-RIR3150172/TF-Locoformer2603921/BiMamba456428。"
     },
     {
       "slide": 3,
-      "title": "推定精度の改善にはトレードオフがある",
+      "title": "BiMambaの構成比較（LS参照）",
       "status": "TEST",
       "sources": [
+        "DAI-45",
         "DAI-49",
         "DAI-50",
-        "DAI-24",
-        "DAI-69"
+        "DAI-54"
       ],
-      "notes": "固定LS direct-reverb参照RMSE:基準.0014111907、後段Freq BiMamba.0013556490、前後Freq BiMamba.0012199479（基準比13.55%減）。前後置換のLS DRR/C50診断誤差は小幅悪化。LSは相対伝達の形状で、DRR/C50/RT60を物理部屋パラメータとは解釈しない。物理RIRのDRR補助:1.792919→1.015485dB（43.36%低下）、RMSE .00487850→.00491808（0.81%悪化）。速度はA100 40GB、FP32、4秒、batch1、ランダム重み、I/O除外。時間BiLSTMでCTF18.4995→10.9131ms、RIRまで412.5335→405.8437ms。全構造に一貫した改善とは言わない。"
+      "notes": "各3,000混合・6,000 RIR、同一16kHz LS参照。前段2+後段2、後段Freq BiMamba、前後Freq BiMamba、時間局所Attention125を比較。基準比で前後Freq BiMambaのLS RMSEが13.5519%低下するがDRR/C50/RT60は同時改善しない。列はRMSE、相関、DRR MAE dB、RT60 MAE s、C50 MAE dB。すべて通常Sweep PIM・ピーク合わせ/正規化・RMSE PIT。単一seed。"
     },
     {
       "slide": 4,
-      "title": "CTF条件付けはSで改善、Mでは横ばい",
+      "title": "推定CTFによる音声分離",
       "status": "TEST",
       "sources": [
         "DAI-17",
         "DAI-19",
         "DAI-20"
       ],
-      "notes": "Sは同実効batch8でBaseline17.58、Estimated CTF18.14。別の実効batch16ではEstimated18.00、Random17.35で推定が.65dB上回る。Mはbest146/119ep、20.132→20.068dB。M SDR21.309→21.675。Sはidentity初期化修正前、Mは修正後で、実行時期・GPUなども異なるためサイズだけの厳密比較ではない。SのOracle18.67はOracle RIRであってOracle CTF時間連結と別。seed0。元監査:https://linear.app/nitsu22/issue/DAI-17#comment-ff12b3f4-7e51-4fab-a85c-48a38c9e65e0。"
+      "notes": "Sは同実効batch8でBaseline17.58、推定CTF18.14。MはBaseline20.132、推定CTF20.068、best146/119epoch。MのSDRは21.309→21.675。S/Mで実行時期、初期化修正、GPU等が異なるためサイズだけの厳密比較ではない。単一seed。"
     },
     {
       "slide": 5,
-      "title": "DAMSEPは補助損失群で改善した",
+      "title": "DAMSEPの損失比較",
       "status": "TEST",
       "sources": [
         "DAI-9",
@@ -54,42 +130,31 @@
         "DAI-41",
         "DAI-61"
       ],
-      "notes": "3損失はclean負SNR、残響RI+Mag、CTF再構成、重み1/.1/.5。H100 1GPU、FP32、batch1 accum1 seed0。best/ES:3損失29/34、cleanのみ10/15。test SI-SNR13.50対11.19、SDR14.76対12.71、STOI96.05%対94.18%。停止epoch差も含む実験全体の観測で、CTF再構成項単独の効果とは分解できない。既存enh4_clean S18.28/M20.65は別学習条件の手法全体比較。公式HETMIXRの完全再現ではなくNF-WHAMRへの適用。元結果https://linear.app/nitsu22/issue/DAI-21#comment-2c6c5e42-b373-412d-9d8d-ed71ec6d98a6。"
+      "notes": "3損失はclean、残響、CTF再構成（重み1/.1/.5）。同モデル、FP32、H100 1枚、batch1 accum1 seed0。best/ESは3損失29/34epoch、cleanのみ10/15epoch。test SI-SNR13.50対11.19、SDR14.76対12.71。停止epoch差も含む実験全体の観測で、CTF再構成項単独の効果とは言えない。既存TF-Locoformer-S18.28はenh4_cleanの別学習条件。"
     },
     {
       "slide": 6,
-      "title": "roomとpathの効果は4条件で比較中",
-      "status": "VALID / IN PROGRESS",
+      "title": "room/path対照学習の比較条件",
+      "status": "IN PROGRESS",
       "sources": [
         "DAI-68",
-        "DAI-51",
-        "DAI-28",
-        "DAI-43"
+        "DAI-65",
+        "DAI-66",
+        "DAI-67",
+        "DAI-74"
       ],
-      "notes": "10/15 17:09頃の共有train.log。同21ep:両.770、room.764、path.764、なし.770（丸め値）。最新完了/最良:両32ep/.748、room21/.764、path21/.764、なし24/.761。進行度が異なるので最良値で効果を断定しない。λroom/path:両.01/.01、room.01/0、path0/.01、なし0/0。479788 params、paired batch2=4波形、projection32、temperature.1、validation primaryのみ、対照損失なし、停止valid.loss_sweep。SSHで現在状態は未照会。SPMambaはローカルで54/56ep正常終了、test未。固定BiMamba-S NF8は10/15 14:08採点再投入記録。Oracleは10/14 15:01時点validのみ。"
+      "notes": "λroom/pathは両.01/.01、room.01/0、path0/.01、なし0/0。同じcontrastive dump、seed0、4秒、paired batch2=4波形、479788 params。validationはprimary view、対照損失を含めずvalid.loss_sweep。今回RIR推定の数値はLS参照の確定testのみを掲載する方針で、途中validの数値は含めない。状況は10/15の元レポート確認時点で、現在ジョブを再照会したものではない。"
     },
     {
       "slide": 7,
-      "title": "新しい分離器は最終testが未確定",
-      "status": "VALID / IN PROGRESS",
-      "sources": [
-        "DAI-23",
-        "DAI-40",
-        "DAI-46"
-      ],
-      "notes": "DeltaNet-M:同30ep10.846対通常nocache M10.480 +.366、10/12 00:40ログで31ep途中、約5h/ep、1GPU FP32 batch1 accum4。Split S:同25ep9.522対9.237 +.285、24h停止で再開待ち、約56min/ep対S baseline約37min。時間MHSA→BiMamba S:同35ep9.671対9.626 +.045、10/13 03:12時間制限停止、再開待ち、約42min/ep。いずれも最終test未確認、最後の記録日時の状態。時間BiMambaはCTF条件付けとは別の分離器構造。"
-    },
-    {
-      "slide": 8,
-      "title": "次は最終testと損失の寄与を確かめる",
+      "title": "まとめと次の比較",
       "status": "NEXT",
       "sources": [
-        "Linear実験進捗レポート",
         "DAI-28",
         "DAI-68",
         "DAI-61"
       ],
-      "notes": "結論は単一seedの結果に限定。確定testと途中validを混ぜない。優先する結果は新しい固定BiMamba-SのCPU採点、room/path4条件の同一条件test、DAMSEP2vs3損失と構造アブレーション。物理RIR参照とLS参照を分け、両方で評価する。詳細な全70Issue、BUT、Attentionアブレーション等は元レポート。現在の実行状態を新たに監視・変更したものではない。"
+      "notes": "軽量CTFモデルのLS参照性能、CTF条件付け、DAMSEPの結果を整理。固定BiMamba条件付きSの採点は元レポート10/15 14:08時点で結果待ち。room/path4条件は学習終了後LS参照のみで比較。DAMSEPは2損失対3損失でCTF項の寄与を確認。新しい分離器の結果はこのデッキの対象外。"
     }
   ]
 }
