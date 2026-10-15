@@ -1,0 +1,95 @@
+{
+  "report": "https://chatgpt.com/space/page_7274532747808191b5d98eaa8c387e2b",
+  "snapshot_date": "2026-10-15",
+  "slides": [
+    {
+      "slide": 1,
+      "title": "CTF推定と音声分離",
+      "status": "OVERVIEW",
+      "sources": [
+        "Linear実験進捗レポート"
+      ],
+      "notes": "研究関連70 Issue（親課題など17件、子Issue53件）を対象とした報告の簡潔版。過去の確定testと途中validを区別する。Linearと参照先成果物による10月15日のスナップショット。"
+    },
+    {
+      "slide": 2,
+      "title": "BiMambaは約0.46Mパラメータ",
+      "status": "TEST",
+      "sources": [
+        "DAI-10",
+        "基準モデル比較結果"
+      ],
+      "notes": "Rec-RIR All loss: 3,150,172 params, RMSE .0047832408。TF-Locoformer Sweep v2: 2,603,921, .0049075850。BiMamba:456,428,.0048784958。Rec-RIRより85.51%少ないparams、物理RIR RMSEは約1.99%大きい。Rec-RIRは学習損失が異なるため手法全体の比較。16kHz、full input ch0、ordinary Sweep PIM、2秒RIR、peak合わせ・正規化・RMSE PIT。単一best、seed0。元結果: egs2/whamr/rir_2spk/exp/pooled_bimamba_evaluation_20261007/comparison.json。"
+    },
+    {
+      "slide": 3,
+      "title": "推定精度の改善にはトレードオフがある",
+      "status": "TEST",
+      "sources": [
+        "DAI-49",
+        "DAI-50",
+        "DAI-24",
+        "DAI-69"
+      ],
+      "notes": "固定LS direct-reverb参照RMSE:基準.0014111907、後段Freq BiMamba.0013556490、前後Freq BiMamba.0012199479（基準比13.55%減）。前後置換のLS DRR/C50診断誤差は小幅悪化。LSは相対伝達の形状で、DRR/C50/RT60を物理部屋パラメータとは解釈しない。物理RIRのDRR補助:1.792919→1.015485dB（43.36%低下）、RMSE .00487850→.00491808（0.81%悪化）。速度はA100 40GB、FP32、4秒、batch1、ランダム重み、I/O除外。時間BiLSTMでCTF18.4995→10.9131ms、RIRまで412.5335→405.8437ms。全構造に一貫した改善とは言わない。"
+    },
+    {
+      "slide": 4,
+      "title": "CTF条件付けはSで改善、Mでは横ばい",
+      "status": "TEST",
+      "sources": [
+        "DAI-17",
+        "DAI-19",
+        "DAI-20"
+      ],
+      "notes": "Sは同実効batch8でBaseline17.58、Estimated CTF18.14。別の実効batch16ではEstimated18.00、Random17.35で推定が.65dB上回る。Mはbest146/119ep、20.132→20.068dB。M SDR21.309→21.675。Sはidentity初期化修正前、Mは修正後で、実行時期・GPUなども異なるためサイズだけの厳密比較ではない。SのOracle18.67はOracle RIRであってOracle CTF時間連結と別。seed0。元監査:https://linear.app/nitsu22/issue/DAI-17#comment-ff12b3f4-7e51-4fab-a85c-48a38c9e65e0。"
+    },
+    {
+      "slide": 5,
+      "title": "DAMSEPは補助損失群で改善した",
+      "status": "TEST",
+      "sources": [
+        "DAI-9",
+        "DAI-21",
+        "DAI-41",
+        "DAI-61"
+      ],
+      "notes": "3損失はclean負SNR、残響RI+Mag、CTF再構成、重み1/.1/.5。H100 1GPU、FP32、batch1 accum1 seed0。best/ES:3損失29/34、cleanのみ10/15。test SI-SNR13.50対11.19、SDR14.76対12.71、STOI96.05%対94.18%。停止epoch差も含む実験全体の観測で、CTF再構成項単独の効果とは分解できない。既存enh4_clean S18.28/M20.65は別学習条件の手法全体比較。公式HETMIXRの完全再現ではなくNF-WHAMRへの適用。元結果https://linear.app/nitsu22/issue/DAI-21#comment-2c6c5e42-b373-412d-9d8d-ed71ec6d98a6。"
+    },
+    {
+      "slide": 6,
+      "title": "roomとpathの効果は4条件で比較中",
+      "status": "VALID / IN PROGRESS",
+      "sources": [
+        "DAI-68",
+        "DAI-51",
+        "DAI-28",
+        "DAI-43"
+      ],
+      "notes": "10/15 17:09頃の共有train.log。同21ep:両.770、room.764、path.764、なし.770（丸め値）。最新完了/最良:両32ep/.748、room21/.764、path21/.764、なし24/.761。進行度が異なるので最良値で効果を断定しない。λroom/path:両.01/.01、room.01/0、path0/.01、なし0/0。479788 params、paired batch2=4波形、projection32、temperature.1、validation primaryのみ、対照損失なし、停止valid.loss_sweep。SSHで現在状態は未照会。SPMambaはローカルで54/56ep正常終了、test未。固定BiMamba-S NF8は10/15 14:08採点再投入記録。Oracleは10/14 15:01時点validのみ。"
+    },
+    {
+      "slide": 7,
+      "title": "新しい分離器は最終testが未確定",
+      "status": "VALID / IN PROGRESS",
+      "sources": [
+        "DAI-23",
+        "DAI-40",
+        "DAI-46"
+      ],
+      "notes": "DeltaNet-M:同30ep10.846対通常nocache M10.480 +.366、10/12 00:40ログで31ep途中、約5h/ep、1GPU FP32 batch1 accum4。Split S:同25ep9.522対9.237 +.285、24h停止で再開待ち、約56min/ep対S baseline約37min。時間MHSA→BiMamba S:同35ep9.671対9.626 +.045、10/13 03:12時間制限停止、再開待ち、約42min/ep。いずれも最終test未確認、最後の記録日時の状態。時間BiMambaはCTF条件付けとは別の分離器構造。"
+    },
+    {
+      "slide": 8,
+      "title": "次は最終testと損失の寄与を確かめる",
+      "status": "NEXT",
+      "sources": [
+        "Linear実験進捗レポート",
+        "DAI-28",
+        "DAI-68",
+        "DAI-61"
+      ],
+      "notes": "結論は単一seedの結果に限定。確定testと途中validを混ぜない。優先する結果は新しい固定BiMamba-SのCPU採点、room/path4条件の同一条件test、DAMSEP2vs3損失と構造アブレーション。物理RIR参照とLS参照を分け、両方で評価する。詳細な全70Issue、BUT、Attentionアブレーション等は元レポート。現在の実行状態を新たに監視・変更したものではない。"
+    }
+  ]
+}
