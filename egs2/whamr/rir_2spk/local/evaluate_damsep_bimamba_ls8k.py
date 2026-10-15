@@ -81,6 +81,9 @@ def main():
     started = time.monotonic()
     validated = []
     maximum_difference = 0.0
+    maximum_unclipped_difference = 0.0
+    clipped_utterances = 0
+    clipped_samples = 0
     for number, key in enumerate(canonical, 1):
         uid = mapping[key]
         path = Path(mixtures[uid])
@@ -91,12 +94,19 @@ def main():
         y, target_sr = sf.read(canonical[key], dtype="float32", always_2d=True)
         if sr != 8000 or target_sr != 8000 or x.shape != y.shape:
             raise ValueError(f"Input rate/shape differs: {uid}")
-        error = float(np.max(np.abs(x - y)))
+        raw_error = float(np.max(np.abs(x - y)))
+        clipped = np.clip(y, -1, 1 - 1 / 32768)
+        clipped_count = int(np.count_nonzero(y != clipped))
+        error = float(np.max(np.abs(x - clipped)))
         # DAMSEP's formatted PCM16 input and the FLOAT NF dump differ by
-        # quantization. BiMamba receives the exact SAME PCM16 input here.
+        # quantization and PCM16 saturation. BiMamba receives the exact SAME
+        # PCM16 input here, including saturation already present in DAMSEP.
         if not np.isfinite(x).all() or not error <= 1 / 32768 + 1e-7:
             raise ValueError(f"Not the same noise-free mixture: {uid}: {error}")
         maximum_difference = max(maximum_difference, error)
+        maximum_unclipped_difference = max(maximum_unclipped_difference, raw_error)
+        clipped_utterances += int(clipped_count > 0)
+        clipped_samples += clipped_count
         validated.append(
             dict(
                 uid=key,
@@ -105,6 +115,8 @@ def main():
                 input_sha256=digest(path),
                 canonical_input=canonical[key],
                 maximum_sample_difference=error,
+                maximum_unclipped_sample_difference=raw_error,
+                clipped_samples=clipped_count,
             )
         )
         if number % 500 == 0:
@@ -114,6 +126,9 @@ def main():
             dict(
                 count=len(validated),
                 maximum_sample_difference=maximum_difference,
+                maximum_unclipped_sample_difference=maximum_unclipped_difference,
+                clipped_utterances=clipped_utterances,
+                clipped_samples=clipped_samples,
                 baseline_input="same formatted PCM16 noise-free mixture as DAMSEP",
                 ctfs_index_sha256=digest(source / "ctf.scp"),
                 entries=validated,
