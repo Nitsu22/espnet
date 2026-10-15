@@ -118,6 +118,46 @@ scoring verifies reference checksums, IDs, waveform headers and primary metric
 counts. Unit verification: `python -m unittest discover -s test/espnet2/rir
 -p test_ls_rir.py` from the repository root.
 
+### Native 8 kHz LS references
+
+`run_ls_direct_reverb_eval_8k.sh` runs the shared entry point with
+`--sample_rate 8000`. Stage 1 fits the native 8 kHz physical direct/reverb
+pairs in `dump_nf_2spk_8k_min/raw/tt_rir_2spk_nf_min_8k` and publishes
+`dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_8k`. Both the causal FIR and the
+measured reference contain 16000 samples (2 seconds). Fitting and measurement
+use the exact existing 8 kHz PIM sweep/inverse: an 8.192-second sweep from
+62.5 Hz to 4 kHz, including its ramps and guards. The LS references are
+independently fitted at 8 kHz from those physical pairs.
+
+```bash
+bash run_ls_direct_reverb_eval_8k.sh --workers 2
+# Equivalent: bash run_ls_direct_reverb_eval.sh --sample_rate 8000 --workers 2
+
+# Score existing ordinary-PIM predictions made at 8 kHz / 16000 samples.
+bash run_ls_direct_reverb_eval_8k.sh --stage 2 --stop_stage 2 \
+    --prediction exp/MODEL_8K/whamr/inference/rir.scp --model_label MODEL_8K
+```
+
+The default 8 kHz score directory is `exp/ls_direct_reverb_evaluation_8k`;
+use `--out_dir` for each additional evaluation. The shared entry point retains
+its existing 16 kHz defaults. `--rir_length`, `--filter_length`,
+`--sweep_duration`, and `--regularization` can override the reference settings;
+Stage 1 reuse checks that the settings and source indexes match the saved
+dump. Use a new `--reference_dir` for different settings. Scoring checks the
+prediction headers against the reference sample rate and length, so 16 kHz
+predictions cannot be scored against the 8 kHz references.
+
+Verified on 2026-10-15 (JST): all 3000 mixtures / 6000 pairs were prepared and
+checksum/header validated at 8 kHz. All fits converged within 21 CG iterations;
+mean/max relative sweep-response MSE were 1.468e-6 / 3.653e-4, and physical-pair
+reconstruction MSE were 1.066e-4 / 1.021e-2. The nine numerical/integration
+tests passed. Swapping the references' speaker order on 12 mixtures / 24 pairs
+gave RMSE 0 and correlation 1 under the shared PIT scorer. These are validation
+checks, not model scores. Logs and diagnostics are saved in
+`exp/ls_direct_reverb_validation_8k_20261015/`.
+
+### Verified 16 kHz results
+
 Verified on 2026-10-12 (JST), using the existing local test data and predictions:
 all 3000 mixtures / 6000 pairs were prepared and checksum/header validated.
 Every LS fit converged in at most 15 CG iterations. Mean/max relative
