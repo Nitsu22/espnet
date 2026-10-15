@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -104,6 +105,7 @@ class ESPnetEnhancementFrozenBiMambaModel(ESPnetEnhancementModel):
         bimamba_sha256,
         bimamba_predictor_conf,
         bimamba_sample_rate=16000,
+        bimamba_preserve_initialization_rng=False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -123,9 +125,17 @@ class ESPnetEnhancementFrozenBiMambaModel(ESPnetEnhancementModel):
         bytes.fromhex(bimamba_sha256)
         self.bimamba_checkpoint = str(bimamba_checkpoint)
         self.bimamba_sha256 = bimamba_sha256
-        self.frozen_ctf = FrozenBiMambaCTF(
-            bimamba_predictor_conf, self.bimamba_sample_rate
+        # The new concat experiment matches the Oracle/Baseline trunk's
+        # Xavier draws. Keep the established FiLM build path unchanged.
+        context = (
+            torch.random.fork_rng(devices=[])
+            if bimamba_preserve_initialization_rng
+            else nullcontext()
         )
+        with context:
+            self.frozen_ctf = FrozenBiMambaCTF(
+                bimamba_predictor_conf, self.bimamba_sample_rate
+            )
 
     def restore_bimamba_source(self):
         """Run AFTER separation-model initialization, so Xavier cannot erase it.

@@ -88,6 +88,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_bigdeltanet import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf import (
     TFLocoformerCTFSeparator,
 )
+from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf_concat import (
+    TFLocoformerSeparator as TFLocoformerCTFConcatSeparator,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_all_ctf import (
     TFLocoformerSeparator as TFLocoformerBiMambaFiLMSeparator,
 )
@@ -172,6 +175,7 @@ separator_choices = ClassChoices(
         tflocoformer_split=TFLocoformerSplitSeparator,
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
+        tflocoformer_bimamba_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
         tflocoformer_nocashe_aeafusion_first=TFLocoformerSeparatorNocasheAEAFusionFirst,
@@ -618,7 +622,9 @@ class EnhancementTask(AbsTask):
             )
 
         else:
-            if args.separator == "tflocoformer_bimamba_ctf_film_all":
+            if args.separator in (
+                "tflocoformer_bimamba_ctf_film_all", "tflocoformer_bimamba_ctf_concat"
+            ):
                 model_class = ESPnetEnhancementFrozenBiMambaModel
             elif args.separator == "tflocoformer_nocashe_ctf":
                 model_class = ESPnetEnhancementCTFModel
