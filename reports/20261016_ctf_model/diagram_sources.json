@@ -1,0 +1,30 @@
+{
+  "scope": "One editable architecture slide following the user-specified flow.",
+  "flow": [
+    "Time Module",
+    "Frequency Module",
+    "repeat N times",
+    "[T,F,D]",
+    "speaker-specific temporal Pooling",
+    "[F,D] per speaker",
+    "Frequency Module per speaker",
+    "CTF per speaker"
+  ],
+  "implementation_source": "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/espnet2/rir/rec_rir/pooled_bimamba.py",
+  "implementation_sha256": "69ee74f20004ca064dfdead4273c9419a374fc8fa0c72452ab66e7988dd1283c",
+  "post_pooling_note": "Two branches denote separate speaker processing; implementation shares module weights.",
+  "omitted_for_clarity": [
+    "STFT / Conv2D feature encoder",
+    "batch dimension",
+    "slot embeddings",
+    "CTF output head detail",
+    "post-pooling layer count"
+  ],
+  "verification": {
+    "expected_pages": 1,
+    "native_editable_shapes": true,
+    "rendered_pdf_pages": 1,
+    "shape_bounds_checked": true,
+    "requested_modules_and_dimensions_checked": true
+  }
+}
