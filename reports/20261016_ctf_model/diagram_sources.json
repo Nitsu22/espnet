@@ -1,6 +1,8 @@
 {
   "scope": "One editable architecture slide following the user-specified flow.",
   "flow": [
+    "Mixture",
+    "Mixture",
     "Time Module",
     "Frequency Module",
     "repeat N times",
@@ -25,6 +27,12 @@
     "native_editable_shapes": true,
     "rendered_pdf_pages": 1,
     "shape_bounds_checked": true,
-    "requested_modules_and_dimensions_checked": true
+    "mixture_input_and_horizontal_module_order_checked": true
+  },
+  "visual_revision": {
+    "orientation": "left to right; Time and Frequency modules arranged horizontally inside N-repeat group",
+    "input_label": "Mixture",
+    "style_reference": "https://www.merl.com/publications/docs/TR2024-126.pdf",
+    "style_note": "Original editable diagram; reference figure is not reproduced."
   }
 }
