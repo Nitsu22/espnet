@@ -1,0 +1,50 @@
+{
+  "scope": [
+    "DAMSEP overview with original Fig. 1",
+    "DAMSEP paper results, HETMIXR Tables 1–2",
+    "Previously compared time-BiLSTM CTF estimator architecture"
+  ],
+  "template": {
+    "path": "/home/kslab/nitsu/.codex/attachments/23779c81-38c9-41df-ab62-20b4899dfc1a/progress_nitsu_20261016.pptx",
+    "sha256": "a895c883a090ae52323279b95f6c63752b6960252a7ec1d2139f995ed7013089",
+    "design": "Original theme/layouts retained; white background, Arial 36 pt titles, 18–24 pt body, pale blue/yellow modules, gray-blue connectors and bottom-right page numbers."
+  },
+  "paper": {
+    "title": "DAMSEP: Distance-Aware Monaural Source Separation using Multi-RIR Estimation",
+    "authors": "Wen Wen et al.",
+    "url": "https://arxiv.org/html/2609.29749v2",
+    "pdf_url": "https://arxiv.org/pdf/2609.29749v2",
+    "version": "v2",
+    "figure": {
+      "number": 1,
+      "pdf_page": 2,
+      "crop_points": [
+        48,
+        65,
+        565,
+        216
+      ],
+      "modification": "Surrounding paper text cropped; figure unchanged"
+    },
+    "tables": [
+      1,
+      2
+    ],
+    "data_note": "Paper-reported HETMIXR; not local NF-WHAMR experiments. RIR baseline has oracle source input advantage. No RT60 error reported."
+  },
+  "implementation_sources": [
+    {
+      "path": "espnet2/rir/rec_rir/pooled_bimamba.py",
+      "sha256": "69ee74f20004ca064dfdead4273c9419a374fc8fa0c72452ab66e7988dd1283c"
+    },
+    {
+      "path": "egs2/whamr/rir_2spk/conf/tuning/train_pooled_bimamba_2spk_nf_16k_sweep_v2_bilstm.yaml",
+      "sha256": "4244d72d3f1d1e8fa0a4e84c0e7aa34a694cfd7e2b68c27f9521a1d96c7bc521"
+    }
+  ],
+  "verification": {
+    "slide_count": 3,
+    "diagram_editable": true,
+    "tables_editable": true
+  }
+}
