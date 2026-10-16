@@ -1,0 +1,48 @@
+{
+  "scope": "Two explanation slides for implemented Lroom/Lpath, matching the user-provided factorized CTF estimator screenshot.",
+  "template": "/home/kslab/nitsu/.codex/attachments/23779c81-38c9-41df-ab62-20b4899dfc1a/progress_nitsu_20261016.pptx",
+  "slide_count": 2,
+  "editable_shapes": true,
+  "sources": [
+    {
+      "path": "egs2/whamr/rir_2spk/exp/room_path_contrastive_code_20261013/espnet2/rir/rec_rir/pooled_bimamba_room_path_contrastive.py",
+      "sha256": "c3b6fe75aa79b4459e21df9c704076a37e4b68afdca659077a130517238538db"
+    },
+    {
+      "path": "egs2/whamr/rir_2spk/exp/room_path_contrastive_code_20261013/espnet2/rir/rec_rir/pooled_bimamba_room_path.py",
+      "sha256": "452e123774dc83851f6ab2b10f38ef118adcaf6d79a4644783e19c27f908e7de"
+    },
+    {
+      "path": "egs2/whamr/rir_2spk/exp/room_path_contrastive_code_20261013/egs2/whamr/rir_2spk/local/prepare_room_path_contrastive_dump.py",
+      "sha256": "c57b244a67cb127b32ccd324d7505edff706d98a7d0dc7f2403b6559477e6ccd"
+    },
+    {
+      "path": "egs2/whamr/rir_2spk/exp/rir_train_pooled_bimamba_2spk_nf_16k_room_path_contrastive/config.yaml",
+      "sha256": "b820ddf47d8904d633ca012388f2d88dbb6972802dd7e30251ad8f0684c104c5"
+    }
+  ],
+  "linear_context": "https://linear.app/nitsu22/issue/DAI-68",
+  "definitions": {
+    "views": "Same fixed room/microphone/two-RIR condition with different speech and speaker identities.",
+    "room_positive": "Same item in opposite view",
+    "room_negatives": "Both views of other batch items",
+    "path_positive": "Same physical RIR in opposite view, after independent CTF PIT per view",
+    "path_negatives": "Other path within the same item, both views; no paths from other items",
+    "projection": "LN64, Linear64/64, SiLU, Linear64/32 per frequency; flatten ordered frequencies; L2 normalize",
+    "path_feature": "Before slot embedding addition",
+    "loss": "Symmetric InfoNCE, temperature 0.1",
+    "total": "mean(Sweep v2 PIT view A, view B) + 0.01 Lroom + 0.01 Lpath"
+  },
+  "limitations": [
+    "Room positives fix source positions too; position invariance is not imposed.",
+    "No claim of physically pure room/path disentanglement.",
+    "No new experimental scores are asserted; the screenshot results table is not reused as contrastive-learning results."
+  ],
+  "verification": {
+    "expected_pages": 2,
+    "source_code_reviewed": true,
+    "rendered_pdf_pages": 2,
+    "all_shapes_within_canvas": true,
+    "loss_definitions_and_coefficients_checked": true
+  }
+}
