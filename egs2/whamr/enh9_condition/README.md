@@ -96,6 +96,30 @@ bash run.sh --stage 8 --stop_stage 8 --ngpu 0
 valid.loss.best.pth を採用し、cv/tt の2話者無響音声に対する SI-SNR/SDR 等を
 既存 ESPnet の採点で評価する。元 DAI-8 のモデル・出力は変更しない。
 
+### 出力保存条件を揃えた再評価
+
+Stage 7はBaselineと同じ `--normalize_output_wav true` を必須にする。
+PCM16保存前に各話者の波形ピークを0.9へ揃え、クリッピングを防ぐ。
+学習済みモデルの重み・音声入力・教師・採点器を変更しない。
+
+既存出力を保持して再評価する場合は、次の2ジョブを投入する。
+前回の実測は推論約24分、CPU採点約15分。GPUは前回の最大キャッシュが
+約54 GBのため `gpu_1`、採点は前回と同じ8並列で `cpu_8` を使う。
+
+```bash
+qsub -g tga-shinoda -l gpu_1=1 -l h_rt=01:00:00 -N oracle_norm_infer \
+    qsub/reevaluate_normalized.sh infer
+qsub -g tga-shinoda -l cpu_8=1 -l h_rt=01:00:00 -hold_jid <infer_job_id> \
+    -N oracle_norm_score qsub/reevaluate_normalized.sh score
+```
+
+出力は元実験配下の `evaluation_normalized_20261016`。元のconfig、学習完了
+checkpoint、120 epochのbest重みを参照する。重みのSHA256を前回評価の
+記録と照合し、保存済みconfigと重みのSHA256を再評価前後で確認する。
+新しい `.pipeline` で採点するため、以前の
+score shardを再利用しない。先行失敗時は完了markerなしで採点を拒否する。
+旧 `RESULTS.md`、音声、ジョブ履歴は元の場所に保持する。
+
 ## Stage 8までの自動進行
 
 専用checkoutで次を1回投入する。初期制御ジョブが学習と終了待ちの

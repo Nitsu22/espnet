@@ -153,7 +153,7 @@ def control(previous_job=None):
 def run_stage(stage):
     subprocess.run(["bash", "run_oracle_ctf_concat.sh", "--stage", str(stage),
                     "--stop_stage", str(stage), "--ngpu", "1",
-                    "--python", sys.executable], check=True)
+                    "--python", sys.executable, "--enh_exp", str(EXP)], check=True)
 
 
 def train():
@@ -270,10 +270,16 @@ def score():
 
 
 def main():
+    global EXP, STATE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
+    parser.add_argument("--exp", type=Path, default=EXP)
     args = parser.parse_args()
+    if args.exp != EXP and args.phase not in ("infer", "score"):
+        parser.error("A separate --exp is supported for inference/scoring only")
+    EXP = args.exp
+    STATE = EXP / ".pipeline"
     report = verify_readiness()
     STATE.mkdir(parents=True, exist_ok=True)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()

@@ -96,7 +96,7 @@ class TestOraclePipeline(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     pipeline.training_state()
 
-    def test_readiness_accepts_automation_only_and_rejects_runtime_or_data_changes(self):
+    def test_readiness_accepts_output_normalization_and_rejects_runtime_or_data_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             recipe = root / "egs2/whamr/enh9_condition"
@@ -107,7 +107,14 @@ class TestOraclePipeline(unittest.TestCase):
             for path in (config, manifest, source, run):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("original")
-            run.write_text("training\n    if (( stage <= 8 && stop_stage >= 8 )); then\nold scoring\n")
+            inference = (
+                '        "${python}" -m espnet2.bin.enh_rir_ctf_inference \\\n'
+                '            --ngpu "${ngpu}" --fs 8000 --batch_size 1 \\\n'
+                '            --model_file "${enh_exp}/${inference_model}"\n'
+            )
+            prefix = "training\n" + inference
+            scoring = "    if (( stage <= 8 && stop_stage >= 8 )); then\n"
+            run.write_text(prefix + scoring + "old scoring\n")
             def git(*args):
                 return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
             git("init", "-q")
@@ -126,12 +133,25 @@ class TestOraclePipeline(unittest.TestCase):
             git("add", str(automation.relative_to(root)))
             git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "automation")
             self.assertEqual(verify_readiness(recipe), report)
-            run.write_text("training\n    if (( stage <= 8 && stop_stage >= 8 )); then\nnew scoring\n")
+            run.write_text(prefix + scoring + "new scoring\n")
             self.assertEqual(verify_readiness(recipe), report)
-            run.write_text("changed training\n    if (( stage <= 8 && stop_stage >= 8 )); then\nnew scoring\n")
-            with self.assertRaises(RuntimeError):
-                verify_readiness(recipe)
-            run.write_text("training\n    if (( stage <= 8 && stop_stage >= 8 )); then\nnew scoring\n")
+            normalized = prefix.replace(
+                "--batch_size 1", "--batch_size 1 --normalize_output_wav true")
+            run.write_text(normalized + scoring + "new scoring\n")
+            self.assertEqual(verify_readiness(recipe), report)
+            for changed in (
+                normalized.replace("training\n", "changed training\n"),
+                normalized.replace("--fs 8000", "--fs 16000"),
+                normalized.replace("--batch_size 1", "--batch_size 2"),
+                normalized.replace("--normalize_output_wav true", "--normalize_output_wav false"),
+                normalized.replace("--normalize_output_wav true", "--normalize_output_wav true --normalize_output_wav false"),
+                normalized.replace("${inference_model}", "other_model.pth"),
+                prefix.replace("training\n", "training --normalize_output_wav true\n"),
+            ):
+                with self.subTest(changed=changed), self.assertRaises(RuntimeError):
+                    run.write_text(changed + scoring + "new scoring\n")
+                    verify_readiness(recipe)
+            run.write_text(normalized + scoring + "new scoring\n")
             source.write_text("changed runtime")
             with self.assertRaises(RuntimeError):
                 verify_readiness(recipe)

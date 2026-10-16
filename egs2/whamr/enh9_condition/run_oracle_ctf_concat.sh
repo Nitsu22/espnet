@@ -70,7 +70,7 @@ for split in cv tt; do
     out=${enh_exp}/inference_${split}
     if (( stage <= 7 && stop_stage >= 7 )); then
         "${python}" -m espnet2.bin.enh_rir_ctf_inference \
-            --ngpu "${ngpu}" --fs 8000 --batch_size 1 \
+            --ngpu "${ngpu}" --fs 8000 --batch_size 1 --normalize_output_wav true \
             --train_config "${enh_exp}/config.yaml" --model_file "${enh_exp}/${inference_model}" \
             --data_path_and_name_and_type "${folder}/wav.scp,speech_mix,sound" \
             --data_path_and_name_and_type "${folder}/rir_ctf.scp,rir_ctf,npy" \
