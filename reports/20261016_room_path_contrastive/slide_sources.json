@@ -42,7 +42,15 @@
     "expected_pages": 2,
     "source_code_reviewed": true,
     "rendered_pdf_pages": 2,
+    "two_forward_passes_per_slide": true,
     "all_shapes_within_canvas": true,
-    "loss_definitions_and_coefficients_checked": true
+    "formula_and_hyperparameters_removed": true
+  },
+  "visual_revision": {
+    "description": "Minimal text, original factorized architecture drawn twice per slide for Data A and Data B, shared model weights. Dedicated Lroom and Lpath slides.",
+    "language": "Japanese explanations; original English module labels",
+    "loss_comparison": "Colored dashed lines connect corresponding embeddings across the two forward passes.",
+    "path_note": "Path 1 illustrated; Path 2 follows the same rule.",
+    "numerical_results": "None"
   }
 }
