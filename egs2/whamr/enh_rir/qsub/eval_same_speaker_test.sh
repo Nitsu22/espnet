@@ -45,7 +45,15 @@ source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 if [[ ${mode} == infer ]]; then
     module load cuda/11.8.0
-    [[ -n ${CUDA_VISIBLE_DEVICES:-} ]] || { echo 'Inference requires an allocated GPU' >&2; exit 2; }
+    # TSUBAME exposes allocated devices without necessarily setting
+    # CUDA_VISIBLE_DEVICES. Check actual CUDA availability; do not override
+    # the scheduler's device selection or assume a physical GPU index.
+    "${CONDA_PREFIX}/bin/python" -B - <<'PY'
+import torch
+if not torch.cuda.is_available():
+    raise RuntimeError("Inference requires a usable allocated CUDA device")
+print("Allocated CUDA:", torch.cuda.device_count(), torch.cuda.get_device_name(0))
+PY
 fi
 set -u
 shared=/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet
