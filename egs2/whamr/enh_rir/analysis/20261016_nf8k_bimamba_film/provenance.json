@@ -1,0 +1,91 @@
+{
+  "seed": 0,
+  "bootstrap_repetitions": 5000,
+  "n_mixtures": 3000,
+  "unit": "mixture, mean over two reference speakers",
+  "regression_r_squared": 0.02614185438066463,
+  "source_sha256": {
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/whamr_scripts/data/reverb_params_tt.csv": "b7003fe5de4de0b817af94a92f098092975c94e8c6cb058ecb9253f56164e2a9",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/exp/bimamba_nf8k_baseline_inputs/raw/tt_mix_clean_reverb_min_8k/spk1.scp": "b681bab5f24a870bee616bea423601287b8ffaa54b708534a0eb5c14ff90a495",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/exp/bimamba_nf8k_baseline_inputs/raw/tt_mix_clean_reverb_min_8k/spk2.scp": "9e60516748753d05effcfbb5d4e9ec77a66fafc8d6f52e5ffb55c3ea1e2f9a49",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SI_SNR_spk1": "ca5095ddf4ed6c92cbfdf4ac6958683a4e4f35b4246aa383e323826afa95ba16",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SI_SNR_spk2": "16c48621851a1772318f42193e7a19a9699b35438e407ed3b04faa34a846cb2e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SDR_spk1": "6ec9bda5f4bc4eccdc469383729cc99ce053dd14122eb390efe84fc440619fc4",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SDR_spk2": "74897f99745c3a7bc92392bee0571eab9a9c8b29b80a6dbb2217d00474733a93",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SAR_spk1": "1183c764a5574f8b26f06a714dedd43dbfe9cc7c150eb22d8b336d281994b01f",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SAR_spk2": "e96701d60ad218ea049a01dcadc75566eccc8de7d834a1824933fb7e89fb1c97",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SIR_spk1": "00d4b6a0a753c940ffcb8d1053dd296bfa049ab1b7f8395812f9bf232473322e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/SIR_spk2": "88b73f17e3e9b681b7c09d41683928ec315e23ce2ec4efa694209b327756a51e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/STOI_spk1": "5dee92b2f3a79ff28928c96857dc3fc30596fed11855d90b946d95420ded978a",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/baseline/STOI_spk2": "310c0f1a8d9ee74bd4728e4687d5e7770721717fda6f92c685cbdcf3d1c68cdd",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SI_SNR_spk1": "095d02c8cc52675a4ea915a532a1cdd154036544e902952839c5ae22577a625c",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SI_SNR_spk2": "7bbbe6000c375fecc7332258b1d7d7b840f3dc6dd0f9236b5f0b6522dab9f2d9",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SDR_spk1": "571dbb81e2bf2292befe6b7f68f3e0ee15d411ce1853ecffd6976e9417b05dba",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SDR_spk2": "a75c937fc58a23e1e57dd02ca66d7b9eef351d1d33400fa2c9b4e97486133edf",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SAR_spk1": "c9ed7a65c502ab08a33cf51027624fabdca416659b652408aa509a3bbcb4de7e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SAR_spk2": "20ee9a526c54b22520286bb27a6b46ce5ec00a6dd8af36a7924f61a1ebdd9cc6",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SIR_spk1": "0e2bbcb2ed5a9de04eaaf0fe98d59cd06ac5175524b431dba392d0dc67238873",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/SIR_spk2": "4cd0df730d2baa98cdb2a556fe79419168f0cc8ec3263810d1a120311c34e11e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/STOI_spk1": "9f6a4c21a3847c6f89d1d653c678b7a8de6cf576cc3b6bc0507a61f0dc141ae7",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261016_nf8k_bimamba_film/input/bimamba/STOI_spk2": "e517ec781707cdafc558ad82082e75ef1709962556ce6e57c26a9f4c0dc1dbb5"
+  },
+  "boundaries": {
+    "rt60_s": [
+      0.1,
+      0.3,
+      0.6,
+      1.0
+    ],
+    "volume_m3": [
+      0,
+      150,
+      225,
+      null
+    ],
+    "doa_separation_deg": [
+      0,
+      30,
+      60,
+      120,
+      180
+    ],
+    "mean_distance_m": [
+      0,
+      1,
+      1.5,
+      null
+    ],
+    "distance_gap_m": [
+      0,
+      0.25,
+      0.5,
+      null
+    ],
+    "source_separation_m": [
+      0,
+      1,
+      2,
+      null
+    ],
+    "power_imbalance_db": [
+      0,
+      2,
+      5,
+      null
+    ],
+    "duration_s": [
+      0,
+      3,
+      5,
+      null
+    ]
+  },
+  "caveats": [
+    "Single training seed; CIs resample test mixtures, not model seeds.",
+    "Nominal generation T60, not independently measured decay.",
+    "DOA is geometric horizontal source-angle gap at left mic; this is mono, not evidence of spatial cue use.",
+    "All subgroup/interaction analyses are exploratory; no causal claims or test-driven model selection.",
+    "Individual subgroup CIs are pointwise, not familywise simultaneous.",
+    "Power imbalance uses zero-mean original clean references, left channel, not nominal filename gains."
+  ]
+}

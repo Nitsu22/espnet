@@ -1,0 +1,13 @@
+{
+  "baseline_experiment": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh7_baseline/exp/enh_train_tflocoformer_s_nf_8k_1gpu_batch4",
+  "baseline_score_subdirectory": "enhanced_tt_mix_clean_reverb_min_8k/scoring",
+  "conditioned_experiment": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_conditioning/egs2/whamr/enh_rir/exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_film_all_seed0",
+  "conditioned_score_subdirectory": "inference_tt/score",
+  "dataset": "NF-WHAMR! 8 kHz min, left microphone, test 3000 mixtures",
+  "reference_channel": 0,
+  "conditioning": "frozen pretrained BiMamba estimated CTF, cross-attention plus FiLM at every block; not Oracle",
+  "analysis_script": "egs2/whamr/enh_rir/local/analyze_bimamba_condition_gains.py",
+  "analysis_date": "2026-10-16",
+  "output_metric": "ESPnet SI_SNR, mean removed scale-invariant SDR in dB",
+  "comparison": "paired per-mixture mean of two already reference-aligned speaker scores"
+}

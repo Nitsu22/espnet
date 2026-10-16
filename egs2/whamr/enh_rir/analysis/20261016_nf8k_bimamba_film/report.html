@@ -1,0 +1,42 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>NF-WHAMR条件別比較</title><style>body{font:16px/1.65 sans-serif;max-width:1120px;margin:36px auto;padding:0 20px;color:#172535}h1,h2{color:#12506a}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:8px;border-bottom:1px solid #d9e1e8;text-align:right}th:first-child,td:first-child{text-align:left}th{background:#edf4f7}img{width:100%}.note{background:#edf4f7;padding:16px}</style>
+<h1>Baseline S vs BiMamba推定CTF・FiLM+ALL S：条件別評価</h1>
+<p>NF-WHAMR!・8 kHz・1ch・test 3,000混合音／6,000音源。モデル・seedは各1条件。指標はESPnetのSI_SNR（平均除去SI-SDRと同じ定義）。値は高いほど良い。</p>
+<p class="note"><b>主な発見：</b>低残響ではSI-SNRが悪化する一方、中～高残響では改善する。部屋体積が小さい群で改善が比較的大きい。DOA差・距離差では明確な連続的傾向は得られなかった。単一seedの探索的解析であり、因果的な説明・推定器精度の証明ではない。</p>
+<h2>全体</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>All</td><td>3,000</td><td>18.250</td><td>18.510</td><td>+0.259</td><td>[+0.197, +0.321]</td><td>67.4%</td><td>+0.206</td></tr></table>
+<h2>条件による改善量</h2><img src="condition_gains.png" alt="条件別のpaired改善量と95%区間">
+<h2>Nominal RT60 [s]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0.1, 0.3)</td><td>420</td><td>19.966</td><td>19.580</td><td>-0.386</td><td>[-0.653, -0.150]</td><td>40.0%</td><td>-0.313</td></tr><tr><td>[0.3, 0.6)</td><td>1,423</td><td>18.972</td><td>19.237</td><td>+0.266</td><td>[+0.197, +0.343]</td><td>65.0%</td><td>+0.175</td></tr><tr><td>[0.6, 1]</td><td>1,157</td><td>16.740</td><td>17.226</td><td>+0.486</td><td>[+0.400, +0.584]</td><td>80.3%</td><td>+0.365</td></tr></table>
+<h2>Room volume [m³]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 150)</td><td>706</td><td>17.586</td><td>17.919</td><td>+0.333</td><td>[+0.245, +0.437]</td><td>74.6%</td><td>+0.288</td></tr><tr><td>[150, 225)</td><td>1,388</td><td>18.241</td><td>18.554</td><td>+0.314</td><td>[+0.205, +0.428]</td><td>67.0%</td><td>+0.250</td></tr><tr><td>[225, inf]</td><td>906</td><td>18.783</td><td>18.902</td><td>+0.119</td><td>[+0.038, +0.204]</td><td>62.4%</td><td>+0.116</td></tr></table>
+<h2>Horizontal source-angle gap [deg]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 30)</td><td>510</td><td>18.282</td><td>18.606</td><td>+0.324</td><td>[+0.147, +0.527]</td><td>67.1%</td><td>+0.229</td></tr><tr><td>[30, 60)</td><td>499</td><td>18.262</td><td>18.437</td><td>+0.175</td><td>[+0.057, +0.291]</td><td>65.7%</td><td>+0.182</td></tr><tr><td>[60, 120)</td><td>1,007</td><td>18.159</td><td>18.453</td><td>+0.294</td><td>[+0.191, +0.401]</td><td>69.1%</td><td>+0.221</td></tr><tr><td>[120, 180]</td><td>984</td><td>18.321</td><td>18.555</td><td>+0.234</td><td>[+0.127, +0.341]</td><td>66.7%</td><td>+0.204</td></tr></table>
+<h2>Mean source–left-mic distance [m]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 1)</td><td>262</td><td>19.101</td><td>19.259</td><td>+0.158</td><td>[-0.034, +0.356]</td><td>64.5%</td><td>+0.145</td></tr><tr><td>[1, 1.5)</td><td>1,712</td><td>18.400</td><td>18.682</td><td>+0.282</td><td>[+0.188, +0.376]</td><td>66.9%</td><td>+0.206</td></tr><tr><td>[1.5, inf]</td><td>1,026</td><td>17.784</td><td>18.032</td><td>+0.248</td><td>[+0.172, +0.320]</td><td>69.0%</td><td>+0.238</td></tr></table>
+<h2>Source-distance difference [m]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 0.25)</td><td>1,059</td><td>18.278</td><td>18.548</td><td>+0.270</td><td>[+0.173, +0.374]</td><td>68.8%</td><td>+0.222</td></tr><tr><td>[0.25, 0.5)</td><td>754</td><td>18.355</td><td>18.628</td><td>+0.274</td><td>[+0.160, +0.396]</td><td>65.3%</td><td>+0.199</td></tr><tr><td>[0.5, inf]</td><td>1,187</td><td>18.160</td><td>18.400</td><td>+0.241</td><td>[+0.138, +0.345]</td><td>67.5%</td><td>+0.201</td></tr></table>
+<h2>Distance between sources [m]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 1)</td><td>553</td><td>18.494</td><td>18.723</td><td>+0.229</td><td>[+0.066, +0.401]</td><td>63.7%</td><td>+0.182</td></tr><tr><td>[1, 2)</td><td>1,129</td><td>18.374</td><td>18.639</td><td>+0.265</td><td>[+0.179, +0.360]</td><td>68.8%</td><td>+0.202</td></tr><tr><td>[2, inf]</td><td>1,318</td><td>18.042</td><td>18.310</td><td>+0.268</td><td>[+0.172, +0.362]</td><td>67.8%</td><td>+0.222</td></tr></table>
+<h2>Clean-source power imbalance [dB]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 2)</td><td>1,195</td><td>18.313</td><td>18.543</td><td>+0.230</td><td>[+0.129, +0.334]</td><td>67.9%</td><td>+0.191</td></tr><tr><td>[2, 5)</td><td>1,459</td><td>18.251</td><td>18.510</td><td>+0.260</td><td>[+0.174, +0.350]</td><td>67.4%</td><td>+0.213</td></tr><tr><td>[5, inf]</td><td>346</td><td>18.033</td><td>18.393</td><td>+0.360</td><td>[+0.204, +0.551]</td><td>65.6%</td><td>+0.256</td></tr></table>
+<h2>Mixture duration [s]</h2>
+<table><tr><th>区間</th><th>混合音数</th><th>Baseline</th><th>BiMamba</th><th>差 [dB]</th><th>差の95% CI</th><th>改善率</th><th>上下1%除外の差</th></tr><tr><td>[0, 3)</td><td>120</td><td>17.588</td><td>17.567</td><td>-0.021</td><td>[-0.333, +0.239]</td><td>45.8%</td><td>+0.025</td></tr><tr><td>[3, 5)</td><td>928</td><td>18.077</td><td>18.327</td><td>+0.250</td><td>[+0.174, +0.336]</td><td>64.8%</td><td>+0.183</td></tr><tr><td>[5, inf]</td><td>1,952</td><td>18.374</td><td>18.655</td><td>+0.281</td><td>[+0.200, +0.369]</td><td>70.0%</td><td>+0.232</td></tr></table>
+<h2>RT60と部屋体積を同時に分けた確認</h2><img src="rt60_volume_gains.png" alt="RT60と部屋体積の交差集計">
+<p>高RT60群と低RT60群の改善量の差：+0.872 dB、95% CI [+0.604, +1.154]。各RT60群で上下1%の極端値を除いても、低残響で悪化・高残響で改善という符号は維持された。</p>
+<h2>他条件を同時に考慮した探索的回帰</h2><p>目的変数は各混合音のSI-SNR差。RT60、log部屋体積、DOA差、平均距離、距離差、実測クリーン音量差、長さを標準化して同時投入。HC3頑健標準誤差、係数単位は1標準偏差当たりdB。7項目内のp値をBH補正。R²=0.026であり、個別utteranceの差の大部分はこのメタデータだけでは説明できない。</p>
+<table><tr><th>条件</th><th>係数</th><th>95% CI</th><th>BH q</th></tr>
+<tr><td>rt60_s</td><td>+0.255</td><td>[+0.178, +0.332]</td><td>7.21e-10</td></tr>
+<tr><td>log_volume</td><td>-0.094</td><td>[-0.146, -0.041]</td><td>0.00158</td></tr>
+<tr><td>doa_separation_deg</td><td>-0.015</td><td>[-0.080, +0.050]</td><td>0.657</td></tr>
+<tr><td>mean_distance_m</td><td>+0.014</td><td>[-0.042, +0.071]</td><td>0.657</td></tr>
+<tr><td>distance_gap_m</td><td>-0.035</td><td>[-0.107, +0.037]</td><td>0.547</td></tr>
+<tr><td>power_imbalance_db</td><td>+0.026</td><td>[-0.034, +0.087]</td><td>0.547</td></tr>
+<tr><td>duration_s</td><td>+0.065</td><td>[+0.005, +0.124]</td><td>0.077</td></tr>
+</table><h2>定義・限界</h2><ul>
+<li>RT60はCSVの生成指定T60。実測された各音源RIRのRT60ではない。</li>
+<li>部屋体積はroom_x×room_y×room_z。距離は左micから音源への3次元距離。DOA差は左mic基準の水平音源角度差（0–180°）。monoモデルのため、角度別結果は空間配列手掛かり利用の証拠ではない。</li>
+<li>2話者を各utterance内で平均してモデル差を計算。5,000回、seed0のpaired mixture bootstrap。区間は各群のpointwise 95%で、多重比較全体の同時区間ではない。学習seed間の不確実性は含まない。</li>
+<li>区間は左閉右開、最終区間のみ右閉。thresholdは物理量の区切りであり、test性能を最大化する探索はしていない。全8条件を省略せず報告。</li>
+<li>参照話者に整列済みの保存スコアを使用。キー集合・重複・有限値・メタデータ一意対応を全件検証。元の片側mic・clean参照から音量差と長さを算出。</li>
+<li>RT60・体積を同時に考慮しても傾向は残るが、CTF推定誤差・反射構造が原因かは未検証。次の確認は別seedとOracle/Random条件、同一音声でRT60のみ変える制御実験。</li>
+</ul><p><a href="condition_summary.csv">全条件集計CSV</a> / <a href="paired_utterances.csv">utterance別CSV</a> / <a href="adjusted_regression.csv">回帰CSV</a> / <a href="provenance.json">出所と検証情報</a></p></html>
