@@ -122,6 +122,36 @@ score shardを再利用しない。先行失敗時は完了markerなしで採点
 
 ## Stage 8までの自動進行
 
+### Oracle CTF Cross-Attention＋全層FiLMとの比較
+
+`--variant film` は、同じOracle dump、音声・教師、batch4、valid batch1、
+FP32、seed0、4秒crop、optimizer/schedulerで条件付けだけを変更する。
+CTFの2話者の実部・虚部を既存の3×3 Conv＋gLNへ渡し、各周波数で
+音声をQuery、CTFをKey/Valueとして各ブロック直前に参照する。
+FiLMはγ=1・β=0で初期化し、ESPnetの全体初期化後にも恒等性を復元する。
+CTF順序のランダム交換と可変長入力の処理は時間連結版と共通。
+追加パラメータは227,232個。CTFを音声列へ追加しないため、Decoderは
+元の音声フレーム数を受け取る。追加のtap位置符号は導入しない。
+
+専用checkoutで元の完成dumpを読み取り用symlinkとして共有する。
+時間連結版のcheckpointや出力は共有・上書きせず、FiLM版は新規学習する。
+GPU検証は実batch4の2更新、CTF encoderへの勾配、最長validationと
+checkpoint推論を確認する。probeの重みを本学習に流用しない。
+
+```bash
+qsub -g tga-shinoda qsub/check_oracle_ctf_film_gpu.sh
+```
+
+検証成功時だけ学習を投入し、24時間枠終了後のcheckpoint継続、学習終了、
+正規化ありのStage 7、Stage 8まで自動進行する。出力は
+`exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_film_seed0`。
+CUDA検証の記録・pipelineのpin・job journalはFiLM版専用に保存する。
+検証はgpu_1×1・20分・priority−5、上限0.0533ポイント。
+本学習と後続の資源・上限は以下の時間連結版と同じで、区間ごとの実投入を
+FiLM実験の `.pipeline/jobs.json` に記録する。確定課金ではない。
+
+### 時間連結版
+
 専用checkoutで次を1回投入する。初期制御ジョブが学習と終了待ちの
 制御ジョブを登録する。学習完了後に推論、推論全8,000件の完了確認後に
 8並列のCPU採点へ進み、`RESULTS.md` と `.pipeline/score.done.json` を作る。

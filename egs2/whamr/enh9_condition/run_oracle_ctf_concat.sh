@@ -6,8 +6,9 @@ stop_stage=6
 ngpu=1
 python=python3
 dumpdir=dump_oracle_ctf_nf8k
-enh_config=conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_concat.yaml
-enh_exp=exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_concat_seed0
+variant=concat
+enh_config=
+enh_exp=
 resume=false
 inference_model=valid.loss.best.pth
 baseline_recipe=../enh7_baseline
@@ -19,6 +20,9 @@ workers=4
 . ./path.sh
 . ./cmd.sh
 . utils/parse_options.sh
+case ${variant} in concat|film) ;; *) echo 'Unknown Oracle variant' >&2; exit 2 ;; esac
+enh_config=${enh_config:-conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_${variant}.yaml}
+enh_exp=${enh_exp:-exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_${variant}_seed0}
 export PYTHONPATH="${PWD}/../../..${PYTHONPATH:+:${PYTHONPATH}}"
 [[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
 if (( stage < 1 || stage > stop_stage || stop_stage > 8 || ngpu < 0 )); then

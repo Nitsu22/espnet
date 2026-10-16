@@ -12,6 +12,7 @@ CRITICAL_PATHS = [
         "run.sh", "path.sh", "cmd.sh",
         "local/prepare_oracle_ctf_dump.py", "local/check_oracle_ctf_inputs.py",
         "local/check_oracle_ctf_training.py",
+        "qsub/oracle_environment.sh", "qsub/train_oracle_ctf_concat_1gpu.sh",
     )],
 ]
 
@@ -24,14 +25,17 @@ def digest(path):
     return h.hexdigest()
 
 
-def verify_readiness(root=Path(".")):
+def verify_readiness(root=Path("."), variant="concat"):
+    if variant not in ("concat", "film"):
+        raise ValueError("Unknown Oracle variant")
     root = Path(root).resolve()
-    report = json.loads((root / "exp/oracle_ctf_cuda_check.json").read_text())
+    marker = "oracle_ctf_cuda_check.json" if variant == "concat" else "oracle_ctf_film_cuda_check.json"
+    report = json.loads((root / "exp" / marker).read_text())
     if (report["status"] != "passed" or report["device"] != "cuda"
             or report["counts"] != {"tr": 20000, "cv": 5000, "tt": 3000}):
         raise RuntimeError("Complete native CUDA validation is required")
     for key, path in (
-        ("config_sha256", "conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_concat.yaml"),
+        ("config_sha256", f"conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_{variant}.yaml"),
         ("manifest_sha256", "dump_oracle_ctf_nf8k/preparation.json"),
     ):
         if report[key] != digest(root / path):
@@ -73,6 +77,8 @@ def verify_readiness(root=Path(".")):
 
 
 if __name__ == "__main__":
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    p = verify_readiness()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    args = parser.parse_args()
+    p = verify_readiness(variant=args.variant)
     print("Verified unchanged CUDA-tested runtime, configuration and dump: " + p["commit"])

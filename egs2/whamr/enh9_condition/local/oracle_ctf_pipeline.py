@@ -16,6 +16,7 @@ from check_oracle_ctf_readiness import digest, verify_readiness
 
 EXP = Path("exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_concat_seed0")
 STATE = EXP / ".pipeline"
+VARIANT = "concat"
 RESOURCES = {
     "control": ("cpu_4", "00:10:00", 0.015),
     "train": ("gpu_1", "24:00:00", 0.2),
@@ -103,6 +104,7 @@ def submit(phase, dependency=None, previous=None):
     if dependency:
         args += ["-hold_jid", str(dependency)]
     args += ["qsub/oracle_ctf_pipeline.sh", "--phase", phase]
+    args += ["--variant", VARIANT]
     if previous:
         args += ["--previous-job", str(previous)]
     reply = subprocess.check_output(args, text=True).strip()
@@ -153,7 +155,8 @@ def control(previous_job=None):
 def run_stage(stage):
     subprocess.run(["bash", "run_oracle_ctf_concat.sh", "--stage", str(stage),
                     "--stop_stage", str(stage), "--ngpu", "1",
-                    "--python", sys.executable, "--enh_exp", str(EXP)], check=True)
+                    "--python", sys.executable, "--enh_exp", str(EXP),
+                    "--variant", VARIANT], check=True)
 
 
 def train():
@@ -163,7 +166,8 @@ def train():
         if log.exists():
             shutil.copy2(log, STATE / ("train_before_" + os.environ["JOB_ID"] + ".log"))
         subprocess.run(["bash", "qsub/train_oracle_ctf_concat_1gpu.sh",
-                        "true" if (EXP / "checkpoint.pth").exists() else "false"], check=True)
+                        "true" if (EXP / "checkpoint.pth").exists() else "false",
+                        VARIANT], check=True)
         epoch, finished = training_state()
     if not finished:
         raise RuntimeError("Training exited without reaching completion criterion")
@@ -270,17 +274,20 @@ def score():
 
 
 def main():
-    global EXP, STATE
+    global EXP, STATE, VARIANT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
-    parser.add_argument("--exp", type=Path, default=EXP)
+    parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    parser.add_argument("--exp", type=Path)
     args = parser.parse_args()
-    if args.exp != EXP and args.phase not in ("infer", "score"):
+    VARIANT = args.variant
+    default_exp = Path(f"exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_{VARIANT}_seed0")
+    if args.exp is not None and args.exp != default_exp and args.phase not in ("infer", "score"):
         parser.error("A separate --exp is supported for inference/scoring only")
-    EXP = args.exp
+    EXP = args.exp or default_exp
     STATE = EXP / ".pipeline"
-    report = verify_readiness()
+    report = verify_readiness(variant=VARIANT)
     STATE.mkdir(parents=True, exist_ok=True)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     pin = STATE / "run.json"

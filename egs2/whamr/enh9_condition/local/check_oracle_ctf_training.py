@@ -40,8 +40,9 @@ def main():
         ['--config', str(args.config), '--output_dir', str(args.output.parent)]
     )
     model = EnhancementRIRCTFTask.build_model(config).to(args.device)
-    if config.separator != 'tflocoformer_nocashe_ctf_concat':
-        raise ValueError('Expected the Oracle temporal-concat separator')
+    is_film = config.separator == 'tflocoformer_nocashe_ctf_film_all'
+    if not is_film and config.separator != 'tflocoformer_nocashe_ctf_concat':
+        raise ValueError('Expected an Oracle CTF separator')
     if config.separator_conf['ctf_taps'] != 60:
         raise ValueError('Oracle dump requires the native 60-tap grid')
     if config.encoder_conf != {'n_fft': 256, 'hop_length': 64}:
@@ -85,20 +86,25 @@ def main():
         torch.cuda.reset_peak_memory_stats()
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), **config.optim_conf)
-    loss, _, _ = model(**batch)
-    if not torch.isfinite(loss):
-        raise ValueError('Nonfinite training loss')
-    loss.backward()
-    for name, parameter in model.named_parameters():
-        if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
-            raise ValueError('Nonfinite gradient: ' + name)
-    prompt_grad = model.separator.ctf_projection.weight.grad
-    if prompt_grad is None or not prompt_grad.abs().sum().item():
-        raise ValueError('No gradient reaches the CTF projection')
-    torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
-    optimizer.step()
-    optimizer.zero_grad(set_to_none=True)
-    training_loss = float(loss.detach())
+    # Identity FiLM initially blocks gradients into its context encoder.
+    # A second update must propagate gradients through the learned FiLM path.
+    for update in range(2 if is_film else 1):
+        loss, _, _ = model(**batch)
+        if not torch.isfinite(loss):
+            raise ValueError('Nonfinite training loss')
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                raise ValueError('Nonfinite gradient: ' + name)
+        projection = model.separator.ctf_projection
+        prompt_grad = (projection[0] if is_film else projection).weight.grad
+        if update == (1 if is_film else 0):
+            if prompt_grad is None or not prompt_grad.abs().sum().item():
+                raise ValueError('No gradient reaches the CTF projection')
+        torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        training_loss = float(loss.detach())
     del batch, examples, loss, optimizer
     validation = maps('cv')
     longest = max(
@@ -125,7 +131,7 @@ def main():
         torch.save(model.state_dict(), checkpoint)
         inference = SeparateSpeech(
             train_config=str(args.config), model_file=str(checkpoint),
-            device=args.device, dtype='float32', normalize_output_wav=False,
+            device=args.device, dtype='float32', normalize_output_wav=True,
         )
         # Avoid retaining two copies of model parameters while measuring memory.
         del model
@@ -133,6 +139,7 @@ def main():
         if len(waves) != 2 or any(w.shape != (1, 8000) or not np.isfinite(w).all() for w in waves):
             raise ValueError('Checkpoint inference output is invalid')
     report = dict(status='passed', device=args.device, counts=manifest['counts'],
+                  separator=config.separator,
                   config=str(args.config.resolve()), parameters=sum(p.numel() for p in inference.enh_model.parameters()),
                   config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
                   manifest_sha256=hashlib.sha256((args.dump / 'preparation.json').read_bytes()).hexdigest(),
