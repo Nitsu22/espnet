@@ -28,7 +28,7 @@ DAMSEPの波形相関は0.9554だが、LS参照に対するRT60の過大推定�
 - 参照と予測のpeak alignment、独立peak normalization、RMSEでPIT。極性反転は許可しない。
 - 両者とも同じformatted PCM16 NF混合音声を使用した。BiMambaの通常のFLOAT dumpとの差を全件検証し、PCM16の飽和と1 LSB以下の量子化差で説明できることを確認。
 - 飽和を含む混合は134件、飽和サンプルは両ch合計1,247。クリップ後の最大差は3.051735e-5。入力の発話対応とファイルSHA256はinput_correspondence.jsonに保存。
-- モデル選択条件は異なる。DAMSEPはclean音声のvalidation lossで選択されたbest29、BiMambaはCTF/sweep validation lossのbest45。アーキテクチャ単独の優劣を結論づける比較ではない。
+- モデル選択条件は異なる。DAMSEPはclean SI-SDR項＋0.1×残響RI+Mag＋0.5×CTF再構成RI+Magのvalidation合計で選択されたbest29、BiMambaはCTF/sweep validation lossのbest45。アーキテクチャ単独の優劣を結論づける比較ではない。
 
 ## CTFの扱い
 
