@@ -156,6 +156,7 @@ class RIRTask(AbsTask):
                 "rec_rir",
                 "rec_rir_sweep",
                 "rec_rir_sweep_v2",
+                "rec_rir_sweep_v2_pit",
                 "rec_rir_lag_narrow",
                 "rec_rir_pit",
                 "tflocoformer_ctf_pit",
@@ -294,6 +295,13 @@ class RIRTask(AbsTask):
                            if args.rir_model_type == "tflocoformer_sweep_v2_pit"
                            else ESPnetRecRIRTFLocoformerPITModel)
             model = model_class(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_sweep_v2_pit":
+            from espnet2.rir.rec_rir.rec_rir_sweep_v2_pit import ESPnetRecRIRSweepV2PITModel
+
+            model = ESPnetRecRIRSweepV2PITModel(**args.model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model
