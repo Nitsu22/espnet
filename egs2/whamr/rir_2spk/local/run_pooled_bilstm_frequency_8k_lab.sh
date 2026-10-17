@@ -6,7 +6,8 @@ variant=$1
 gpu_index=$2
 result_recipe=$(realpath "$3")
 case "$variant" in
-    bilstm_post_bilstm) ;;
+    bilstm_post_bilstm) run_group=bilstm_frequency_training_20261016_8k ;;
+    bilstm_post_bilstm_pre8_post4) run_group=bilstm_frequency_training_20261017_8k ;;
     *) exit 2 ;;
 esac
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
@@ -16,7 +17,7 @@ code_root=$(git rev-parse --show-toplevel)
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
 prefix=train_pooled_bimamba_2spk_nf_8k_sweep_v2
 config="conf/tuning/${prefix}_${variant}.yaml"
-run_dir="$result_recipe/exp/bilstm_frequency_training_20261016_8k/$variant"
+run_dir="$result_recipe/exp/$run_group/$variant"
 stats_dir="$result_recipe/exp/rir_stats_${prefix}_${variant}"
 model_dir="$result_recipe/exp/rir_${prefix}_${variant}"
 [[ -x "$python" && -f "$config" ]] || exit 1
