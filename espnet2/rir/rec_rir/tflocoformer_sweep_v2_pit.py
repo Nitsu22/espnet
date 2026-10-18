@@ -11,13 +11,18 @@ from espnet2.torch_utils.device_funcs import force_gatherable
 
 class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
     def __init__(self, drr_loss_weight=0.0, drr_direct_window_ms=2.5,
-                 drr_huber_beta=1.0, drr_energy_floor=1e-8, **kwargs):
+                 drr_huber_beta=1.0, drr_energy_floor=1e-8,
+                 time_sweep_loss_weight=0.0, time_sweep_loss_eps=1e-8,
+                 **kwargs):
         settings = (drr_loss_weight, drr_direct_window_ms,
                     drr_huber_beta, drr_energy_floor)
         if (not all(math.isfinite(value) for value in settings)
                 or drr_loss_weight < 0 or drr_direct_window_ms < 0
                 or drr_huber_beta <= 0 or not 0 < drr_energy_floor < 1):
             raise ValueError('Invalid DRR loss weight, window, Huber beta or energy floor')
+        if (not math.isfinite(time_sweep_loss_weight) or time_sweep_loss_weight < 0
+                or not math.isfinite(time_sweep_loss_eps) or time_sweep_loss_eps <= 0):
+            raise ValueError('Invalid time-sweep loss weight or epsilon')
         super().__init__(**kwargs)
         if self.rt60_auxiliary or self.reconstruction_signal != 'speech':
             raise ValueError('Use the basic CTF predictor; sweep v2 supplies its own loss')
@@ -26,6 +31,8 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
         self.drr_direct_window_ms = float(drr_direct_window_ms)
         self.drr_huber_beta = float(drr_huber_beta)
         self.drr_energy_floor = float(drr_energy_floor)
+        self.time_sweep_loss_weight = float(time_sweep_loss_weight)
+        self.time_sweep_loss_eps = float(time_sweep_loss_eps)
         if self.drr_loss_weight:
             inverse = self.pim.invfilter.clone()
             gain = torch.dot(self.sweep.double(), inverse.flip(0).double())
@@ -36,6 +43,22 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
 
     response_spectrum = ESPnetRecRIRSweepV2Model.response_spectrum
     response_to_rir = ESPnetRecRIRSweepV2Model.response_to_rir
+
+    def time_sweep_l1(self, output, target):
+        """Per-utterance relative waveform L1, before inverse filtering.
+
+        Both spectra retain their complete response and are synthesized over
+        the same frame extent. Only the teacher sets the amplitude scale;
+        predicted gain, delay and polarity errors remain in the objective.
+        """
+        frames = max(output.shape[-1], target.shape[-1])
+        output = F.pad(output, (0, frames - output.shape[-1]))
+        target = F.pad(target, (0, frames - target.shape[-1]))
+        predicted_waveform = self.transforms.istft(output, 'complex')
+        target_waveform = self.transforms.istft(target, 'complex')
+        error = (predicted_waveform - target_waveform).abs().flatten(1).sum(-1)
+        scale = target_waveform.abs().flatten(1).sum(-1)
+        return error / scale.clamp_min(self.time_sweep_loss_eps)
 
     def drr_db(self, rir, centers):
         """Differentiable stabilized DRR with teacher-defined, fixed windows.
@@ -83,9 +106,9 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
                 target_drr = self.drr_db(
                     recovered_target.reshape(batch * speakers, -1),
                     centers.reshape(-1)).reshape(batch, speakers)
-        costs, drr_costs, drr_errors = [], [], []
+        costs, time_costs, drr_costs, drr_errors = [], [], [], []
         for pred in range(speakers):
-            row, drr_row, error_row = [], [], []
+            row, time_row, drr_row, error_row = [], [], [], []
             for ref in range(speakers):
                 # BOTH the excitation and response belong to the reference
                 # speaker; permuting only target responses is incorrect.
@@ -95,6 +118,8 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
                     F.pad(output, (0, frames-output.shape[-1])),
                     F.pad(target[:, ref], (0, frames-target.shape[-1])),
                     reduction='none'))
+                if self.time_sweep_loss_weight:
+                    time_row.append(self.time_sweep_l1(output, target[:, ref]))
                 if self.drr_loss_weight:
                     # Restore the clean-to-reverb basis from the predicted
                     # DIRECT-sweep response, using the ORIGINAL sweep inverse.
@@ -105,6 +130,7 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
                         beta=self.drr_huber_beta))
                     error_row.append((predicted_drr - target_drr[:, ref]).abs())
             costs.append(row)
+            time_costs.append(time_row)
             drr_costs.append(drr_row)
             drr_errors.append(error_row)
         def permute_costs(values):
@@ -112,13 +138,21 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
                                 for perm in self.permutations])
         sweep_totals = permute_costs(costs)
         totals = sweep_totals
+        if self.time_sweep_loss_weight:
+            time_totals = permute_costs(time_costs)
+            totals = totals + self.time_sweep_loss_weight * time_totals
         if self.drr_loss_weight:
             drr_totals = permute_costs(drr_costs)
-            totals = sweep_totals + self.drr_loss_weight * drr_totals
+            totals = totals + self.drr_loss_weight * drr_totals
         best = totals.argmin(0)
         def select(values):
             return values.gather(0, best[None]).mean()
         stats = dict(loss_sweep=select(sweep_totals).detach())
+        if self.time_sweep_loss_weight:
+            stats['loss_time_sweep_l1'] = select(time_totals).detach()
+            # The original baseline selects PIT using only spectral loss.
+            # Keep that independent validation metric for checkpoint selection.
+            stats['loss_sweep_min'] = sweep_totals.min(0).values.mean().detach()
         if self.drr_loss_weight:
             stats.update(loss_drr=select(drr_totals).detach(),
                          drr_mae_db=select(permute_costs(drr_errors)).detach())
