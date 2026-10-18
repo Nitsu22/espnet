@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
 # Ordinary-sweep inference and immutable LS-reference scoring; no retraining.
 set -euo pipefail
-[[ $# == 2 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [VARIANT]' >&2; exit 2; }
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
 result_recipe=$(realpath "$2")
+variant=${3:-bilstm_post_bilstm}
+case "$variant" in
+    bilstm_post_bilstm)
+        training_group=bilstm_frequency_training_20261016_8k
+        evaluation_group=bilstm_frequency_ls8k_20261017
+        prediction_label=BiLSTM_time_light_post_BiLSTM_8k
+        pre_layers=4; post_layers=2 ;;
+    bilstm_post_bilstm_pre8_post4)
+        training_group=bilstm_frequency_training_20261017_8k
+        evaluation_group=bilstm_frequency_ls8k_20261018
+        prediction_label=BiLSTM_time_light_post_BiLSTM_pre8_post4_8k
+        pre_layers=8; post_layers=4 ;;
+    *) echo 'Unsupported BiLSTM variant' >&2; exit 2 ;;
+esac
 recipe=$(cd "$(dirname "$0")/.." && pwd)
 code_root=$(git -C "$recipe" rev-parse --show-toplevel)
 cd "$code_root"
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
 ls_code="$result_recipe/exp/frequency_ls_eval_code_20261014"
-model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_bilstm_post_bilstm"
+model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_${variant}"
+training="$result_recipe/exp/$training_group/$variant"
 data="$result_recipe/dump_nf_2spk_8k_min/raw/tt_rir_2spk_nf_min_8k"
 reference="$result_recipe/dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_8k"
-output="$result_recipe/exp/bilstm_frequency_ls8k_20261017/bilstm_post_bilstm"
+output="$result_recipe/exp/$evaluation_group/$variant"
 [[ ! -e "$output" && -f "$ls_code/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" ]] || exit 1
 mkdir -p "$output/.tmp"
 export CUDA_VISIBLE_DEVICES="$gpu_index" TZ=Asia/Tokyo
@@ -32,13 +47,14 @@ finish() {
     exit "$status"
 }
 trap finish EXIT
-"$python" -B - "$gpu_index" "$output" "$model" "$data" "$reference" <<'PY'
+"$python" -B - "$gpu_index" "$output" "$model" "$data" "$reference" "$training" "$pre_layers" "$post_layers" <<'PY'
 import csv, datetime, hashlib, io, json, shutil, socket, subprocess, sys
 from pathlib import Path
 import yaml
 
 gpu = int(sys.argv[1])
-output, model, data, reference = map(Path, sys.argv[2:])
+output, model, data, reference, training = map(Path, sys.argv[2:7])
+pre_layers, post_layers = map(int, sys.argv[7:9])
 digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 rows = list(csv.reader(io.StringIO(subprocess.check_output([
     'nvidia-smi', '--query-gpu=index,uuid,name,memory.used',
@@ -53,12 +69,13 @@ config = yaml.safe_load((model / 'config.yaml').read_text())
 assert config['sample_rate'] == config['model_conf']['sr'] == 8000
 assert config['model_conf']['predictor_conf']['time_module'] == 'bilstm'
 assert config['model_conf']['predictor_conf']['post_frequency_module'] == 'bilstm'
+assert config['model_conf']['predictor_conf']['pre_layers'] == pre_layers
+assert config['model_conf']['predictor_conf']['post_layers'] == post_layers
 preparation = json.loads((reference / 'preparation.json').read_text())
 assert preparation['full_dataset'] and preparation['count'] == 3000
 assert preparation['config']['sample_rate'] == 8000
 assert preparation['config']['rir_length'] == 16000
 assert digest(data / 'wav.scp') == preparation['source_index_sha256']['wav.scp']
-training = model.parent / 'bilstm_frequency_training_20261016_8k/bilstm_post_bilstm'
 assert (training / 'exit_status').read_text().strip() == '0'
 assert digest(model / 'valid.loss.best.pth') == json.loads(
     (training / 'training_complete.json').read_text())['checkpoint_sha256']
@@ -91,7 +108,7 @@ phase=ls_scoring
 PYTHONPATH="$ls_code" "$python" -B \
     "$ls_code/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" \
     --reference_dir "$reference" \
-    --prediction BiLSTM_time_light_post_BiLSTM_8k "$output/prediction/inference/rir.scp" \
+    --prediction "$prediction_label" "$output/prediction/inference/rir.scp" \
     --out_dir "$output/ls" --no_comparison_csv
 "$python" -B - "$output" <<'PY'
 import datetime, hashlib, json, sys
