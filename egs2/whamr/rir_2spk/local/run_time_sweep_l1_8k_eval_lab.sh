@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # One ordinary-PIM inference pass, scored against physical WHAMR and LS RIRs.
 set -euo pipefail
-[[ $# == 2 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [time_l1|baseline]' >&2; exit 2; }
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
+variant=${3:-time_l1}
+case "$variant" in time_l1|baseline) ;; *) echo 'Unsupported variant' >&2; exit 2 ;; esac
 result_recipe=$(realpath "$2")
 case "$result_recipe" in
     /net/midgar/work2/nitsu/*|/gs/bs/tga-shinoda/nitsu/*) ;;
@@ -18,11 +20,17 @@ scoring_root="$result_recipe/exp/frequency_ls_eval_code_20261014"
 expected_scorer=4e8a0f5b9b0bc5d73e3e5ace5b42d4b29b300f72
 [[ "$(git -C "$scoring_root" rev-parse HEAD)" == "$expected_scorer" ]] || exit 1
 [[ -z "$(git -C "$scoring_root" status --porcelain)" ]] || exit 1
-model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_time_l1"
-training="$result_recipe/exp/time_sweep_l1_training_20261019"
+if [[ "$variant" == baseline ]]; then
+    model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2"
+    training="$result_recipe/exp/pooled_bimamba_8k_launch_20261009"
+    output="$result_recipe/exp/time_sweep_l1_baseline_eval8k_20261019"
+else
+    model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_time_l1"
+    training="$result_recipe/exp/time_sweep_l1_training_20261019"
+    output="$result_recipe/exp/time_sweep_l1_eval8k_20261019"
+fi
 data="$result_recipe/dump_nf_2spk_8k_min/raw/tt_rir_2spk_nf_min_8k"
 reference="$result_recipe/dump_ls_direct_reverb/raw/tt_rir_2spk_nf_min_8k"
-output="$result_recipe/exp/time_sweep_l1_eval8k_20261019"
 [[ ! -e "$output" && ! -L "$output" ]] || { echo "Existing output: $output" >&2; exit 1; }
 mkdir "$output"
 phase=initialization
@@ -47,7 +55,7 @@ export TORCH_EXTENSIONS_DIR="$output/.tmp/torch_extensions"
 export CUDA_CACHE_PATH="$output/.tmp/cuda" TORCH_HOME="$output/.tmp/torch"
 export MPLCONFIGDIR="$output/.tmp/matplotlib"
 phase=validation
-"$python" -B - "$gpu_index" "$output" "$model" "$training" "$data" "$reference" "$scoring_root" <<'PY'
+"$python" -B - "$gpu_index" "$output" "$model" "$training" "$data" "$reference" "$scoring_root" "$variant" <<'PY'
 import csv
 import datetime
 import hashlib
@@ -65,7 +73,8 @@ import yaml
 from espnet2.rir.rec_rir.pim import RecRIRPIM
 
 gpu = int(sys.argv[1])
-output, model, training, data, reference, scoring_root = map(Path, sys.argv[2:])
+output, model, training, data, reference, scoring_root = map(Path, sys.argv[2:8])
+variant = sys.argv[8]
 digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
 rows = list(csv.reader(io.StringIO(subprocess.check_output([
     'nvidia-smi', '--query-gpu=index,uuid,name,memory.used',
@@ -77,15 +86,20 @@ apps = list(csv.reader(io.StringIO(subprocess.check_output([
 if int(selected[3]) >= 200 or any(row and row[0].strip() == selected[1] for row in apps):
     raise RuntimeError('Selected GPU is occupied')
 assert (training / 'exit_status').read_text().strip() == '0'
-assert (training / 'final_phase').read_text().strip() == 'complete'
-completed = json.loads((training / 'training_complete.json').read_text())
-checkpoint = model / 'valid.loss_sweep_min.best.pth'
-assert checkpoint.resolve() == Path(completed['checkpoint']).resolve()
+if variant == 'baseline':
+    completed = json.loads((model.parent / 'damsep_bimamba_ls8k_20261015/bimamba/metadata.json').read_text())
+    assert Path(completed['experiment']).resolve() == model.resolve()
+    checkpoint = model / 'valid.loss.best.pth'
+else:
+    assert (training / 'final_phase').read_text().strip() == 'complete'
+    completed = json.loads((training / 'training_complete.json').read_text())
+    checkpoint = model / 'valid.loss_sweep_min.best.pth'
+    assert checkpoint.resolve() == Path(completed['checkpoint']).resolve()
 assert digest(checkpoint) == completed['checkpoint_sha256']
 assert digest(model / 'config.yaml') == completed['config_sha256']
 config = yaml.safe_load((model / 'config.yaml').read_text())
 assert config['sample_rate'] == config['model_conf']['sr'] == 8000
-assert config['model_conf']['time_sweep_loss_weight'] == 1.0
+assert config['model_conf'].get('time_sweep_loss_weight', 0.0) == (0.0 if variant == 'baseline' else 1.0)
 assert config['model_conf']['ctf_taps'] == 60
 assert config['model_conf']['pim_sweep_duration'] == 8.192
 preparation = json.loads((reference / 'preparation.json').read_text())
@@ -110,13 +124,13 @@ assert all(set(ref) == set(wavs) for ref in refs)
 prediction = output / 'prediction'
 prediction.mkdir()
 shutil.copy2(model / 'config.yaml', prediction / 'config.yaml')
-shutil.copy2(checkpoint, prediction / 'valid.loss_sweep_min.best.pth')
+shutil.copy2(checkpoint, prediction / 'selected_model.pth')
 shutil.copy2(data / 'wav.scp', prediction / 'wav.scp')
 (output / 'physical_reference.scp').write_text(''.join(
     f'{uid} {refs[0][uid]} {refs[1][uid]}\n' for uid in wavs))
 metadata = dict(inference='ordinary sweep PIM', sample_rate=8000, rir_length=16000,
     count=3000, input='full utterance, channel 0, canonical FLOAT NF mixture',
-    experiment=str(model), checkpoint='valid.loss_sweep_min.best.pth',
+    experiment=str(model), checkpoint=checkpoint.name, variant=variant,
     checkpoint_sha256=digest(checkpoint), config_sha256=digest(model / 'config.yaml'),
     input_index_sha256=digest(prediction / 'wav.scp'), output_subtype='FLOAT',
     sweep_sha256=sweep_hash, inverse_sha256=inverse_hash,
@@ -133,7 +147,7 @@ PY
 phase=inference
 "$python" -B -m espnet2.bin.rec_rir_pit_inference \
     --train_config "$output/prediction/config.yaml" \
-    --model_file "$output/prediction/valid.loss_sweep_min.best.pth" \
+    --model_file "$output/prediction/selected_model.pth" \
     --wav_scp "$output/prediction/wav.scp" --output_dir "$output/prediction/inference" \
     --sample_rate 8000 --rir_length 16000 --output_subtype FLOAT --device cuda:0
 phase=whamr_scoring
@@ -147,7 +161,7 @@ phase=ls_scoring
 PYTHONPATH="$scoring_root" "$python" -B \
     "$scoring_root/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" \
     --reference_dir "$reference" \
-    --prediction BiMamba_8k_time_sweep_l1 "$output/prediction/inference/rir.scp" \
+    --prediction "BiMamba_8k_$variant" "$output/prediction/inference/rir.scp" \
     --out_dir "$output/ls" --no_comparison_csv
 phase=finalization
 "$python" -B - "$output" <<'PY'

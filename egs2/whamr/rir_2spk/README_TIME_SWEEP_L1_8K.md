@@ -89,3 +89,10 @@ to commit `4e8a0f5b9b0bc5d73e3e5ace5b42d4b29b300f72` in
 `RESULT_RECIPE/exp/frequency_ls_eval_code_20261014`. No comparison CSV is
 written. Historical runs which re-encoded input mixtures to PCM16 have a
 different input condition; their numbers are not a strictly matched control.
+
+Pass a third argument `baseline` to the same evaluation launcher to evaluate
+the original 8 kHz baseline best checkpoint with identical FLOAT input and
+scoring. It verifies the baseline training exit status and the previously
+recorded checkpoint/config hashes, and writes a fresh result under
+`RESULT_RECIPE/exp/time_sweep_l1_baseline_eval8k_20261019/`. The default third
+argument is `time_l1`; both variants preserve existing result directories.
