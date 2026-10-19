@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # One ordinary-PIM inference pass, scored against physical WHAMR and LS RIRs.
 set -euo pipefail
-[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [time_l1|baseline]' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [time_l1|baseline|rec_rir]' >&2; exit 2; }
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
 variant=${3:-time_l1}
-case "$variant" in time_l1|baseline) ;; *) echo 'Unsupported variant' >&2; exit 2 ;; esac
+case "$variant" in time_l1|baseline|rec_rir) ;; *) echo 'Unsupported variant' >&2; exit 2 ;; esac
+prediction_label="BiMamba_8k_$variant"
+[[ "$variant" != rec_rir ]] || prediction_label=RecRIR_8k_3loss
 result_recipe=$(realpath "$2")
 case "$result_recipe" in
     /net/midgar/work2/nitsu/*|/gs/bs/tga-shinoda/nitsu/*) ;;
@@ -20,7 +22,11 @@ scoring_root="$result_recipe/exp/frequency_ls_eval_code_20261014"
 expected_scorer=4e8a0f5b9b0bc5d73e3e5ace5b42d4b29b300f72
 [[ "$(git -C "$scoring_root" rev-parse HEAD)" == "$expected_scorer" ]] || exit 1
 [[ -z "$(git -C "$scoring_root" status --porcelain)" ]] || exit 1
-if [[ "$variant" == baseline ]]; then
+if [[ "$variant" == rec_rir ]]; then
+    model=$(realpath "$result_recipe/../rir/exp/rir_train_rec_rir_2spk_pit_clean_8192")
+    training="$result_recipe/exp/rec_rir_ls8k_20261015"
+    output="$result_recipe/exp/time_sweep_l1_recrir_eval8k_20261019"
+elif [[ "$variant" == baseline ]]; then
     model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2"
     training="$result_recipe/exp/pooled_bimamba_8k_launch_20261009"
     output="$result_recipe/exp/time_sweep_l1_baseline_eval8k_20261019"
@@ -85,12 +91,19 @@ apps = list(csv.reader(io.StringIO(subprocess.check_output([
     '--format=csv,noheader,nounits'], text=True))))
 if int(selected[3]) >= 200 or any(row and row[0].strip() == selected[1] for row in apps):
     raise RuntimeError('Selected GPU is occupied')
-assert (training / 'exit_status').read_text().strip() == '0'
-if variant == 'baseline':
+if variant == 'rec_rir':
+    prior = json.loads((training / 'complete.json').read_text())
+    assert prior['count'] == 3000 and prior['source_pairs'] == 6000
+    completed = json.loads((training / 'metadata.json').read_text())
+    assert Path(completed['experiment']).resolve() == model.resolve()
+    checkpoint = model / '97epoch.pth'
+elif variant == 'baseline':
+    assert (training / 'exit_status').read_text().strip() == '0'
     completed = json.loads((model.parent / 'damsep_bimamba_ls8k_20261015/bimamba/metadata.json').read_text())
     assert Path(completed['experiment']).resolve() == model.resolve()
     checkpoint = model / 'valid.loss.best.pth'
 else:
+    assert (training / 'exit_status').read_text().strip() == '0'
     assert (training / 'final_phase').read_text().strip() == 'complete'
     completed = json.loads((training / 'training_complete.json').read_text())
     checkpoint = model / 'valid.loss_sweep_min.best.pth'
@@ -99,8 +112,13 @@ assert digest(checkpoint) == completed['checkpoint_sha256']
 assert digest(model / 'config.yaml') == completed['config_sha256']
 config = yaml.safe_load((model / 'config.yaml').read_text())
 assert config['sample_rate'] == config['model_conf']['sr'] == 8000
-assert config['model_conf'].get('time_sweep_loss_weight', 0.0) == (0.0 if variant == 'baseline' else 1.0)
-assert config['model_conf']['ctf_taps'] == 60
+assert config['model_conf'].get('time_sweep_loss_weight', 0.0) == (1.0 if variant == 'time_l1' else 0.0)
+if variant == 'rec_rir':
+    assert config['rir_model_type'] == 'rec_rir_pit'
+    assert all(config['model_conf'][key] == 1.0 for key in ('loss_w_cln', 'loss_w_rvb', 'loss_w_rec'))
+    assert config['model_conf']['dim_output_CTF'] // (2 * config['model_conf']['num_spk']) == 60
+else:
+    assert config['model_conf']['ctf_taps'] == 60
 assert config['model_conf']['pim_sweep_duration'] == 8.192
 preparation = json.loads((reference / 'preparation.json').read_text())
 assert preparation['full_dataset'] and preparation['count'] == 3000
@@ -161,7 +179,7 @@ phase=ls_scoring
 PYTHONPATH="$scoring_root" "$python" -B \
     "$scoring_root/egs2/whamr/rir_2spk/local/evaluate_ls_direct_reverb.py" \
     --reference_dir "$reference" \
-    --prediction "BiMamba_8k_$variant" "$output/prediction/inference/rir.scp" \
+    --prediction "$prediction_label" "$output/prediction/inference/rir.scp" \
     --out_dir "$output/ls" --no_comparison_csv
 phase=finalization
 "$python" -B - "$output" <<'PY'

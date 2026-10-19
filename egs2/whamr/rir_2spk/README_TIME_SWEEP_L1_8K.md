@@ -96,3 +96,13 @@ scoring. It verifies the baseline training exit status and the previously
 recorded checkpoint/config hashes, and writes a fresh result under
 `RESULT_RECIPE/exp/time_sweep_l1_baseline_eval8k_20261019/`. The default third
 argument is `time_l1`; both variants preserve existing result directories.
+
+The third argument `rec_rir` evaluates the conventional two-speaker Rec-RIR
+with its clean-speech, reverberant-speech and CTF-reconstruction losses
+(weights 1/1/1), using the archived best97 checkpoint. It verifies the saved
+checkpoint/config hashes from the completed earlier evaluation and writes
+`RESULT_RECIPE/exp/time_sweep_l1_recrir_eval8k_20261019/`. Evaluation input,
+PIM and scoring match the lightweight models. Training conditions and
+objectives differ; this is a trained-system comparison, not an isolated
+architecture ablation. It does not evaluate the still-training Rec-RIR
+Sweep v2 experiment.
