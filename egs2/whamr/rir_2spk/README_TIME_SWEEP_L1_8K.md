@@ -69,3 +69,23 @@ producing `valid.loss_sweep_min.best.pth`;
 `training_complete.json` records the saved configuration's criterion.
 Successful completion requires
 `exit_status = 0`, `final_phase = complete`, and the completion metadata.
+
+## WHAMR and LS test evaluation
+
+After successful training, run `local/run_time_sweep_l1_8k_eval_lab.sh
+GPU_INDEX RESULT_RECIPE` from a persistent session on an idle lab GPU.
+It verifies the saved best-checkpoint hash, full test indexes and the
+Sweep/inverse hashes against the immutable 8 kHz LS preparation. Inference
+uses the native FLOAT mixture, full utterance, channel 0, ordinary Sweep PIM,
+and FLOAT two-second RIRs. The same 3,000 predicted pairs are scored against
+physical WHAMR RIRs and the LS relative-transfer reference, using RMSE PIT,
+peak alignment, peak normalization and no polarity alignment. Both reports
+include the 50 ms interval starting at the reference peak.
+
+Results are saved under `RESULT_RECIPE/exp/time_sweep_l1_eval8k_20261019/`:
+`whamr/summary.json`, `ls/models/00/summary.json`, prediction metadata and
+`evaluation_complete.json`. The existing scoring implementation is pinned
+to commit `4e8a0f5b9b0bc5d73e3e5ace5b42d4b29b300f72` in
+`RESULT_RECIPE/exp/frequency_ls_eval_code_20261014`. No comparison CSV is
+written. Historical runs which re-encoded input mixtures to PCM16 have a
+different input condition; their numbers are not a strictly matched control.
