@@ -20,10 +20,11 @@ def main():
     parser.add_argument('--warmup-steps', type=int, default=0)
     parser.add_argument('--timed-steps', type=int, default=0)
     parser.add_argument('--valid-data-dir', type=Path)
+    parser.add_argument('--noise', action='store_true')
     args=parser.parse_args()
     if args.output.exists():
         raise ValueError('Use a new output')
-    cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir','/tmp/two-spk-check'])
+    cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir',str(args.output.parent / 'scratch_model')])
     assert not cfg.init_param and not cfg.use_amp
     torch.manual_seed(cfg.seed);np.random.seed(cfg.seed)
     model=RIRTask.build_model(cfg).cuda().train()
@@ -33,13 +34,25 @@ def main():
     names=['speech_mix']+[f'{p}{i}' for p in prefixes for i in (1,2)]
     maps={k:dict(line.split(maxsplit=1) for line in (args.data_dir/f'{k}.scp').read_text().splitlines()) for k in names}
     reverb_maps=[dict(line.split(maxsplit=1) for line in (args.data_dir/f'speech_reverb{i}.scp').read_text().splitlines()) for i in (1,2)]
+    noise_map = (dict(line.split(maxsplit=1) for line in
+                     (args.data_dir/'noise_ref.scp').read_text().splitlines())
+                 if args.noise else None)
+    noise_ratios = []
     ids=list(maps['speech_mix'])[:args.batch_size];examples=[]
     for uid in ids:
         data={}
         for k in names:
             data[k],sr=sf.read(maps[k][uid]);assert sr==cfg.sample_rate
         clean_sum=sum(sf.read(m[uid])[0] for m in reverb_maps)
-        assert np.max(np.abs(clean_sum-data['speech_mix']))<2e-6, 'Input must be noise-free mixture'
+        expected = clean_sum
+        if args.noise:
+            noise, rate = sf.read(noise_map[uid])
+            assert rate == cfg.sample_rate and noise.shape == clean_sum.shape
+            assert np.any(noise[:, 0] != 0), 'Expected nonzero left-channel noise'
+            expected = clean_sum + noise
+            noise_ratios.append(float(10 * np.log10(
+                np.sum(clean_sum[:, 0] ** 2) / np.sum(noise[:, 0] ** 2))))
+        assert np.max(np.abs(expected-data['speech_mix']))<2e-6, 'Mixture components do not match'
         examples.append(proc(uid,data))
     batch={}
     for k in names:
@@ -53,6 +66,10 @@ def main():
     loss,stats,_=model(**batch)
     assert torch.isfinite(loss).all()
     loss.backward()
+    for name, parameter in model.named_parameters():
+        if parameter.requires_grad:
+            assert parameter.grad is not None, name
+            assert torch.isfinite(parameter.grad).all(), name
     norm=torch.nn.utils.clip_grad_norm_(model.parameters(),cfg.grad_clip,error_if_nonfinite=True)
     opt.step();opt.zero_grad(set_to_none=True)
     torch.cuda.synchronize();seconds=time.perf_counter()-start
@@ -123,7 +140,12 @@ def main():
                 parameters=sum(p.numel() for p in model.parameters()),
                 first_update_seconds=seconds,peak_allocated_bytes=peak,gradient_norm=float(norm),
                 losses={k:float(v) for k,v in stats.items()},teacher_permutation_invariant=True,
-                noise_free_mixture_verified=True,rir_shape=list(rir.shape))
+                noise_free_mixture_verified=not args.noise,
+                noisy_mixture_verified=args.noise,
+                active_parameters_have_finite_gradients=True,
+                rir_shape=list(rir.shape))
+    if args.noise:
+        report['sample_mixture_snr_db'] = noise_ratios
     if step_seconds:
         report['steady_update_seconds'] = float(np.median(step_seconds))
         report['timed_step_seconds'] = step_seconds

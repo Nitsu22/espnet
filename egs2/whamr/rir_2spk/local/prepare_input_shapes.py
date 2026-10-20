@@ -22,10 +22,11 @@ def main():
     assert sample_rate in ('8k', '16k')
     assert config['sample_rate'] == config['model_conf']['sr'] == int(sample_rate.replace('k', '000'))
     assert saved['spec']['num_spk']==2
-    assert saved['spec']['length']=='min' and saved['spec']['noise'] is False
+    assert saved['spec']['length']=='min' and isinstance(saved['spec']['noise'], bool)
+    condition = 'noisy' if saved['spec']['noise'] else 'nf'
     report={}
     for split,mode in [('tr','train'),('cv','valid')]:
-        folder=Path('raw')/f'{split}_rir_2spk_nf_min_{sample_rate}'
+        folder=Path('raw')/f'{split}_rir_2spk_{condition}_min_{sample_rate}'
         for name in ('utt2num_samples','wav.scp'):
             path=folder/name
             actual=hashlib.sha256((args.dump/path).read_bytes()).hexdigest()
