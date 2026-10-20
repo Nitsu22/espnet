@@ -45,6 +45,7 @@ from espnet2.train.preprocessor_rec_rir_sweep import RecRIRSweepPreprocessor
 from espnet2.train.preprocessor_rec_rir_sweep_v2 import RecRIRSweepV2Preprocessor
 from espnet2.train.preprocessor_rec_rir_pit import RecRIRPITPreprocessor
 from espnet2.train.preprocessor_rec_rir_sweep_v2_pit import RecRIRSweepV2PITPreprocessor
+from espnet2.train.preprocessor_rec_rir_sweep_v2_speech_pit import RecRIRSweepV2SpeechPITPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -104,6 +105,7 @@ preprocessor_choices = ClassChoices(
         rec_rir_sweep_v2=RecRIRSweepV2Preprocessor,
         rec_rir_pit=RecRIRPITPreprocessor,
         rec_rir_sweep_v2_pit=RecRIRSweepV2PITPreprocessor,
+        rec_rir_sweep_v2_speech_pit=RecRIRSweepV2SpeechPITPreprocessor,
         daras=DARASPreprocessor,
     ),
     type_check=AbsPreprocessor,
@@ -157,6 +159,7 @@ class RIRTask(AbsTask):
                 "rec_rir_sweep",
                 "rec_rir_sweep_v2",
                 "rec_rir_sweep_v2_pit",
+                "rec_rir_sweep_v2_speech_pit",
                 "rec_rir_lag_narrow",
                 "rec_rir_pit",
                 "tflocoformer_ctf_pit",
@@ -295,6 +298,13 @@ class RIRTask(AbsTask):
                            if args.rir_model_type == "tflocoformer_sweep_v2_pit"
                            else ESPnetRecRIRTFLocoformerPITModel)
             model = model_class(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_sweep_v2_speech_pit":
+            from espnet2.rir.rec_rir.rec_rir_sweep_v2_speech_pit import ESPnetRecRIRSweepV2SpeechPITModel
+
+            model = ESPnetRecRIRSweepV2SpeechPITModel(**args.model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model

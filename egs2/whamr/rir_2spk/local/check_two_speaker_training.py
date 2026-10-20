@@ -29,7 +29,9 @@ def main():
     model=RIRTask.build_model(cfg).cuda().train()
     proc=RIRTask.build_preprocess_fn(cfg,train=True)
     sweep=cfg.rir_model_type in ('tflocoformer_sweep_v2_pit','pooled_bimamba_sweep_v2_pit','rec_rir_sweep_v2_pit')
-    prefixes=('rir_ref','rir_direct') if sweep else ('speech_direct','speech_reverb')
+    hybrid=cfg.rir_model_type=='rec_rir_sweep_v2_speech_pit'
+    prefixes=(('rir_ref','rir_direct','speech_direct','speech_reverb') if hybrid
+              else ('rir_ref','rir_direct') if sweep else ('speech_direct','speech_reverb'))
     names=['speech_mix']+[f'{p}{i}' for p in prefixes for i in (1,2)]
     maps={k:dict(line.split(maxsplit=1) for line in (args.data_dir/f'{k}.scp').read_text().splitlines()) for k in names}
     reverb_maps=[dict(line.split(maxsplit=1) for line in (args.data_dir/f'speech_reverb{i}.scp').read_text().splitlines()) for i in (1,2)]
