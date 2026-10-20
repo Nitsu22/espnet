@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 import numpy as np
 import pytest
@@ -109,3 +110,10 @@ def test_config_exactly_matches_native_8k_baseline():
     folder = RECIPE / 'conf/tuning'
     assert yaml.safe_load((folder / 'train_pooled_bimamba_2spk_nf_8k_sweep_v2.yaml').read_text()) == yaml.safe_load(
         (folder / 'train_pooled_bimamba_2spk_noisy_8k_sweep_v2.yaml').read_text())
+
+
+def test_shell_syntax_for_each_entrypoint():
+    # bash -n accepts only one script; later paths would be positional arguments.
+    for path in (RECIPE / 'run_pooled_bimamba_2spk_noisy_8k_sweep_v2.sh',
+                 RECIPE / 'local/train_noisy_bimamba_8k_lab.sh'):
+        subprocess.run(['bash', '-n', str(path)], check=True)

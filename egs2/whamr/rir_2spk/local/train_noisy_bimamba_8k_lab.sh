@@ -3,7 +3,7 @@
 set -euo pipefail
 recipe=$(cd "$(dirname "$0")/.." && pwd)
 cd "${recipe}"
-storage=${1:?Absolute recipe path for this user's data and results}
+storage=${1:?Absolute personal recipe path for data and results}
 gpu_index=${2:?Host GPU index}
 launch_name=${3:?Unique launch directory basename}
 case ${storage} in /net/midgar/work2/nitsu/*|/gs/bs/tga-shinoda/nitsu/*) ;; *) exit 2 ;; esac
