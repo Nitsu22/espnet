@@ -28,7 +28,7 @@ def main():
     torch.manual_seed(cfg.seed);np.random.seed(cfg.seed)
     model=RIRTask.build_model(cfg).cuda().train()
     proc=RIRTask.build_preprocess_fn(cfg,train=True)
-    sweep=cfg.rir_model_type in ('tflocoformer_sweep_v2_pit','pooled_bimamba_sweep_v2_pit','rec_rir_sweep_v2_pit')
+    sweep=cfg.rir_model_type in ('tflocoformer_sweep_v2_pit','pooled_bimamba_sweep_v2_pit','rec_rir_sweep_v2_pit','rec_rir_pooled_sweep_v2_pit')
     hybrid=cfg.rir_model_type=='rec_rir_sweep_v2_speech_pit'
     prefixes=(('rir_ref','rir_direct','speech_direct','speech_reverb') if hybrid
               else ('rir_ref','rir_direct') if sweep else ('speech_direct','speech_reverb'))

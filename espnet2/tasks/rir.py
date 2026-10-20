@@ -159,6 +159,7 @@ class RIRTask(AbsTask):
                 "rec_rir_sweep",
                 "rec_rir_sweep_v2",
                 "rec_rir_sweep_v2_pit",
+                "rec_rir_pooled_sweep_v2_pit",
                 "rec_rir_sweep_v2_speech_pit",
                 "rec_rir_lag_narrow",
                 "rec_rir_pit",
@@ -305,6 +306,13 @@ class RIRTask(AbsTask):
             from espnet2.rir.rec_rir.rec_rir_sweep_v2_speech_pit import ESPnetRecRIRSweepV2SpeechPITModel
 
             model = ESPnetRecRIRSweepV2SpeechPITModel(**args.model_conf)
+            if args.init is not None:
+                initialize(model, args.init)
+            return model
+        if getattr(args, "rir_model_type", "direct") == "rec_rir_pooled_sweep_v2_pit":
+            from espnet2.rir.rec_rir.rec_rir_pooled_sweep_v2_pit import ESPnetRecRIRPooledSweepV2PITModel
+
+            model = ESPnetRecRIRPooledSweepV2PITModel(**args.model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model
