@@ -24,9 +24,20 @@ def main():
     if args.output.exists():
         raise ValueError('Use a new output')
     cfg=RIRTask.get_parser().parse_args(['--config',str(args.config),'--output_dir','/tmp/two-spk-check'])
-    assert not cfg.init_param and not cfg.use_amp
+    assert not cfg.use_amp
     torch.manual_seed(cfg.seed);np.random.seed(cfg.seed)
     model=RIRTask.build_model(cfg).cuda().train()
+    initialization = []
+    for checkpoint in cfg.init_param:
+        # Full-model checkpoints only: reject partial or mismatched loading.
+        path = Path(checkpoint)
+        state = torch.load(path, map_location='cpu')
+        model.load_state_dict(state, strict=True)
+        for name, tensor in model.state_dict().items():
+            torch.testing.assert_close(tensor.cpu(), state[name], rtol=0, atol=0)
+        initialization.append(dict(checkpoint=str(path.resolve()),
+                                   sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                                   strict_weights_verified=True))
     proc=RIRTask.build_preprocess_fn(cfg,train=True)
     sweep=cfg.rir_model_type in ('tflocoformer_sweep_v2_pit','pooled_bimamba_sweep_v2_pit')
     prefixes=('rir_ref','rir_direct') if sweep else ('speech_direct','speech_reverb')
@@ -119,6 +130,7 @@ def main():
                                           samples=int(lengths[uid]), seconds=time.perf_counter()-start,
                                           peak_allocated_bytes=torch.cuda.max_memory_allocated()))
     report=dict(config=str(args.config),config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
+                initialization=initialization,
                 gpu=torch.cuda.get_device_name(),batch_size=args.batch_size,utterances=ids,
                 parameters=sum(p.numel() for p in model.parameters()),
                 first_update_seconds=seconds,peak_allocated_bytes=peak,gradient_norm=float(norm),
