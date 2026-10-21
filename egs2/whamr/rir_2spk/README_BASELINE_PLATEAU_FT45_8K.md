@@ -39,3 +39,22 @@ Source results are read only. It saves configuration, hashes, training log,
 completion metadata, and exit state under the usual recipe `exp/` directory.
 Use a persistent session on the lab host, and check GPU availability again
 immediately before launch.
+
+## Initial LR 0.01 replacement (2026-10-21)
+
+At the user's request, the LR 1e-4 run was interrupted and retained. The
+replacement starts again from the original epoch-45 weights with a fresh
+optimizer and initial LR **0.01**. It does not load the interrupted run's
+weights or optimizer. The three-bad-epoch halving rule, floor 1e-6,
+15-bad-epoch early stopping, model, loss, and data are unchanged.
+
+```bash
+bash local/run_baseline_plateau_ft45_8k_lab.sh 0 \
+  /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk \
+  lr1em2
+```
+
+This selects `train_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau_lr1em2.yaml`
+and writes a separate model directory ending in `_ft45_plateau_lr1em2`.
+The launcher checks finite GPU updates at the requested LR before starting
+Stage 6; it does not silently substitute another learning rate.

@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # Fine-tune the 8 kHz baseline from epoch 45 with no LR restarts.
 set -euo pipefail
-[[ $# == 2 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || {
+    echo 'Usage: script GPU_INDEX RESULT_RECIPE [baseline|lr1em2]' >&2; exit 2;
+}
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || { echo 'GPU_INDEX must be an integer' >&2; exit 2; }
+variant=${3:-baseline}
+case "$variant" in
+    baseline) suffix=; run_label=baseline_plateau_ft45 ;;
+    lr1em2) suffix=_lr1em2; run_label=baseline_plateau_ft45_lr1em2 ;;
+    *) echo 'Unknown LR variant' >&2; exit 2 ;;
+esac
 result_recipe=$(realpath "$2")
 output_root=$(realpath -m "$result_recipe/exp")
 case "$output_root" in
@@ -20,9 +28,9 @@ recipe=$(cd "$(dirname "$0")/.." && pwd)
 cd "$recipe"
 code_root=$(git rev-parse --show-toplevel)
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
-prefix=train_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau
+prefix=train_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau${suffix}
 config="conf/tuning/${prefix}.yaml"
-run_dir="$output_root/baseline_plateau_ft45_training_20261021"
+run_dir="$output_root/${run_label}_training_20261021"
 stats_dir="$output_root/rir_stats_${prefix}"
 model_dir="$output_root/rir_${prefix}"
 dump_dir="$result_recipe/dump_nf_2spk_8k_min"
@@ -91,7 +99,7 @@ config = Path(config)
 report = dict(checked_at=datetime.datetime.now().astimezone().isoformat(),
               host=socket.gethostname(), gpu_index=int(gpu), gpu_uuid=selected[1],
               gpu=selected[2], memory_used_mib=int(selected[3]), phase=phase,
-              variant='pooled_bimamba_sweep_v2_ft45_plateau', model_directory=model_dir,
+              variant=config.stem, model_directory=model_dir,
               config=str(config.resolve()),
               config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),
               commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip())
@@ -124,7 +132,8 @@ for key in ('seed', 'model_conf', 'preprocessor', 'preprocessor_conf',
 assert source['fold_length'] == [80000]
 assert source['valid_batch_size'] == 1
 assert config['optim'] == source['optim'] == 'adamw'
-assert config['optim_conf'] == dict(source['optim_conf'], lr=1e-4)
+expected_lr = 1e-2 if config_path.stem.endswith('_lr1em2') else 1e-4
+assert config['optim_conf'] == dict(source['optim_conf'], lr=expected_lr)
 assert config['model_conf'].get('time_sweep_loss_weight', 0) == 0
 assert config['model_conf'].get('drr_loss_weight', 0) == 0
 assert config['scheduler'] == 'reducelronplateau'
@@ -142,14 +151,15 @@ trajectory = []
 for _ in range(3):
     scheduler.step(0.700)
     trajectory.append(optimizer.param_groups[0]['lr'])
-assert trajectory == [1e-4, 1e-4, 5e-5], trajectory
-for _ in range(30):
+assert trajectory == [expected_lr, expected_lr, expected_lr / 2], trajectory
+for _ in range(60):
     scheduler.step(0.700)
 assert optimizer.param_groups[0]['lr'] == 1e-6
 report = dict(source_checkpoint=str(checkpoint.resolve()),
               source_checkpoint_sha256=actual, source_epoch=45,
               source_validation_loss_rounded=0.681,
               initialization='model_only_fresh_optimizer_and_scheduler',
+              initial_learning_rate=expected_lr,
               model_and_loss_unchanged=True, three_bad_epoch_lr=trajectory,
               min_lr_verified=optimizer.param_groups[0]['lr'],
               config_sha256=hashlib.sha256(config_path.read_bytes()).hexdigest())
@@ -171,7 +181,7 @@ phase=input_shapes
 phase=training_gpu_verification
 assert_free_gpu "$run_dir/training_gpu.json"
 phase=training
-bash run_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau.sh \
+bash "run_${prefix#train_}.sh" \
     --stage 6 --stop_stage 6 --resume false --ngpu 1 --python "$python" \
     --dumpdir "$dump_dir" --rir_stats_dir "$stats_dir" --rir_exp "$model_dir"
 printf '0\n' > "$run_dir/training_exit_status"
