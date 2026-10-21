@@ -31,8 +31,11 @@ def main():
     parser.add_argument("--dump", type=Path, default=Path("dump_nf_2spk_16k_min"))
     parser.add_argument("--config", default="conf/tuning/train_enh_tflocoformer_s_nf16k_bimamba_ctf_film_all.yaml")
     parser.add_argument("--input-style", choices=("native", "baseline"), default="native")
+    parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.condition == "whamr" and args.input_style != "baseline":
+        raise ValueError("Noisy WHAMR uses the exact Baseline indexes")
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise RuntimeError("Use exactly one allocated CUDA device for this probe")
     free, total = torch.cuda.mem_get_info()
@@ -54,8 +57,9 @@ def main():
     )
     sample_rate = options.model_conf.get("bimamba_sample_rate", 16000)
     segment = sample_rate * 4
+    mixture = "mix_both_reverb" if args.condition == "whamr" else "mix_clean_reverb"
     suffix = (f"rir_2spk_nf_min_{sample_rate // 1000}k" if args.input_style == "native"
-              else f"mix_clean_reverb_min_{sample_rate // 1000}k")
+              else f"{mixture}_min_{sample_rate // 1000}k")
     ref_prefix = "speech_direct" if args.input_style == "native" else "spk"
     np.random.seed(options.seed)
     torch.manual_seed(options.seed)
@@ -118,6 +122,7 @@ def main():
         frozen_weights_unchanged=True,
         source_sha256=model.bimamba_sha256,
         sample_rate=sample_rate,
+        condition=args.condition,
         cuda_startup=diagnostics,
     )
     model.zero_grad(set_to_none=True)

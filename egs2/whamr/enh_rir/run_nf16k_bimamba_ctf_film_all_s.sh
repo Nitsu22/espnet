@@ -6,6 +6,8 @@ stop_stage=6
 ngpu=1
 sample_rate=16000
 input_style=native
+dataset_condition=nf_whamr
+baseline_recipe=../enh7_baseline
 conditioning=true
 dumpdir=
 prepared_inputs=exp/bimamba_nf8k_baseline_inputs
@@ -16,6 +18,11 @@ inference_model=valid.loss.best.pth
 . ./path.sh
 . ./cmd.sh
 . utils/parse_options.sh
+case ${dataset_condition} in nf_whamr|whamr) ;; *) exit 2 ;; esac
+if [[ ${dataset_condition} == whamr && ( ${sample_rate}:${input_style} != 8000:baseline || -z ${enh_config} || -z ${enh_exp} ) ]]; then
+    echo 'Noisy WHAMR requires 8000/baseline and explicit config/output paths' >&2
+    exit 2
+fi
 
 case ${sample_rate}:${input_style} in
     16000:native)
@@ -29,6 +36,9 @@ case ${sample_rate}:${input_style} in
         dumpdir=${dumpdir:-dump_nf_baseline_8k}
         data_root=${prepared_inputs}
         dataset_suffix=mix_clean_reverb_min_8k
+        if [[ ${dataset_condition} == whamr ]]; then
+            dataset_suffix=mix_both_reverb_min_8k
+        fi
         ref_prefix=spk ;;
     *) echo 'Use 16000/native or 8000/baseline inputs' >&2; exit 2 ;;
 esac
@@ -60,7 +70,8 @@ export MPLCONFIGDIR="${MPLCONFIGDIR:-${PWD}/.cache/matplotlib}"
 if (( stage <= 5 && stop_stage >= 5 )); then
     if [[ ${input_style} == baseline ]]; then
         "${python}" local/prepare_bimamba_baseline8k_inputs.py \
-            --dump "${dumpdir}" --output "${prepared_inputs}"
+            --dump "${dumpdir}" --output "${prepared_inputs}" \
+            --baseline-recipe "${baseline_recipe}" --condition "${dataset_condition}"
     else
         "${python}" local/check_bimamba_conditioning_data.py \
             --dump "${dumpdir}" --output "${enh_exp}/data_check.json"

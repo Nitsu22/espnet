@@ -23,13 +23,19 @@ def sha(path):
 
 
 def prepare(dump, baseline_recipe, output, workers=4,
-            expected_counts=(("tr", 20000), ("cv", 5000), ("tt", 3000))):
+            expected_counts=(("tr", 20000), ("cv", 5000), ("tt", 3000)),
+            condition="nf_whamr"):
+    if condition not in ("nf_whamr", "whamr"):
+        raise ValueError("Use nf_whamr or whamr")
+    suffix = "mix_both_reverb_min_8k" if condition == "whamr" else "mix_clean_reverb_min_8k"
     if not dump.is_symlink() or not dump.is_dir():
-        raise ValueError("Use a symlink to enh7_baseline's NF-WHAMR dump")
+        raise ValueError("Use a symlink to enh7_baseline's matching dump")
     spec = dict(source=str(dump.resolve()), base_directory=str(baseline_recipe.resolve()),
                 sample_rate=8000, channel=0, source_hashes={})
+    if condition == "whamr":
+        spec["condition"] = condition
     for split, _ in expected_counts:
-        folder = dump / "raw" / f"{split}_mix_clean_reverb_min_8k"
+        folder = dump / "raw" / f"{split}_{suffix}"
         for name in ("wav.scp", "spk1.scp", "spk2.scp"):
             spec["source_hashes"][f"{split}/{name}"] = sha(folder / name)
     marker = output / "preparation.json"
@@ -50,7 +56,7 @@ def prepare(dump, baseline_recipe, output, workers=4,
     try:
         counts = {}
         for split, expected_count in expected_counts:
-            dataset = f"{split}_mix_clean_reverb_min_8k"
+            dataset = f"{split}_{suffix}"
             src = dump / "raw" / dataset
             maps = [read_scp(src / name) for name in ("wav.scp", "spk1.scp", "spk2.scp")]
             ids = sorted(maps[0])
@@ -98,5 +104,6 @@ if __name__ == "__main__":
     parser.add_argument("--baseline-recipe", type=Path, default=Path("../enh7_baseline"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     args = parser.parse_args()
-    prepare(args.dump, args.baseline_recipe, args.output, args.workers)
+    prepare(args.dump, args.baseline_recipe, args.output, args.workers, condition=args.condition)
