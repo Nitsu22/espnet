@@ -58,3 +58,20 @@ This selects `train_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau_lr1em2.yaml`
 and writes a separate model directory ending in `_ft45_plateau_lr1em2`.
 The launcher checks finite GPU updates at the requested LR before starting
 Stage 6; it does not silently substitute another learning rate.
+
+## Initial LR 0.001 replacement (2026-10-21)
+
+After the LR 0.01 experiment stopped with invalid gradients, the user
+requested initial LR **0.001**. This variant again initializes from the
+original epoch-45 baseline, with a fresh optimizer. All loss, model, data,
+decay, and early-stopping settings are otherwise unchanged.
+
+```bash
+bash local/run_baseline_plateau_ft45_8k_lab.sh 0 \
+  /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk \
+  lr1em3
+```
+
+Outputs end in `_ft45_plateau_lr1em3`. Finalization now rejects ESPnet's
+"all gradients invalid" termination even when the training process returns
+zero, so that this numerical failure cannot produce a success marker.

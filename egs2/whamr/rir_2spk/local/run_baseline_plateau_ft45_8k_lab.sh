@@ -2,7 +2,7 @@
 # Fine-tune the 8 kHz baseline from epoch 45 with no LR restarts.
 set -euo pipefail
 [[ $# == 2 || $# == 3 ]] || {
-    echo 'Usage: script GPU_INDEX RESULT_RECIPE [baseline|lr1em2]' >&2; exit 2;
+    echo 'Usage: script GPU_INDEX RESULT_RECIPE [baseline|lr1em2|lr1em3]' >&2; exit 2;
 }
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || { echo 'GPU_INDEX must be an integer' >&2; exit 2; }
@@ -10,6 +10,7 @@ variant=${3:-baseline}
 case "$variant" in
     baseline) suffix=; run_label=baseline_plateau_ft45 ;;
     lr1em2) suffix=_lr1em2; run_label=baseline_plateau_ft45_lr1em2 ;;
+    lr1em3) suffix=_lr1em3; run_label=baseline_plateau_ft45_lr1em3 ;;
     *) echo 'Unknown LR variant' >&2; exit 2 ;;
 esac
 result_recipe=$(realpath "$2")
@@ -132,7 +133,11 @@ for key in ('seed', 'model_conf', 'preprocessor', 'preprocessor_conf',
 assert source['fold_length'] == [80000]
 assert source['valid_batch_size'] == 1
 assert config['optim'] == source['optim'] == 'adamw'
-expected_lr = 1e-2 if config_path.stem.endswith('_lr1em2') else 1e-4
+expected_lr = 1e-4
+if config_path.stem.endswith('_lr1em2'):
+    expected_lr = 1e-2
+elif config_path.stem.endswith('_lr1em3'):
+    expected_lr = 1e-3
 assert config['optim_conf'] == dict(source['optim_conf'], lr=expected_lr)
 assert config['model_conf'].get('time_sweep_loss_weight', 0) == 0
 assert config['model_conf'].get('drr_loss_weight', 0) == 0
@@ -196,6 +201,10 @@ import sys
 import yaml
 
 run_dir, model_dir = map(Path, sys.argv[1:])
+log = (model_dir / 'train.log').read_text()
+if 'The gradients at all steps are invalid in this epoch.' in log:
+    # ESPnet returns zero for this numerical failure; do not mark it complete.
+    raise RuntimeError('Training stopped because all gradients were invalid')
 config = model_dir / 'config.yaml'
 if not config.is_file():
     raise RuntimeError('Saved training configuration is missing')
