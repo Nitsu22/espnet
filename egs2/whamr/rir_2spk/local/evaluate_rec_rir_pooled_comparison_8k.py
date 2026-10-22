@@ -81,12 +81,52 @@ def validate_context(recipe):
     return result, specs, indexes, ids, physical, reference, prior
 
 
+def finalize_results(result, folders, output, prior):
+    ls_report = json.loads((output / 'ls/comparison.json').read_text())
+    assert set(ls_report['models']) == set(folders)
+    assert ls_report['reference_preparation_sha256'] == result['ls_reference_preparation_sha256']
+    assert (ls_report['count'], ls_report['source_pairs']) == (3000, 6000)
+    assert not (output / 'ls/comparison.csv').exists()
+    for label, folder in folders.items():
+        summary = json.loads((folder / 'physical/summary.json').read_text())
+        assert summary['num_utts'] == 3000 and summary['num_source_pairs'] == 6000
+        with (folder / 'physical/per_source.csv').open() as stream:
+            rows = list(csv.DictReader(stream))
+        counts = {key: sum(math.isfinite(float(row[key])) for row in rows)
+                  for key in ('rmse', 'rmse_direct_50ms', 'corr', 'rt60_err', 'drr_err', 'c50_err')}
+        assert all(counts[key] == 6000 for key in ('rmse', 'rmse_direct_50ms', 'corr'))
+        ls_record = ls_report['models'][label]
+        assert digest(folder / 'inference/rir.scp') == ls_record['prediction_index_sha256']
+        ls_folder = Path(ls_record['summary']).parent
+        assert json.loads((ls_folder / 'summary.json').read_text()) == ls_record['metrics']
+        with (ls_folder / 'per_source.csv').open() as stream:
+            ls_rows = list(csv.DictReader(stream))
+        assert len(rows) == len(ls_rows) == 6000
+        ls_counts = {key: sum(math.isfinite(float(row[key])) for row in ls_rows)
+                     for key in ('rmse', 'rmse_direct_50ms', 'corr', 'rt60_err', 'drr_err', 'c50_err')}
+        assert all(ls_counts[key] == 6000 for key in ('rmse', 'rmse_direct_50ms', 'corr'))
+        assert all(ls_counts[key] == value for key, value in ls_record['valid_counts'].items())
+        result['models'][label] = dict(metadata=json.loads((folder / 'metadata.json').read_text()),
+            physical=summary, physical_valid_counts=counts,
+            ls=ls_report['models'][label]['metrics'], ls_valid_counts=ls_counts)
+    result['prior_comparison'] = str(prior / 'comparison.json')
+    result['prior_comparison_sha256'] = digest(prior / 'comparison.json')
+    result['physical_rt60_note'] = ('The unchanged physical-reference RT60 scorer has a known '
+        '356.032 s reference outlier. Physical RT60 ranking is withheld; no sample was removed.')
+    (output / 'comparison.json').write_text(json.dumps(result, indent=2) + '\n')
+    (output / 'evaluation_complete.json').write_text(json.dumps(dict(
+        finished_at=datetime.datetime.now().astimezone().isoformat(), count=3000, source_pairs=6000,
+        models=list(result['models']), comparison_sha256=digest(output / 'comparison.json'),
+        ls_comparison_sha256=digest(output / 'ls/comparison.json')), indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('--recipe', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ls-code', type=Path, required=True)
     parser.add_argument('--validate-only', action='store_true')
+    parser.add_argument('--finalize-only', action='store_true')
     args = parser.parse_args()
     recipe, output, ls_code = args.recipe.resolve(), args.output.resolve(), args.ls_code.resolve()
     result, specs, indexes, ids, physical, reference, prior = validate_context(recipe)
@@ -95,6 +135,23 @@ def main():
                               reused_models=list(result['models']),
                               input_sha256=result['input_index_sha256'],
                               ls_reference_sha256=result['ls_reference_preparation_sha256']), indent=2))
+        return
+    if args.finalize_only:
+        assert not (output / 'evaluation_complete.json').exists()
+        assert digest(output / 'input/wav.scp') == result['input_index_sha256']
+        assert digest(output / 'input/physical_rir.scp') == result['physical_reference_sha256']
+        folders = {}
+        for label, source, provenance, kind, epoch in specs:
+            folder = output / 'models' / label
+            metadata = json.loads((folder / 'metadata.json').read_text())
+            assert metadata['input_index_sha256'] == result['input_index_sha256']
+            for filename, key in [('config.yaml', 'config_sha256'),
+                                  ('valid.loss.best.pth', 'checkpoint_sha256')]:
+                assert digest(folder / filename) == provenance[key] == metadata[key]
+            validate_prediction(folder / 'inference', ids)
+            folders[label] = folder
+        finalize_results(result, folders, output, prior)
+        print('Finalization complete: reused finished inference and scoring', flush=True)
         return
     inputs = output / 'input'
     inputs.mkdir(exist_ok=False)
@@ -141,32 +198,8 @@ def main():
     for label, folder in folders.items():
         ls_arguments.extend(['--prediction', label, folder / 'inference/rir.scp'])
     run(ls_arguments, pythonpath=ls_code)
-    ls_report = json.loads((output / 'ls/comparison.json').read_text())
-    assert ls_report['reference_preparation_sha256'] == result['ls_reference_preparation_sha256']
-    assert (ls_report['count'], ls_report['source_pairs']) == (3000, 6000)
-    assert not (output / 'ls/comparison.csv').exists()
-    for label, folder in folders.items():
-        summary = json.loads((folder / 'physical/summary.json').read_text())
-        assert summary['num_utts'] == 3000 and summary['num_source_pairs'] == 6000
-        with (folder / 'physical/per_source.csv').open() as stream:
-            rows = list(csv.DictReader(stream))
-        counts = {key: sum(math.isfinite(float(row[key])) for row in rows)
-                  for key in ('rmse', 'rmse_direct_50ms', 'corr', 'rt60_err', 'drr_err', 'c50_err')}
-        assert all(counts[key] == 6000 for key in ('rmse', 'rmse_direct_50ms', 'corr'))
-        assert all(ls_report['models'][label]['valid_counts'][key] == 6000
-                   for key in ('rmse', 'rmse_direct_50ms', 'corr'))
-        result['models'][label] = dict(metadata=json.loads((folder / 'metadata.json').read_text()),
-            physical=summary, physical_valid_counts=counts,
-            ls=ls_report['models'][label]['metrics'], ls_valid_counts=ls_report['models'][label]['valid_counts'])
-    result['prior_comparison'] = str(prior / 'comparison.json')
-    result['prior_comparison_sha256'] = digest(prior / 'comparison.json')
-    result['physical_rt60_note'] = ('The unchanged physical-reference RT60 scorer has a known '
-        '356.032 s reference outlier. Physical RT60 ranking is withheld; no sample was removed.')
-    (output / 'comparison.json').write_text(json.dumps(result, indent=2) + '\n')
-    (output / 'evaluation_complete.json').write_text(json.dumps(dict(
-        finished_at=datetime.datetime.now().astimezone().isoformat(), count=3000, source_pairs=6000,
-        models=list(result['models']), comparison_sha256=digest(output / 'comparison.json'),
-        ls_comparison_sha256=digest(output / 'ls/comparison.json')), indent=2) + '\n')
+    finalize_results(result, folders, output, prior)
+
 
 
 if __name__ == '__main__':
