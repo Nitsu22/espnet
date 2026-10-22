@@ -75,3 +75,24 @@ bash local/run_baseline_plateau_ft45_8k_lab.sh 0 \
 Outputs end in `_ft45_plateau_lr1em3`. Finalization now rejects ESPnet's
 "all gradients invalid" termination even when the training process returns
 zero, so that this numerical failure cannot produce a success marker.
+
+## WHAMR and LS evaluation of the LR 0.001 fine-tuned model
+
+```bash
+bash local/run_time_sweep_l1_8k_eval_lab.sh 0 \
+  /net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/rir_2spk \
+  baseline_ft45_plateau
+```
+
+The selected `valid.loss.best.pth` is verified against the training completion
+metadata (additional epoch 91, SHA-256
+`1aeb4c1522cdf05e36dd837543e36c2b83a604056e861b8200c1f35fecc93c75`).
+An immutable copy is evaluated on 3,000 canonical FLOAT NF test mixtures
+(6,000 sources), native 8 kHz, full utterances, channel 0, ordinary Sweep
+PIM, and FLOAT 2-second output RIRs. One inference pass is scored against
+both raw physical WHAMR RIRs and the existing LS references. Peak alignment,
+peak normalization, global utterance RMSE PIT, and no polarity alignment
+match the earlier baseline evaluation. The frozen scorer at
+`4e8a0f5b9b0bc5d73e3e5ace5b42d4b29b300f72` includes the 50-ms RMSE.
+No comparison CSV is created; standard per-source diagnostics are retained.
+Results: `exp/baseline_plateau_ft45_lr1em3_eval8k_20261023`.
