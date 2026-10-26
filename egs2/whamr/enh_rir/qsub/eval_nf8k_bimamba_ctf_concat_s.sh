@@ -14,7 +14,8 @@ cd "${SGE_O_WORKDIR:?Submit from enh_rir}"
 case ${PWD} in /gs/bs/tga-shinoda/nitsu/*) ;; *) exit 2 ;; esac
 [[ ${JOB_ID:?} =~ ^[0-9]+$ ]]
 expdir=exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_concat_seed0
-pipeline=exp/bimamba_nf8k_concat_eval
+pipeline=exp/bimamba_nf8k_concat_eval_normalized
+export CONCAT_INFERENCE_TAG=inference_normalized
 logs=${PWD}/${pipeline}/job_${JOB_ID}
 mkdir -p "${logs}"
 task_tmp=$(mktemp -d "${logs}/tmp.XXXXXX")
@@ -39,8 +40,13 @@ test -s "${expdir}/valid.loss.best.pth"
 grep -Eq '\[Early stopping\]|INFO: 150epoch results:' "${expdir}/train.log"
 if [[ ${mode} == infer ]]; then
     module load cuda/11.8.0
+    # Never overwrite the previous, unnormalized inference/evaluation.
+    for split in cv tt; do
+        test ! -e "${expdir}/${CONCAT_INFERENCE_TAG}_${split}"
+    done
     bash run_nf8k_bimamba_ctf_concat_s.sh --stage 7 --stop_stage 7 \
         --ngpu 1 --inference_model valid.loss.best.pth \
+        --normalize_output_wav true --inference_tag "${CONCAT_INFERENCE_TAG}" \
         --python "${CONDA_PREFIX}/bin/python"
 else
     previous_job=${2:?inference job ID}
@@ -51,8 +57,12 @@ fi
 # Both stages reject missing/duplicate UIDs and incomplete inference output.
 python - <<'PY'
 from pathlib import Path
+import os
+import numpy as np
+import soundfile as sf
 
 exp = Path('exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_concat_seed0')
+tag = os.environ['CONCAT_INFERENCE_TAG']
 
 
 def rows(path):
@@ -68,21 +78,27 @@ for split, count in (('cv', 5000), ('tt', 3000)):
     expected = rows(source)
     assert len(expected) == count, source
     for speaker in (1, 2):
-        scp = exp / f'inference_{split}/spk{speaker}.scp'
+        scp = exp / f'{tag}_{split}/spk{speaker}.scp'
         output = rows(scp)
         assert output.keys() == expected.keys(), scp
         assert all(Path(path).is_file() for path in output.values()), scp
+        # Check a deterministic sample before accepting output as normalized.
+        for uid in sorted(output)[::max(1, count // 100)]:
+            audio, rate = sf.read(output[uid])
+            assert rate == 8000 and np.isfinite(audio).all(), uid
+            assert np.max(np.abs(audio)) <= 0.901, f'Clipping/unnormalized: {uid}'
 PY
 if [[ ${mode} == infer ]]; then
     printf '%s\n' "${JOB_ID}" > "${pipeline}/inference_complete"
 else
     bash run_nf8k_bimamba_ctf_concat_s.sh --stage 8 --stop_stage 8 \
         --ngpu 0 --inference_model valid.loss.best.pth \
+        --normalize_output_wav true --inference_tag "${CONCAT_INFERENCE_TAG}" \
         --python "${CONDA_PREFIX}/bin/python"
     for split in cv tt; do
         for speaker in 1 2; do
             for metric in SI_SNR STOI ESTOI SDR SAR SIR; do
-                test -s "${expdir}/inference_${split}/score/${metric}_spk${speaker}"
+                test -s "${expdir}/${CONCAT_INFERENCE_TAG}_${split}/score/${metric}_spk${speaker}"
             done
         done
     done

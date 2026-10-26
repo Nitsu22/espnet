@@ -13,6 +13,8 @@ enh_config=
 enh_exp=
 python=python3
 inference_model=valid.loss.best.pth
+normalize_output_wav=false
+inference_tag=inference
 . ./path.sh
 . ./cmd.sh
 . utils/parse_options.sh
@@ -97,10 +99,11 @@ if (( stage <= 6 && stop_stage >= 6 )); then
 fi
 for split in cv tt; do
     data=${data_root}/raw/${split}_${dataset_suffix}
-    out=${enh_exp}/inference_${split}
+    out=${enh_exp}/${inference_tag}_${split}
     if (( stage <= 7 && stop_stage >= 7 )); then
         "${python}" -m espnet2.bin.enh_inference \
             --ngpu "${ngpu}" --fs "${sample_rate}" --batch_size 1 \
+            --normalize_output_wav "${normalize_output_wav}" \
             --train_config "${enh_exp}/config.yaml" \
             --model_file "${enh_exp}/${inference_model}" \
             --data_path_and_name_and_type "${data}/wav.scp,speech_mix,sound" \
