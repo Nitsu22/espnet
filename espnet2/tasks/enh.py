@@ -23,6 +23,7 @@ from espnet2.enh.encoder.null_encoder import NullEncoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.espnet_model_ctf import ESPnetEnhancementCTFModel
+from espnet2.enh.espnet_model_ctf_dereverb import ESPnetCTFDereverbModel
 from espnet2.enh.espnet_model_frozen_bimamba import (
     ESPnetEnhancementFrozenBiMambaModel,
 )
@@ -88,6 +89,10 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_bigdeltanet import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf import (
     TFLocoformerCTFSeparator,
 )
+from espnet2.enh.separator.tflocoformer_ctf_dereverb import (
+    TFLocoformerCTFDereverbSeparator,
+    TFLocoformerCTFDereverbBaselineSeparator,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf_concat import (
     TFLocoformerSeparator as TFLocoformerCTFConcatSeparator,
 )
@@ -133,6 +138,7 @@ from espnet2.train.preprocessor import (
     EnhPreprocessor,
 )
 from espnet2.train.preprocessor_enh_ctf import EnhCTFPreprocessor
+from espnet2.train.preprocessor_ctf_dereverb import CTFDereverbPreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
@@ -174,6 +180,8 @@ separator_choices = ClassChoices(
         tflocoformer_nocashe=TFLocoformerSeparatorNocashe,
         tflocoformer_split=TFLocoformerSplitSeparator,
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
+        tflocoformer_ctf_dereverb=TFLocoformerCTFDereverbSeparator,
+        tflocoformer_ctf_dereverb_baseline=TFLocoformerCTFDereverbBaselineSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_bimamba_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
@@ -539,11 +547,12 @@ class EnhancementTask(AbsTask):
                     flexible_numspk=getattr(args, "flexible_numspk", False),
                 )
                 kwargs.update(args.preprocessor_conf)
-                preprocessor_class = (
-                    EnhCTFPreprocessor
-                    if args.separator == "tflocoformer_nocashe_ctf"
-                    else preprocessor_choices.get_class(args.preprocessor)
-                )
+                if args.separator.startswith("tflocoformer_ctf_dereverb"):
+                    preprocessor_class = CTFDereverbPreprocessor
+                elif args.separator == "tflocoformer_nocashe_ctf":
+                    preprocessor_class = EnhCTFPreprocessor
+                else:
+                    preprocessor_class = preprocessor_choices.get_class(args.preprocessor)
                 retval = preprocessor_class(train=train, **kwargs)
             else:
                 raise ValueError(
@@ -574,6 +583,8 @@ class EnhancementTask(AbsTask):
         retval += ["noise_ref{}".format(n) for n in range(1, MAX_REFERENCE_NUM + 1)]
         retval += ["category"]
         retval += ["speech_reverb1", "speech_reverb2", "reverb_crop_start"]
+        retval += ["ctf_loss_start", "ctf_loss_end", "ctf_crop_start",
+                   "ctf_crop_end", "ctf_original_length"]
         retval = tuple(retval)
         return retval
 
@@ -628,6 +639,8 @@ class EnhancementTask(AbsTask):
                 model_class = ESPnetEnhancementFrozenBiMambaModel
             elif args.separator == "tflocoformer_nocashe_ctf":
                 model_class = ESPnetEnhancementCTFModel
+            elif args.separator.startswith("tflocoformer_ctf_dereverb"):
+                model_class = ESPnetCTFDereverbModel
             else:
                 model_class = ESPnetEnhancementModel
             model = model_class(

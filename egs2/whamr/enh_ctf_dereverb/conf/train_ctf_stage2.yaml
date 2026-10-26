@@ -1,0 +1,117 @@
+# Noisy WHAMR Direct/Reverb, TF-Locoformer-S and paired context crops.
+seed: 0
+init: xavier_uniform
+max_epoch: 150
+use_amp: false
+train_dtype: float32
+grad_clip: 5.0
+batch_type: folded
+batch_size: 4
+num_workers: 4
+preprocessor: enh
+preprocessor_conf:
+  ctf_taps: 128
+  ctf_n_fft: 256
+  ctf_hop_length: 64
+num_spk: 2
+iterator_type: sequence
+speech_segment: 32000
+shuffle_within_batch: true
+force_single_channel: true
+avoid_allzero_segment: true
+model_conf:
+  normalize_variance: true
+  component_grad_interval: 100
+  training_stage: 2
+  clean_spectral_weight: 1.0
+  loss_w_clean0: 1.0
+  loss_w_clean: 1.0
+  loss_w_reverb: 1.0
+  loss_w_ctf: 1.0
+  baseline_mode: false
+optim: adamw
+optim_conf:
+  lr: 0.0001
+  eps: 1.0e-08
+  weight_decay: 0.01
+patience: 10
+early_stopping_criterion:
+- valid
+- loss
+- min
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+- - valid
+  - si_snr
+  - max
+- - valid
+  - loss
+  - min
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+  warmup_steps: 4000
+  mode: min
+  factor: 0.5
+  patience: 3
+encoder: stft
+encoder_conf:
+  n_fft: 256
+  win_length: 256
+  hop_length: 64
+  window: hann
+  center: true
+  normalized: false
+  onesided: true
+separator: tflocoformer_ctf_dereverb
+separator_conf:
+  num_spk: 2
+  n_layers: 4
+  emb_dim: 96
+  norm_type: rmsgroupnorm
+  num_groups: 4
+  tf_order: ft
+  n_heads: 4
+  flash_attention: false
+  ffn_type:
+  - swiglu_conv1d
+  - swiglu_conv1d
+  ffn_hidden_dim:
+  - 128
+  - 128
+  conv1d_kernel: 8
+  conv1d_shift: 1
+  dropout: 0.0
+  eps: 1.0e-05
+  ctf_taps: 128
+  ctf_hidden_dim: 64
+  mamba_d_state: 16
+  mamba_d_conv: 4
+  mamba_expand: 2
+  mamba_backend: auto
+  use_deconvolution: true
+  cg_iterations: 8
+  cg_gamma: 0.1
+  cg_eps: 1.0e-06
+decoder: stft
+decoder_conf:
+  n_fft: 256
+  win_length: 256
+  hop_length: 64
+  window: hann
+  center: true
+  normalized: false
+  onesided: true
+criterions:
+- name: si_snr
+  conf:
+    eps: 1.0e-07
+  wrapper: pit
+  wrapper_conf:
+    weight: 1.0
+    independent_perm: true
+valid_batch_size: 1
+num_att_plot: 0
+log_interval: 50
