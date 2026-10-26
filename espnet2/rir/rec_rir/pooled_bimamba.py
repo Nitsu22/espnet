@@ -265,6 +265,32 @@ class PostPoolingAttention(nn.Module):
         return x + update
 
 
+class SpeakerQueryRefinement(nn.Module):
+    """Refine time pooling using utterance-conditioned speaker queries.
+
+    The first pooling pass supplies one frequency-averaged context per speaker.
+    Each query is shared across frequency, while its keys retain every frame
+    and frequency. The resulting scalar attention logits are added to the
+    original channelwise pooling logits; the values and output size stay the
+    same. This is one refinement pass, not speech reconstruction or a hard
+    assignment of each time-frequency bin to exactly one speaker.
+    """
+
+    def __init__(self, dim, eps):
+        super().__init__()
+        self.query_norm = nn.LayerNorm(dim, eps=eps)
+        self.key_norm = nn.LayerNorm(dim, eps=eps)
+        self.query = nn.Linear(dim, dim, bias=False)
+        self.key = nn.Linear(dim, dim, bias=False)
+        self.scale = dim ** -0.5
+
+    def forward(self, x, pooled, slot_embeddings):
+        context = pooled.mean(dim=2) + slot_embeddings[None]
+        query = self.query(self.query_norm(context))
+        key = self.key(self.key_norm(x))
+        return torch.einsum("bsd,btfd->btfs", query, key) * self.scale
+
+
 class PooledBiMambaCTFPredictor(nn.Module):
     def __init__(self, input_dim=257, num_spk=2, ctf_taps=60, emb_dim=64,
                  pre_layers=4, post_layers=2, d_state=16, d_conv=4,
@@ -277,7 +303,8 @@ class PooledBiMambaCTFPredictor(nn.Module):
                  pre_frequency_global=True, post_interaction="none",
                  post_interaction_order="after_frequency",
                  pre_frequency_module="light",
-                 post_frequency_module="attention"):
+                 post_frequency_module="attention",
+                 pre_frequency_modules=None, pooling_mode="legacy"):
         super().__init__()
         positive = (input_dim, num_spk, ctf_taps, emb_dim, pre_layers, d_state,
                     d_conv, freq_bottleneck, freq_rank, local_kernel, pooling_hidden,
@@ -298,9 +325,22 @@ class PooledBiMambaCTFPredictor(nn.Module):
             raise ValueError("pre_frequency_global must be a boolean")
         if pre_frequency_module not in ("light", "attention", "bimamba", "bilstm"):
             raise ValueError("pre_frequency_module must be 'light', 'attention', 'bimamba', or 'bilstm'")
+        if pre_frequency_modules is None:
+            pre_modules = [pre_frequency_module] * pre_layers
+        else:
+            if pre_frequency_module != "light":
+                raise ValueError("Use either pre_frequency_module or pre_frequency_modules")
+            if (not isinstance(pre_frequency_modules, (list, tuple))
+                    or len(pre_frequency_modules) != pre_layers
+                    or any(module not in ("light", "attention", "bimamba", "bilstm")
+                           for module in pre_frequency_modules)):
+                raise ValueError("pre_frequency_modules must specify one valid mixer per pre layer")
+            pre_modules = list(pre_frequency_modules)
+        if pooling_mode not in ("legacy", "speaker_query"):
+            raise ValueError("pooling_mode must be 'legacy' or 'speaker_query'")
         if post_frequency_module not in ("attention", "bimamba", "bilstm"):
             raise ValueError("post_frequency_module must be 'attention', 'bimamba', or 'bilstm'")
-        if pre_frequency_module != "light" and not pre_frequency_global:
+        if any(module != "light" for module in pre_modules) and not pre_frequency_global:
             raise ValueError("pre_frequency_global selects a branch of the light module only")
         if post_frequency_module != "attention":
             if not post_attention:
@@ -330,7 +370,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
         self.post_interaction = post_interaction
         self.post_interaction_order = post_interaction_order
         self.pre_frequency_module = pre_frequency_module
+        self.pre_frequency_modules = tuple(pre_modules)
         self.post_frequency_module = post_frequency_module
+        self.pooling_mode = pooling_mode
         self.pooling_channels = emb_dim if pooling_channelwise else 1
         self.encoder = nn.Conv2d(2, emb_dim, kernel_size=3, padding=1)
         if time_module == "bimamba":
@@ -370,21 +412,22 @@ class PooledBiMambaCTFPredictor(nn.Module):
                 torch.default_generator.manual_seed((seed + offset) % (2**63 - 1))
                 return factory()
 
-        if pre_frequency_module != "light":
-            for index in frequency_indices:
+        for index in frequency_indices:
+            module = pre_modules[index]
+            if module != "light":
                 attention = seeded_module(
                     100003 + 97 * index,
                     lambda: FrequencyAttentionBlock(
                         emb_dim, n_heads, ffn_dim, local_kernel, eps),
                 )
                 sequence = attention
-                if pre_frequency_module == "bimamba":
+                if module == "bimamba":
                     sequence = seeded_module(
                         200003 + 97 * index,
                         lambda: FrequencyBiMambaBlock(
                             emb_dim, d_state, d_conv, eps, attention),
                     )
-                elif pre_frequency_module == "bilstm":
+                elif module == "bilstm":
                     sequence = seeded_module(
                         400009 + 97 * index,
                         lambda: FrequencyBiLSTMBlock(emb_dim, eps, attention),
@@ -403,6 +446,9 @@ class PooledBiMambaCTFPredictor(nn.Module):
                     500009 + 97 * index,
                     lambda: FrequencyBiLSTMBlock(emb_dim, eps, attention),
                 )
+        if pooling_mode == "speaker_query":
+            self.query_refinement = seeded_module(
+                600011, lambda: SpeakerQueryRefinement(emb_dim, eps))
 
     @staticmethod
     def _active_indices(indices, layers, name):
@@ -431,6 +477,10 @@ class PooledBiMambaCTFPredictor(nn.Module):
         # Match baseline padding behavior: softmax over the full batch time axis.
         weights = scores.softmax(dim=1)
         pooled = (weights * x.unsqueeze(3)).sum(1).permute(0, 2, 1, 3)
+        if self.pooling_mode == "speaker_query":
+            query_scores = self.query_refinement(x, pooled, self.slot_embeddings)
+            weights = (scores + query_scores.unsqueeze(-1)).softmax(dim=1)
+            pooled = (weights * x.unsqueeze(3)).sum(1).permute(0, 2, 1, 3)
         pooled = pooled + self.slot_embeddings[None, :, None, :]
         if self.post_interaction == "none":
             # Keep the legacy layout and operation ordering exactly intact.

@@ -13,6 +13,7 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
     def __init__(self, drr_loss_weight=0.0, drr_direct_window_ms=2.5,
                  drr_huber_beta=1.0, drr_energy_floor=1e-8,
                  time_sweep_loss_weight=0.0, time_sweep_loss_eps=1e-8,
+                 rir_mse_loss_weight=0.0, rir_mse_loss_eps=1e-8,
                  **kwargs):
         settings = (drr_loss_weight, drr_direct_window_ms,
                     drr_huber_beta, drr_energy_floor)
@@ -23,6 +24,9 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
         if (not math.isfinite(time_sweep_loss_weight) or time_sweep_loss_weight < 0
                 or not math.isfinite(time_sweep_loss_eps) or time_sweep_loss_eps <= 0):
             raise ValueError('Invalid time-sweep loss weight or epsilon')
+        if (not math.isfinite(rir_mse_loss_weight) or rir_mse_loss_weight < 0
+                or not math.isfinite(rir_mse_loss_eps) or rir_mse_loss_eps <= 0):
+            raise ValueError('Invalid recovered-RIR MSE weight or epsilon')
         super().__init__(**kwargs)
         if self.rt60_auxiliary or self.reconstruction_signal != 'speech':
             raise ValueError('Use the basic CTF predictor; sweep v2 supplies its own loss')
@@ -33,7 +37,9 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
         self.drr_energy_floor = float(drr_energy_floor)
         self.time_sweep_loss_weight = float(time_sweep_loss_weight)
         self.time_sweep_loss_eps = float(time_sweep_loss_eps)
-        if self.drr_loss_weight:
+        self.rir_mse_loss_weight = float(rir_mse_loss_weight)
+        self.rir_mse_loss_eps = float(rir_mse_loss_eps)
+        if self.drr_loss_weight or self.rir_mse_loss_weight:
             inverse = self.pim.invfilter.clone()
             gain = torch.dot(self.sweep.double(), inverse.flip(0).double())
             if not torch.isfinite(gain) or gain.abs() < 1e-8:
@@ -85,6 +91,20 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
             16 * torch.finfo(energy.dtype).tiny)
         return 10 * (torch.log10(direct + floor) - torch.log10(reverb + floor))
 
+    def rir_peak_mse(self, prediction, target):
+        """Per-example MSE with a shared, teacher-only amplitude scale.
+
+        Inputs must both have passed through the SAME calibrated inverse-sweep
+        measurement. No student peak alignment or normalization: gain, delay
+        and polarity errors remain. Epsilon is an amplitude floor, applied
+        before squaring. This is not ordinary-PIM-vs-raw-physical-RIR loss.
+        """
+        if prediction.shape != target.shape or prediction.ndim != 2:
+            raise ValueError('Expected paired recovered RIRs [B, samples]')
+        scale = target.abs().amax(dim=-1, keepdim=True).clamp_min(
+            self.rir_mse_loss_eps)
+        return ((prediction - target) / scale).square().mean(dim=-1)
+
     def paired_pit_loss(self, ctf, direct, reverb):
         loss, best, _ = self.paired_pit_loss_with_stats(ctf, direct, reverb)
         return loss, best
@@ -95,20 +115,21 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
         target = self.response_spectrum(reverb.reshape(batch * speakers, reverb.shape[-1]))
         excitation = excitation[:, 0].reshape(batch, speakers, *excitation.shape[-2:])
         target = target[:, 0].reshape(batch, speakers, *target.shape[-2:])
-        if self.drr_loss_weight:
+        if self.drr_loss_weight or self.rir_mse_loss_weight:
             # Both sides include the SAME original-sweep measurement/inverse
             # response. A raw physical RIR is not a band-limited PIM reference.
             with torch.no_grad():
                 recovered_target = self.response_to_rir(
                     target.reshape(batch * speakers, 1, *target.shape[-2:]),
                     reverb.shape[-1])[:, 0].reshape(batch, speakers, -1)
-                centers = reverb.abs().argmax(-1)
-                target_drr = self.drr_db(
-                    recovered_target.reshape(batch * speakers, -1),
-                    centers.reshape(-1)).reshape(batch, speakers)
-        costs, time_costs, drr_costs, drr_errors = [], [], [], []
+                if self.drr_loss_weight:
+                    centers = reverb.abs().argmax(-1)
+                    target_drr = self.drr_db(
+                        recovered_target.reshape(batch * speakers, -1),
+                        centers.reshape(-1)).reshape(batch, speakers)
+        costs, time_costs, drr_costs, drr_errors, rir_costs = [], [], [], [], []
         for pred in range(speakers):
-            row, time_row, drr_row, error_row = [], [], [], []
+            row, time_row, drr_row, error_row, rir_row = [], [], [], [], []
             for ref in range(speakers):
                 # BOTH the excitation and response belong to the reference
                 # speaker; permuting only target responses is incorrect.
@@ -120,10 +141,13 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
                     reduction='none'))
                 if self.time_sweep_loss_weight:
                     time_row.append(self.time_sweep_l1(output, target[:, ref]))
-                if self.drr_loss_weight:
+                if self.drr_loss_weight or self.rir_mse_loss_weight:
                     # Restore the clean-to-reverb basis from the predicted
                     # DIRECT-sweep response, using the ORIGINAL sweep inverse.
                     recovered = self.response_to_rir(output[:, None], reverb.shape[-1])[:, 0]
+                if self.rir_mse_loss_weight:
+                    rir_row.append(self.rir_peak_mse(recovered, recovered_target[:, ref]))
+                if self.drr_loss_weight:
                     predicted_drr = self.drr_db(recovered, centers[:, ref])
                     drr_row.append(F.smooth_l1_loss(
                         predicted_drr, target_drr[:, ref], reduction='none',
@@ -133,6 +157,7 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
             time_costs.append(time_row)
             drr_costs.append(drr_row)
             drr_errors.append(error_row)
+            rir_costs.append(rir_row)
         def permute_costs(values):
             return torch.stack([sum(values[p][r] for p, r in enumerate(perm)) / speakers
                                 for perm in self.permutations])
@@ -144,15 +169,22 @@ class ESPnetTFLocoformerSweepV2PITModel(ESPnetRecRIRTFLocoformerPITModel):
         if self.drr_loss_weight:
             drr_totals = permute_costs(drr_costs)
             totals = totals + self.drr_loss_weight * drr_totals
+        if self.rir_mse_loss_weight:
+            rir_totals = permute_costs(rir_costs)
+            totals = totals + self.rir_mse_loss_weight * rir_totals
         best = totals.argmin(0)
         def select(values):
             return values.gather(0, best[None]).mean()
         stats = dict(loss_sweep=select(sweep_totals).detach())
         if self.time_sweep_loss_weight:
             stats['loss_time_sweep_l1'] = select(time_totals).detach()
+        if self.time_sweep_loss_weight or self.rir_mse_loss_weight:
             # The original baseline selects PIT using only spectral loss.
             # Keep that independent validation metric for checkpoint selection.
             stats['loss_sweep_min'] = sweep_totals.min(0).values.mean().detach()
+        if self.rir_mse_loss_weight:
+            stats['loss_rir_mse'] = select(rir_totals).detach()
+            stats['loss_rir_mse_min'] = rir_totals.min(0).values.mean().detach()
         if self.drr_loss_weight:
             stats.update(loss_drr=select(drr_totals).detach(),
                          drr_mae_db=select(permute_costs(drr_errors)).detach())

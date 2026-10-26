@@ -1,0 +1,88 @@
+# Ablation: speaker_query_rir_mse. Keep training/selection settings shared with the baseline.
+# BiLSTM pre8/post4, spectral Sweep v2 plus teacher-peak-normalized recovered-RIR MSE.
+# MSE weight 10000 balances initial CTF gradients on three training examples; tune on validation.
+# Random initialization; no pretrained weights and no resumed checkpoint.
+seed: 0
+init_param: []
+resume: false
+init: null
+max_epoch: 200
+use_amp: false
+grad_clip: 1.0
+batch_type: folded
+batch_size: 4
+num_workers: 4
+sample_rate: 8000
+force_single_channel: true
+rir_model_type: pooled_bimamba_sweep_v2_pit
+preprocessor: rec_rir_sweep_v2_pit
+preprocessor_conf:
+  speech_segment: 32000
+  force_single_channel: true
+  rir_length: 16000
+model_conf:
+  extract_feats_in_collect_stats: false
+  sr: 8000
+  n_fft: 256
+  win_len: 256
+  hop_len: 128
+  win_type: sqrthann
+  num_freqs: 129
+  loss_type: RIMag
+  normalize_by_mix: true
+  pim_sweep_duration: 8.192
+  num_spk: 2
+  ctf_taps: 60
+  time_sweep_loss_weight: 0.0
+  rir_mse_loss_weight: 10000.0
+  rir_mse_loss_eps: 1.0e-8
+  time_sweep_loss_eps: 1.0e-8
+  predictor_conf:
+    time_module: bilstm
+    pre_frequency_module: light
+    post_frequency_module: bilstm
+    emb_dim: 64
+    pre_layers: 8
+    post_layers: 4
+    d_state: 16
+    d_conv: 4
+    freq_bottleneck: 16
+    freq_rank: 16
+    local_kernel: 5
+    pooling_hidden: 32
+    pooling_mode: speaker_query
+    n_heads: 4
+    ffn_dim: 128
+    head_dim: 128
+    slot_embedding_std: 0.02
+    eps: 1.0e-5
+optim: adamw
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.0
+# ESPnet stops when epochs_without_improvement > patience: 14 means 15.
+patience: 14
+early_stopping_criterion:
+- valid
+- loss_sweep_min
+- min
+val_scheduler_criterion:
+- valid
+- loss_sweep_min
+best_model_criterion:
+- - valid
+  - loss_sweep_min
+  - min
+keep_nbest_models: 5
+scheduler: reducelronplateau
+scheduler_conf:
+  mode: min
+  factor: 0.5
+  # PyTorch reduces when num_bad_epochs > patience: 4 means 5.
+  patience: 4
+  threshold: 0.0
+  threshold_mode: abs
+  cooldown: 0
+  min_lr: 0.000001
+  eps: 1.0e-08
