@@ -1,0 +1,13 @@
+{
+  "host": "tsubame",
+  "original_baseline": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh7_baseline/exp/enh_train_tflocoformer_s_nf_8k_1gpu_batch4/enhanced_tt_mix_clean_reverb_min_8k/scoring",
+  "original_concat": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_concat_s/egs2/whamr/enh_rir/exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_concat_seed0/inference_normalized_tt/score",
+  "same_baseline": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_concat_s/egs2/whamr/enh_rir/exp/eval_nf8k_same_speaker_concat_normalized_seed0/baseline/score",
+  "same_concat": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_concat_s/egs2/whamr/enh_rir/exp/eval_nf8k_same_speaker_concat_normalized_seed0/conditioned/score",
+  "baseline_checkpoint": "146epoch.pth",
+  "concat_checkpoint": "129epoch.pth",
+  "normalize_output_wav": true,
+  "local_inputs": "inputs/ copies of the four score directories, excluded from Git",
+  "metadata": "egs2/whamr/enh_rir/whamr_scripts/data/reverb_params_tt.csv",
+  "same_speaker_dump": "/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_same_speaker_test/egs2/whamr/enh_rir/dump_nf8k_same_speaker_seed0"
+}

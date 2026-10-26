@@ -1,0 +1,99 @@
+{
+  "seed": 0,
+  "bootstrap": 5000,
+  "count": 3000,
+  "metric": "ESPnet SI_SNR: zero-mean SI-SDR in dB",
+  "unit": "one paired scene, mean of two reference-aligned source scores",
+  "distance_definition": "3D Euclidean distance; left microphone; mean_distance_m=(d1+d2)/2",
+  "source_sha256": {
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/whamr_scripts/data/reverb_params_tt.csv": "b7003fe5de4de0b817af94a92f098092975c94e8c6cb058ecb9253f56164e2a9",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SI_SNR_spk1": "ca5095ddf4ed6c92cbfdf4ac6958683a4e4f35b4246aa383e323826afa95ba16",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SI_SNR_spk2": "16c48621851a1772318f42193e7a19a9699b35438e407ed3b04faa34a846cb2e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SDR_spk1": "6ec9bda5f4bc4eccdc469383729cc99ce053dd14122eb390efe84fc440619fc4",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SDR_spk2": "74897f99745c3a7bc92392bee0571eab9a9c8b29b80a6dbb2217d00474733a93",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SAR_spk1": "1183c764a5574f8b26f06a714dedd43dbfe9cc7c150eb22d8b336d281994b01f",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SAR_spk2": "e96701d60ad218ea049a01dcadc75566eccc8de7d834a1824933fb7e89fb1c97",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SIR_spk1": "00d4b6a0a753c940ffcb8d1053dd296bfa049ab1b7f8395812f9bf232473322e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/SIR_spk2": "88b73f17e3e9b681b7c09d41683928ec315e23ce2ec4efa694209b327756a51e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/STOI_spk1": "5dee92b2f3a79ff28928c96857dc3fc30596fed11855d90b946d95420ded978a",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_baseline/STOI_spk2": "310c0f1a8d9ee74bd4728e4687d5e7770721717fda6f92c685cbdcf3d1c68cdd",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SI_SNR_spk1": "65a8b022e0b7c2243821c89a14e72f520507060ec5f7d6b112d4de464c911fc7",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SI_SNR_spk2": "e871e74058357476391ac90899cb84a720e8f5d6cd6ce33b21363ae7f30172a4",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SDR_spk1": "899348cdba49f46f05261c8745175b5be835ab9d1c93c7f3455eea12fdfea08f",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SDR_spk2": "6740cfa3708a7b15d02e82cdaec73a95d6e5e61431a2e757f46342b58bb33d2e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SAR_spk1": "b5cbc24d53c290136c2733b0bd28100f875da41e0f3c04bef215ed451bf8600f",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SAR_spk2": "f3390aaa9b981f2390ce093558466f14bb6ebf42ed1dcc8e7aa7c0e8c2786953",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SIR_spk1": "03d99dd1588819de41e1db701734a614f429c67689bdc379579ffeafd9ad06ed",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/SIR_spk2": "735848f72455f6261ebadb17e02a7c52fa89063e1a07df911536d9264364acf8",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/STOI_spk1": "777d6fed23b828a518dc535560772ffcd251551a376ad9a8a71d6fb398a41a1a",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/original_concat/STOI_spk2": "436d4b903dc72a8b237a6c28a55a889a62cfa35b8946c5a7f4022e4ee02c1b25",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SI_SNR_spk1": "9b25d753be71eb6b312ee9b32c8e099bb0fb42d2a7316cc087e380d85097ca89",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SI_SNR_spk2": "dd500f9a55b8517e1580753d3ba40fb9f912e8246b04380601f9f91988a6223d",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SDR_spk1": "2e2ffe2ffb5d397f4d3373f683d5f720af750cb576a7ad2bcabbc87605ad9c74",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SDR_spk2": "0472b29a86a59db53e782ff0f7a92e10d67dfb17c71fe8d3dc38669657724dae",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SAR_spk1": "e69a5299f84bd640b3fb576d721bf8adb9c7a21dc720d7e9dbd7423be6f95553",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SAR_spk2": "3cad6ecbe534d680cd185e4f353013f67b98215c93b70130746fbb3f9331b2d6",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SIR_spk1": "45eca4f79eb4ca175deeb684ba4e836d3cdd2fd63ad992615d088ba19e64939b",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/SIR_spk2": "895a8d07d9d2e032980aadaf1520622697bae898723c2f362bffdb74b76ce940",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/STOI_spk1": "f338cf8c6168e483eda63c8dd09039d02029fcf270b5e286c93e3a9a2eb5eccf",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_baseline/STOI_spk2": "e60964ae24390f3df117ee406fda43811d724abb5ff0a387934905faf50ddc5a",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SI_SNR_spk1": "ec881f33e4197720846e67a2fc9e73e04a8a9db07618ae5265edf57b52be90ba",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SI_SNR_spk2": "6281d3cc599e50ef4288e6ceafa904431a23da40ebd1893a7fac28bb7a2238b0",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SDR_spk1": "0cd3e288857bf04ddae9a91a178de2a2e7cf6749470fa0607fbaebad8db35dd8",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SDR_spk2": "e0a2c1221844bec2696298ee285b1890c2d973108e9b2982f68d0e8098a2ed79",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SAR_spk1": "bbc60c066c7b819f9342dd56f7499e24cddfdfedbb1c10feaa44f475761ce95f",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SAR_spk2": "135b2f3891ad7492d197248bd937560dc162f9009aa604a92a567b782250c28e",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SIR_spk1": "3f3998faa60edea60e1d0c963cb1119c3faa12bfdd8c104a2093a82fc392e629",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/SIR_spk2": "575e8513500e8874c9357d655f3674b24180d1ca28055dada392f0cb9a4b07e5",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/STOI_spk1": "403551cf5ef05de787f53354d448088e7ea2ef14d86c603737a6646a906b915c",
+    "/net/midgar/work2/nitsu/learning/tf-locoformer/espnet/egs2/whamr/enh_rir/analysis/20261027_concat_conditions/inputs/same_concat/STOI_spk2": "1652ce0af7af55e45664f31e0b76c213581ea03827d0c00a5be22478d4b639b1"
+  },
+  "boundaries": {
+    "rt60_s": [
+      0.1,
+      0.3,
+      0.6,
+      1.0
+    ],
+    "mean_distance_m": [
+      0,
+      1,
+      1.5,
+      null
+    ],
+    "distance_gap_m": [
+      0,
+      0.25,
+      0.5,
+      null
+    ],
+    "source_separation_m": [
+      0,
+      1,
+      2,
+      null
+    ],
+    "doa_separation_deg": [
+      0,
+      30,
+      60,
+      120,
+      180
+    ],
+    "volume_m3": [
+      0,
+      150,
+      225,
+      null
+    ]
+  },
+  "caveats": [
+    "One training seed; confidence intervals resample scenes, not training runs.",
+    "Pointwise exploratory subgroup intervals; no multiple-comparison correction.",
+    "Scenes share utterances/speakers; intervals condition on this fixed speech pool.",
+    "Room factors are correlated; subgroup trends do not establish causality.",
+    "RT60 is nominal generation T60, not a measured decay estimate.",
+    "Same-speaker scenes change utterance content as well as speaker pairing.",
+    "Both models use normalized output WAVs in both conditions."
+  ]
+}
