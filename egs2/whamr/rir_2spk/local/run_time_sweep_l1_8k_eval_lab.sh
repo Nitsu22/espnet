@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # One ordinary-PIM inference pass, scored against physical WHAMR and LS RIRs.
 set -euo pipefail
-[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [time_l1|baseline|rec_rir|baseline_ft45_plateau]' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [time_l1|baseline|rec_rir|baseline_ft45_plateau|baseline_scratch_plateau|bilstm_pre8_post4_time_l1_plateau]' >&2; exit 2; }
 gpu_index=$1
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || exit 2
 variant=${3:-time_l1}
-case "$variant" in time_l1|baseline|rec_rir|baseline_ft45_plateau) ;; *) echo 'Unsupported variant' >&2; exit 2 ;; esac
+case "$variant" in time_l1|baseline|rec_rir|baseline_ft45_plateau|baseline_scratch_plateau|bilstm_pre8_post4_time_l1_plateau) ;; *) echo 'Unsupported variant' >&2; exit 2 ;; esac
 prediction_label="BiMamba_8k_$variant"
 [[ "$variant" != rec_rir ]] || prediction_label=RecRIR_8k_3loss
 result_recipe=$(realpath "$2")
@@ -34,6 +34,15 @@ elif [[ "$variant" == baseline_ft45_plateau ]]; then
     model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_ft45_plateau_lr1em3"
     training="$result_recipe/exp/baseline_plateau_ft45_lr1em3_training_20261021"
     output="$result_recipe/exp/baseline_plateau_ft45_lr1em3_eval8k_20261023"
+elif [[ "$variant" == baseline_scratch_plateau ]]; then
+    model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_scratch_plateau_200ep"
+    training="$result_recipe/exp/baseline_scratch_plateau_200ep_training_20261022"
+    output="$result_recipe/exp/baseline_scratch_plateau_eval8k_20261026"
+elif [[ "$variant" == bilstm_pre8_post4_time_l1_plateau ]]; then
+    model="$result_recipe/exp/rir_train_pooled_bilstm_2spk_nf_8k_sweep_v2_pre8_post4_time_l1_plateau_200ep"
+    training="$result_recipe/exp/bilstm_pre8_post4_time_l1_training_20261023"
+    output="$result_recipe/exp/bilstm_pre8_post4_time_l1_plateau_eval8k_20261026"
+    prediction_label=BiLSTM_pre8_post4_time_L1_8k
 else
     model="$result_recipe/exp/rir_train_pooled_bimamba_2spk_nf_8k_sweep_v2_time_l1"
     training="$result_recipe/exp/time_sweep_l1_training_20261019"
@@ -110,14 +119,14 @@ else:
     assert (training / 'exit_status').read_text().strip() == '0'
     assert (training / 'final_phase').read_text().strip() == 'complete'
     completed = json.loads((training / 'training_complete.json').read_text())
-    checkpoint = model / ('valid.loss.best.pth' if variant == 'baseline_ft45_plateau'
+    checkpoint = model / ('valid.loss.best.pth' if variant in ('baseline_ft45_plateau', 'baseline_scratch_plateau')
                           else 'valid.loss_sweep_min.best.pth')
     assert checkpoint.resolve() == Path(completed['checkpoint']).resolve()
 assert digest(checkpoint) == completed['checkpoint_sha256']
 assert digest(model / 'config.yaml') == completed['config_sha256']
 config = yaml.safe_load((model / 'config.yaml').read_text())
 assert config['sample_rate'] == config['model_conf']['sr'] == 8000
-assert config['model_conf'].get('time_sweep_loss_weight', 0.0) == (1.0 if variant == 'time_l1' else 0.0)
+assert config['model_conf'].get('time_sweep_loss_weight', 0.0) == (1.0 if variant in ('time_l1', 'bilstm_pre8_post4_time_l1_plateau') else 0.0)
 if variant == 'rec_rir':
     assert config['rir_model_type'] == 'rec_rir_pit'
     assert all(config['model_conf'][key] == 1.0 for key in ('loss_w_cln', 'loss_w_rvb', 'loss_w_rec'))
