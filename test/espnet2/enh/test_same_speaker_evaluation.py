@@ -41,7 +41,8 @@ class TestSameSpeakerEvaluation(unittest.TestCase):
         self.args = SimpleNamespace(output_dir=self.root / "evaluation", test_dir=self.data,
                                     baseline_exp=self.exps["baseline"],
                                     conditioned_exp=self.exps["conditioned"],
-                                    checkpoint="valid.loss.best.pth", resume=False)
+                                    checkpoint="valid.loss.best.pth", resume=False,
+                                    normalize_output_wav="true")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -50,6 +51,7 @@ class TestSameSpeakerEvaluation(unittest.TestCase):
         check.prepare(self.args)
         manifest = check.verify(self.args.output_dir)
         self.assertEqual(manifest["inputs"]["count"], 2)
+        self.assertTrue(manifest["inference"]["normalize_output_wav"])
         self.assertTrue(manifest["models"]["baseline"]["checkpoint"].endswith("1epoch.pth"))
         with self.assertRaises(ValueError):
             check.prepare(self.args)
@@ -66,6 +68,13 @@ class TestSameSpeakerEvaluation(unittest.TestCase):
         (self.exps["conditioned"] / "1epoch.pth").write_bytes(b"modified")
         with self.assertRaises(ValueError):
             check.verify(self.args.output_dir)
+
+    def test_resume_rejects_different_output_normalization(self):
+        check.prepare(self.args)
+        self.args.resume = True
+        self.args.normalize_output_wav = "false"
+        with self.assertRaisesRegex(ValueError, "Output normalization differs"):
+            check.prepare(self.args)
 
     def test_keys_duplicates_missing_paths_and_audio_lengths_rejected(self):
         index = self.data / "spk2.scp"

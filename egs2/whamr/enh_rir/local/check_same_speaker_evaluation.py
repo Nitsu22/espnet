@@ -102,6 +102,7 @@ def prepare(args):
     test = args.test_dir.resolve(strict=True)
     exps = {name: getattr(args, f"{name}_exp").resolve(strict=True)
             for name in MODELS}
+    normalize_output_wav = args.normalize_output_wav == "true"
     allowed = (Path("/net/midgar/work2/nitsu"), Path("/gs/bs/tga-shinoda/nitsu"))
     if not any(base in root.parents for base in allowed):
         raise ValueError("Evaluation output must be inside a permitted user directory")
@@ -112,6 +113,8 @@ def prepare(args):
         if not args.resume:
             raise ValueError("Evaluation output exists; use a new directory or --resume true")
         spec = verify(root)
+        if spec["inference"]["normalize_output_wav"] != normalize_output_wav:
+            raise ValueError("Output normalization differs from the recorded evaluation")
         if spec["inputs"]["test_dir"] != str(test) or any(
                 spec["models"][name]["experiment"] != str(exp)
                 for name, exp in exps.items()):
@@ -131,7 +134,7 @@ def prepare(args):
     root.mkdir(parents=True)
     spec = {"schema_version": 1, "inputs": inputs, "models": models,
             "inference": {"fs": 8000, "batch_size": 1, "ngpu": 1,
-                          "segmented": False, "normalize_output_wav": False},
+                          "segmented": False, "normalize_output_wav": normalize_output_wav},
             "conditioning": "Frozen BiMamba estimates CTF from each new mixture; no cached CTF",
             "scoring": "ESPnet enh_scoring, ref_channel=0, standard BSS_EVAL permutation"}
     (root / "provenance.json").write_text(json.dumps(spec, indent=2) + "\n")
@@ -189,6 +192,7 @@ def main():
     for name in ("test-dir", "baseline-exp", "conditioned-exp", "output-dir"):
         prep.add_argument(f"--{name}", type=Path, required=True)
     prep.add_argument("--checkpoint", default="valid.loss.best.pth")
+    prep.add_argument("--normalize-output-wav", choices=("true", "false"), default="true")
     prep.add_argument("--resume", action="store_true")
     for command in ("paths", "verify", "check-inference", "check-score", "summary"):
         item = sub.add_parser(command)

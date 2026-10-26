@@ -103,6 +103,12 @@ inference rather than assuming that a hold dependency succeeded. Models use
 the same full-waveform inference, batch 1, 8 kHz, reference channel 0, and
 ESPnet BSS_EVAL permutation as the completed benchmark.
 
+Output WAV peak normalization is enabled by default for BOTH models, matching
+the Baseline benchmark and preventing PCM16 clipping. The setting is pinned
+in `provenance.json`; resuming an old unnormalized run requires explicit
+`--normalize_output_wav false` on the local runner. Use a new evaluation output
+for the normalized Baseline / temporal-concat comparison; do not reuse old scores.
+
 ## Results and interpretation
 
 `OUT/summary.csv` holds all six standard ESPnet metrics. The optional original

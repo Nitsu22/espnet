@@ -9,10 +9,11 @@ output_dir=
 stage=7
 stop_stage=8
 resume=false
+normalize_output_wav=true
 python=python3
 while (( $# )); do
     case "$1" in
-        --test_dir|--baseline_exp|--conditioned_exp|--output_dir|--stage|--stop_stage|--resume|--python)
+        --test_dir|--baseline_exp|--conditioned_exp|--output_dir|--stage|--stop_stage|--resume|--normalize_output_wav|--python)
             name=${1#--}; [[ $# -ge 2 ]] || exit 2; printf -v "${name}" '%s' "$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -20,12 +21,13 @@ done
 [[ -n ${test_dir} && -n ${baseline_exp} && -n ${conditioned_exp} && -n ${output_dir} ]]
 [[ ${stage} =~ ^[78]$ && ${stop_stage} =~ ^[78]$ && ${stage} -le ${stop_stage} ]]
 [[ ${resume} == true || ${resume} == false ]]
+[[ ${normalize_output_wav} == true || ${normalize_output_wav} == false ]]
 checker=$(dirname "${BASH_SOURCE[0]}")/check_same_speaker_evaluation.py
 opts=()
 [[ ${resume} == false ]] || opts+=(--resume)
 "${python}" "${checker}" prepare --test-dir "${test_dir}" \
     --baseline-exp "${baseline_exp}" --conditioned-exp "${conditioned_exp}" \
-    --output-dir "${output_dir}" "${opts[@]}"
+    --output-dir "${output_dir}" --normalize-output-wav "${normalize_output_wav}" "${opts[@]}"
 export TMPDIR="${output_dir}/.tmp"
 export NUMBA_CACHE_DIR="${TMPDIR}/numba" TRITON_CACHE_DIR="${TMPDIR}/triton"
 export MPLCONFIGDIR="${TMPDIR}/matplotlib" XDG_CACHE_HOME="${TMPDIR}/xdg"
@@ -49,6 +51,7 @@ for model in baseline conditioned; do
             mkdir -p "${out}"
             "${python}" -m espnet2.bin.enh_inference \
                 --ngpu 1 --fs 8000 --batch_size 1 \
+                --normalize_output_wav "${normalize_output_wav}" \
                 --train_config "${model_paths[0]}" --model_file "${model_paths[1]}" \
                 --data_path_and_name_and_type "${test_dir}/wav.scp,speech_mix,sound" \
                 --key_file "${test_dir}/wav.scp" --output_dir "${out}" \
