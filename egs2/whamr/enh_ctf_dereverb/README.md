@@ -178,6 +178,8 @@ From this recipe, create `qsub_logs`, then submit a charged CUDA readiness job:
 
 ```bash
 qsub -g tga-shinoda qsub/check_joint_cuda.sh /absolute/verified/dump_ctf_joint
+# Or queue the same 24-hour training job automatically, only if this check passes:
+qsub -g tga-shinoda qsub/check_joint_cuda.sh /absolute/verified/dump_ctf_joint true
 # After it passes, supply its actual report path:
 qsub -g tga-shinoda qsub/train_joint_1gpu.sh /absolute/verified/dump_ctf_joint \
     exp/cuda_checks/check_JOB_ID.json
@@ -189,6 +191,10 @@ examples, four AdamW updates with finite gradients, and full-length validation
 of the longest validation utterance. The report records time and memory; no
 probe weights are used for production training. This is a charged job, not a
 free-trial measurement.
+The optional second argument `true` submits training only after both checks
+return success; the submission output is retained in
+`exp/cuda_checks/training_after_JOB_ID.txt`. Use either this automatic route or
+the manual training command, not both for the same experiment.
 
 The base `tf-locoformer` conda environment does not itself contain Mamba.
 Both jobs add the existing user-owned dependency directory
