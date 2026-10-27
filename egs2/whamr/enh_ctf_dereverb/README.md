@@ -169,6 +169,39 @@ python -m unittest \
     test.espnet2.enh.test_ctf_joint
 ```
 
+## TSUBAME launch
+
+Use an isolated checkout at the synchronized commit. Existing paired data can
+be reused at
+`/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/enh_rir/dump_ctf_joint`.
+From this recipe, create `qsub_logs`, then submit a charged CUDA readiness job:
+
+```bash
+qsub -g tga-shinoda qsub/check_joint_cuda.sh /absolute/verified/dump_ctf_joint
+# After it passes, supply its actual report path:
+qsub -g tga-shinoda qsub/train_joint_1gpu.sh /absolute/verified/dump_ctf_joint \
+    exp/cuda_checks/check_JOB_ID.json
+```
+
+The readiness job requests `gpu_1=1`, priority -5, 20 minutes. It checks Mamba
+CUDA/reference forward and input gradients, four full-context 40640-sample
+examples, four AdamW updates with finite gradients, and full-length validation
+of the longest validation utterance. The report records time and memory; no
+probe weights are used for production training. This is a charged job, not a
+free-trial measurement.
+
+Training requests `gpu_1=1` (8 cores, 96 GB host RAM, one full GPU), priority -5,
+24 hours. It verifies a passed readiness report with exactly matching source
+commit, configuration and paired manifest, and starts from scratch or resumes
+the same experiment's checkpoint. Further submissions resume completed epochs;
+an interrupted epoch repeats. Scripts preserve scheduler GPU visibility, use
+owned task-specific `/tmp/nitsu` directories, and keep caches in the recipe.
+
+Using the official coefficients checked on 2026-10-27, upper point estimates
+are `0.2 * 0.8 * (20/60) = 0.0533` for readiness and
+`0.2 * 0.8 * 24 = 3.84` for one training allocation. Actual duration is not
+known before the GPU check; these are estimates, not confirmed charges.
+
 The revised implementation passed 45 unit/integration/regression tests. A tiny
 synthetic CPU trainer also completed joint training, saved its optimizer and
 best SI-SNR checkpoint, and resumed for another epoch (optimizer steps 1 to 2).
