@@ -24,7 +24,7 @@ from espnet2.tasks.enh import EnhancementTask
 from espnet2.utils.types import str2bool
 
 
-CLEAN_BRANCHES = ("clean_prior", "clean_deconv", "clean_final")
+CLEAN_BRANCHES = ("clean_deconv", "clean_final")
 SAMPLE_RATE = 8000
 
 
@@ -241,7 +241,12 @@ def inference(
     except ImportError:
         stoi = None
         stoi_status = dict(available=False, reason="pystoi is not installed")
-    branches = CLEAN_BRANCHES + (("reverb",) if write_reverb else ())
+    if model.baseline_mode and write_reverb:
+        raise ValueError("The baseline has no Reverb output to export")
+    branches = (
+        ("clean_final",) if model.baseline_mode
+        else CLEAN_BRANCHES + (("reverb",) if write_reverb else ())
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     scp_entries = {name: [[], []] for name in branches}
     ctf_entries = []

@@ -1,4 +1,4 @@
-"""Two-stage, common-assignment CTF dereverberation training and inference."""
+"""Joint 3+1-block CTF restoration with baseline SI-SNR and common PIT."""
 
 import math
 from itertools import permutations
@@ -8,6 +8,8 @@ from torch.nn import functional as F
 
 from espnet2.enh.espnet_model import ESPnetEnhancementModel
 from espnet2.enh.layers.ctf_deconvolution import ctf_forward
+from espnet2.enh.loss.criterions.time_domain import SISNRLoss
+from espnet2.enh.loss.wrappers.pit_solver import PITSolver
 from espnet2.torch_utils.device_funcs import force_gatherable
 
 
@@ -24,21 +26,8 @@ def spectral_distance(estimate, reference, mask):
     return (error * weight).sum() / weight.sum()
 
 
-def negative_si_sdr(estimate, reference, eps=1e-8):
-    """Finite SI-SDR, including silence; no independent rescaling of branches."""
-    estimate = estimate - estimate.mean(-1, keepdim=True)
-    reference = reference - reference.mean(-1, keepdim=True)
-    projection = (
-        (estimate * reference).sum(-1, keepdim=True)
-        / reference.square().sum(-1, keepdim=True).clamp_min(eps)
-    ) * reference
-    target = projection.square().sum(-1).clamp_min(eps)
-    residual = (estimate - projection).square().sum(-1).clamp_min(eps)
-    return -10 * (target.log10() - residual.log10())
-
-
 class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
-    """PIT from S0 in stage 1 and final clean in stage 2, shared by all heads.
+    """Final-Clean SI-SNR PIT, shared by Reverb and teacher-CTF reconstruction.
 
     Each utterance is encoded at its own boundary. The mixture-derived scale
     is shared by every teacher and estimate; all spectral losses use linear
@@ -48,9 +37,6 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
     def __init__(
         self,
         *args,
-        training_stage=1,
-        clean_spectral_weight=1.0,
-        loss_w_clean0=1.0,
         loss_w_clean=1.0,
         loss_w_reverb=1.0,
         loss_w_ctf=1.0,
@@ -59,10 +45,7 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        if training_stage not in (1, 2):
-            raise ValueError("training_stage must be 1 or 2")
-        loss_weights = (clean_spectral_weight, loss_w_clean0, loss_w_clean,
-                        loss_w_reverb, loss_w_ctf)
+        loss_weights = (loss_w_clean, loss_w_reverb, loss_w_ctf)
         if not all(math.isfinite(x) and x >= 0 for x in loss_weights):
             raise ValueError("Loss weights must be nonnegative")
         if self.num_spk != 2 or self.mask_module is not None:
@@ -72,9 +55,21 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
         if not hasattr(self.separator, "separate_all"):
             raise ValueError("Use a CTF-dereverb separator")
         if not baseline_mode and not hasattr(self.separator, "ctf_taps"):
-            raise ValueError("The auxiliary model requires the two-decoder separator")
-        if training_stage == 1 and getattr(self.separator, "use_deconvolution", False):
-            raise ValueError("Stage 1 must train S0 without inverse filtering")
+            raise ValueError("Use the CTF restoration separator for auxiliary losses")
+        # Honor the actual YAML criterion, including baseline clamp/zero-mean
+        # settings. Other losses must not be silently constructed and ignored.
+        if self.loss_wrappers:
+            if (
+                len(self.loss_wrappers) != 1
+                or not isinstance(self.loss_wrappers[0], PITSolver)
+                or not isinstance(self.loss_wrappers[0].criterion, SISNRLoss)
+                or self.loss_wrappers[0].weight != 1
+                or self.loss_wrappers[0].flexible_numspk
+            ):
+                raise ValueError("Configure one weight-1 SI-SNR PIT criterion")
+            self.speech_criterion = self.loss_wrappers[0].criterion
+        else:
+            self.speech_criterion = SISNRLoss(eps=1e-7)
         for module in (self.encoder, self.decoder):
             if getattr(module, "spec_transform_type", None) not in (None, "none"):
                 raise ValueError("CTF/CG require uncompressed linear complex STFT")
@@ -92,9 +87,6 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
             raise ValueError("Use native complex STFT")
         if component_grad_interval < 0:
             raise ValueError("component_grad_interval must be nonnegative")
-        self.training_stage = training_stage
-        self.clean_spectral_weight = clean_spectral_weight
-        self.loss_w_clean0 = loss_w_clean0
         self.loss_w_clean = loss_w_clean
         self.loss_w_reverb = loss_w_reverb
         self.loss_w_ctf = loss_w_ctf
@@ -220,49 +212,45 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
         reverb = (
             None if reverb_wave is None else self._encode_sources(reverb_wave, lengths)
         )
-        matrices, time_matrices = {}, {}
-        for name in ("clean_prior", "clean_final"):
-            rows, time_rows = [], []
+        matrices = {}
+        names = ("clean_final",) if self.baseline_mode else (
+            "clean_final", "reverb", "clean_deconv"
+        )
+        for name in names:
+            teacher = reverb_wave if name == "reverb" else clean_wave
+            rows = []
             for predicted in range(self.num_spk):
-                row, time_row = [], []
+                row = []
                 for reference in range(self.num_spk):
-                    sd = spectral_distance(
-                        result[name][:, predicted : predicted + 1],
-                        clean[:, reference : reference + 1], target,
-                    )
-                    td = negative_si_sdr(
+                    td = self.speech_criterion(
+                        teacher[:, reference, start:end],
                         waves[name][:, predicted, start:end],
-                        clean_wave[:, reference, start:end],
                     ).mean()
-                    row.append(td + self.clean_spectral_weight * sd)
-                    time_row.append(td)
+                    row.append(td)
                 rows.append(torch.stack(row))
-                time_rows.append(torch.stack(time_row))
             matrices[name] = torch.stack(rows)
-            time_matrices[name] = torch.stack(time_rows)
-        assignment_name = "clean_prior" if self.training_stage == 1 else "clean_final"
         perms = torch.tensor(
             list(permutations(range(self.num_spk))), device=clean.device
         )
         pred = torch.arange(self.num_spk, device=clean.device)
         costs = torch.stack([
-            matrices[assignment_name][pred, perm].mean() for perm in perms
+            matrices["clean_final"][pred, perm].mean() for perm in perms
         ])
         selected = perms[costs.argmin()]
         components = {
-            "clean0": matrices["clean_prior"][pred, selected].mean(),
             "clean": matrices["clean_final"][pred, selected].mean(),
-            "si_snr": -time_matrices["clean_final"][pred, selected].mean(),
-            "si_snr_prior": -time_matrices["clean_prior"][pred, selected].mean(),
+            "si_snr": -matrices["clean_final"][pred, selected].mean(),
         }
         if not self.baseline_mode:
             # The SAME clean-derived permutation is used for Y and H.
             aligned_clean = clean[:, selected]
             aligned_reverb = reverb[:, selected]
             reconstructed = ctf_forward(aligned_clean, result["ctf"])
-            components["reverb"] = spectral_distance(
-                result["reverb"], aligned_reverb, target
-            )
+            components["reverb"] = matrices["reverb"][pred, selected].mean()
+            components["si_snr_reverb"] = -components["reverb"]
+            components["si_snr_deconv"] = -matrices["clean_deconv"][
+                pred, selected
+            ].mean()
             components["ctf"] = spectral_distance(reconstructed, aligned_reverb, target)
         return components
 
@@ -306,9 +294,7 @@ class ESPnetCTFDereverbModel(ESPnetEnhancementModel):
         components = {
             name: torch.stack(values).mean() for name, values in losses.items()
         }
-        weights = {"clean0": self.loss_w_clean0}
-        if self.training_stage == 2:
-            weights["clean"] = self.loss_w_clean
+        weights = {"clean": self.loss_w_clean}
         if not self.baseline_mode:
             weights.update(reverb=self.loss_w_reverb, ctf=self.loss_w_ctf)
         loss = sum(weights[key] * components[key] for key in weights)

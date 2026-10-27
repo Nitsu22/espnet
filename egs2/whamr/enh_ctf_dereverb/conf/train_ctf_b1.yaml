@@ -1,4 +1,4 @@
-# Noisy WHAMR Direct/Reverb, TF-Locoformer-S and paired context crops.
+# Joint training; Stage 1/2 denote network parts, not training phases.
 seed: 0
 init: xavier_uniform
 max_epoch: 150
@@ -22,9 +22,6 @@ avoid_allzero_segment: true
 model_conf:
   normalize_variance: true
   component_grad_interval: 0
-  training_stage: 1
-  clean_spectral_weight: 1.0
-  loss_w_clean0: 1.0
   loss_w_clean: 1.0
   loss_w_reverb: 0.0
   loss_w_ctf: 0.0
@@ -37,18 +34,15 @@ optim_conf:
 patience: 10
 early_stopping_criterion:
 - valid
-- loss
+- loss_clean
 - min
 val_scheduler_criterion:
 - valid
-- loss
+- loss_clean
 best_model_criterion:
 - - valid
   - si_snr
   - max
-- - valid
-  - loss
-  - min
 keep_nbest_models: 5
 scheduler: warmupreducelronplateau
 scheduler_conf:
@@ -85,6 +79,7 @@ separator_conf:
   conv1d_shift: 1
   dropout: 0.0
   eps: 1.0e-05
+  attention_dim: 128
 decoder: stft
 decoder_conf:
   n_fft: 256
@@ -95,13 +90,14 @@ decoder_conf:
   normalized: false
   onesided: true
 criterions:
-- name: si_snr
-  conf:
+- conf:
     eps: 1.0e-07
+  name: si_snr
   wrapper: pit
   wrapper_conf:
-    weight: 1.0
     independent_perm: true
+    weight: 1.0
 valid_batch_size: 1
 num_att_plot: 0
 log_interval: 50
+sample_rate: 8000

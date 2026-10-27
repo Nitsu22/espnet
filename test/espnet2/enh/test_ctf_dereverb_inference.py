@@ -28,15 +28,14 @@ class TestCTFScoring(unittest.TestCase):
         references = generator.normal(size=(2, 2048))
         mixture = references.sum(0)
         branches = dict(
-            clean_prior=references,
-            clean_deconv=references[::-1],
+            clean_deconv=references,
             clean_final=2 * references[::-1],
         )
         assignment, metrics = score_branches(branches, references, mixture)
         self.assertEqual(assignment, (1, 0))
         self.assertGreater(metrics["clean_final"]["si_sdr_db"], 100)
         # Independent PIT for the prior would incorrectly make this large too.
-        self.assertLess(metrics["clean_prior"]["si_sdr_db"], -10)
+        self.assertLess(metrics["clean_deconv"]["si_sdr_db"], -10)
         self.assertAlmostEqual(metrics["clean_final"]["snr_db"], 0.0, places=10)
         self.assertIsNone(metrics["clean_final"]["stoi"])
         self.assertGreater(metrics["clean_final"]["si_sdri_db"], 100)
@@ -97,7 +96,7 @@ class TestCTFScoring(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("mamba_ssm"), "mamba_ssm unavailable")
 class TestCTFInferenceCheckpoint(unittest.TestCase):
-    def test_real_stage1_checkpoint_exports_and_explicit_stage2_inverse(self):
+    def test_joint_checkpoint_exports_and_explicit_cg_override(self):
         torch.manual_seed(43)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -112,9 +111,13 @@ class TestCTFInferenceCheckpoint(unittest.TestCase):
                 n_layers=1, emb_dim=8, attention_dim=8, n_heads=2,
                 num_groups=2, ffn_hidden_dim=[8, 8], conv1d_kernel=4,
                 ctf_taps=4, ctf_hidden_dim=8, mamba_d_state=2,
-                mamba_d_conv=2, mamba_backend="torch", use_deconvolution=False,
+                mamba_d_conv=2, mamba_backend="torch", use_deconvolution=True,
             )
-            options.model_conf = dict(training_stage=1, normalize_variance=True)
+            options.model_conf = dict(normalize_variance=True)
+            options.criterions = [dict(
+                name="si_snr", conf=dict(eps=1e-7), wrapper="pit",
+                wrapper_conf=dict(weight=1.0, independent_perm=True),
+            )]
             network = EnhancementTask.build_model(options).eval()
             config = root / "config.yaml"
             config.write_text(yaml.safe_dump(vars(options)))
@@ -146,18 +149,18 @@ class TestCTFInferenceCheckpoint(unittest.TestCase):
             refs = [listing / "ref1.scp", listing / "ref2.scp"]
             for path, entries in zip(refs, reference_lines):
                 path.write_text("".join(entries))
-            destination = root / "stage1"
+            destination = root / "joint"
             summary = inference(
                 config, checkpoint, scp, destination,
                 ref1_scp=refs[0], ref2_scp=refs[1], write_reverb=True,
             )
             self.assertEqual(summary["num_utterances"], 2)
             self.assertEqual(summary["branches"], list(CLEAN_BRANCHES) + ["reverb"])
-            self.assertFalse(summary["deconvolution"]["enabled"])
+            self.assertTrue(summary["deconvolution"]["enabled"])
             self.assertTrue(summary["ctf_available"])
             self.assertTrue(summary["scored"])
             self.assertIn("available", summary["stoi"])
-            self.assertEqual(len(list(destination.rglob("*.wav"))), 16)
+            self.assertEqual(len(list(destination.rglob("*.wav"))), 12)
             for uid, samples in sources.items():
                 tensor = torch.from_numpy(samples).unsqueeze(0)
                 with torch.no_grad():
@@ -190,7 +193,7 @@ class TestCTFInferenceCheckpoint(unittest.TestCase):
             )
             with self.assertRaises(FileExistsError):
                 inference(config, checkpoint, scp, destination)
-            # No new training parameters: enable CG on the same Stage 1 weights.
+            # Override numerical CG settings on the same jointly trained architecture.
             inverted = root / "inverted"
             summary = inference(
                 config, checkpoint, scp, inverted,
@@ -213,7 +216,7 @@ class TestCTFInferenceCheckpoint(unittest.TestCase):
                     saved, expected["waveforms"][branch][0, 0].numpy()
                 )
             self.assertGreater(
-                (expected["waveforms"]["clean_prior"]
+                (expected["waveforms"]["reverb"]
                  - expected["waveforms"]["clean_deconv"]).abs().max(), 1e-5,
             )
 

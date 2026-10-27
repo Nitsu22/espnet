@@ -34,6 +34,24 @@ class TestCTFDeconvolution(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(732)
 
+    def test_no_prior_ridge_solution_and_complex_gradients(self):
+        y = random_complex((1, 1, 2, 4)).requires_grad_()
+        h = random_complex((1, 1, 2, 3)).requires_grad_()
+        gamma, eps = .1, 1e-6
+        result = regularized_deconvolution(y, h, gamma=gamma, eps=eps, iterations=12)
+        for frequency in range(2):
+            a = causal_matrix(h[0, 0, frequency], 4)
+            lam = gamma * h[0, 0, frequency].abs().square().sum() + eps
+            expected = torch.linalg.solve(
+                a.mH @ a + lam * torch.eye(4, dtype=a.dtype),
+                a.mH @ y[0, 0, frequency],
+            )
+            torch.testing.assert_close(result[0, 0, frequency], expected)
+        self.assertTrue(torch.autograd.gradcheck(
+            lambda obs, filt: regularized_deconvolution(obs, filt, iterations=12),
+            (y, h), eps=1e-6, atol=2e-5, rtol=2e-4,
+        ))
+
     def test_identity_and_analytic_regularized_solution(self):
         for dtype in (torch.complex64, torch.complex128):
             with self.subTest(dtype=dtype):

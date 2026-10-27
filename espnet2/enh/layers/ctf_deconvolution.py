@@ -150,14 +150,19 @@ def ctf_adjoint(
 def regularized_deconvolution(
     observation: Tensor,
     ctf: Tensor,
-    prior: Tensor,
+    prior: Optional[Tensor] = None,
     frame_lengths: Optional[Tensor] = None,
     observation_mask: Optional[Tensor] = None,
     gamma: float = 0.1,
     eps: float = 1e-6,
     iterations: int = 8,
 ) -> Tensor:
-    """Solve ``(A^H W A + lambda I)s = A^H W y + lambda s0`` with CG.
+    """Solve regularized finite CTF deconvolution with differentiable CG.
+
+    With no ``prior``, solve ``(A^H W A + lambda I)s = A^H W y`` from zero.
+    This is ridge regularization ``||As-y||_W^2 + lambda ||s||^2`` and needs
+    no initial Clean estimator. An optional prior retains the anchored operator
+    for standalone numerical comparisons.
 
     Here ``A`` is the unweighted, finite causal convolution and
     ``lambda = gamma * sum(abs(ctf)**2) + eps`` for each speaker/frequency.
@@ -168,6 +173,8 @@ def regularized_deconvolution(
     complex64 or complex128 input dtype and has zero padding.
     """
     _check_signal(observation, ctf)
+    if prior is None:
+        prior = torch.zeros_like(observation)
     if not isinstance(prior, Tensor):
         raise TypeError("prior must be a torch tensor")
     if (

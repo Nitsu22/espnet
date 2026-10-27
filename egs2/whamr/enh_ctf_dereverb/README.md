@@ -1,178 +1,164 @@
-# TF-Locoformer-S with speaker CTF estimation and regularized deconvolution
+# Joint CTF dereverberation: 3 front-end blocks + 1 restoration block
 
-This implements the initial Stage 1/Stage 2 architecture in
-`ctf_dereverb_plan.md`: the ordinary four TF-Locoformer-S blocks feed separate
-Direct and Reverb decoders, a speaker-shared bidirectional Mamba CTF estimator,
-and optional differentiable complex CG deconvolution. The backbone retains
-frequency-then-time attention. Neither Direct/Reverb teachers nor RIR metadata
-are inference inputs. Refinement and Sweep supervision are deferred.
+This is the revised architecture agreed after the initial design. Stage 1 and
+Stage 2 name network parts; both are trained together from scratch. The earlier
+S0 decoder and sequential pretraining/fine-tuning schedule have been removed.
+Old `train_ctf_stage*.yaml` configurations/checkpoints are incompatible with this
+revision; use the earlier Git commit to reproduce that architecture.
 
-## Comparison configurations
+```mermaid
+flowchart TD
+    X[Mixture] --> B[Stage 1: TF-Locoformer x3]
+    B --> Y[Reverb decoder: two speakers]
+    B --> H[Shared BiMamba CTF estimator]
+    Y --> H
+    Y --> CG[Regularized CG: no S0]
+    H --> CG
+    CG --> R[Stage 2: shared TF-Locoformer x1 + residual decoder]
+    B --> R
+    CG --> SUM[Add]
+    R --> SUM
+    SUM --> S[Final Clean]
+```
 
-| `--phase` | Configuration | Output used for the main Clean loss |
-|---|---|---|
-| `b1` | Standard TF-Locoformer-S, proposed Clean loss and crop policy | Direct estimate |
-| `stage1` | Two decoders plus CTF reconstruction supervision | Clean prior S0 |
-| `stage2` | Stage 1 plus CG, with joint fine-tuning | Deconvolved Clean |
-| `stage2_nocg` | Stage 1 plus corresponding fine-tuning, without CG | Clean prior S0 |
+## Architecture
 
-Stage 1 and B1 start from random initialization with AdamW at 0.001. Both
-Stage 2 configurations start from the same Stage 1 model weights and AdamW at
-0.0001; this starts a new optimizer/scheduler, rather than resuming Stage 1's
-optimizer. Use equal additional updates for the Stage 2 versus no-CG comparison.
-The examples are single GPU, batch 4, FP32, seed 0, maximum 150 epochs,
-warmup 4,000 updates, plateau LR scheduling, early-stop patience 10.
-The initial gamma 0.1 and 8 CG iterations are hypotheses to validate.
-The supplied configurations have 5,125,252 baseline parameters and 5,372,553
-proposal parameters (about 4.8% more); runtime and memory still need measuring.
+- Front end: 3 ordinary TF-Locoformer-S blocks, D=96, attention projection 128,
+  4 heads, RMSGroupNorm, frequency then time, Macaron ConvSwiGLU widths128/128,
+  kernel8. Its sole pre-CG RI decoder predicts both speakers' Reverb spectra.
+- CTF estimator: backbone features + the target speaker's predicted Reverb,
+  98-to-64 projection, time BiMamba, frequency BiMamba, attentive time pooling,
+  frequency BiMamba, Linear64-to-256. Three BiMamba blocks, two independent
+  official Mamba-1 directions per block; all speaker parameters are shared.
+- CG: solve `min_s ||A(H)s-Y_hat||_W^2 + lambda_f ||s||^2`, with
+  `lambda_f = gamma * sum_l |H(f,l)|^2 + eps`. Start from zero; no S0 signal,
+  pretrained Clean estimator or Clean decoder before CG. Default taps128,
+  gamma0.1, eps1e-6, 8 unrolled complex64 iterations. FFTs implement causal
+  linear convolution and its exact complex adjoint, not circular division.
+- Restoration: concatenate backbone Z96 and RI(CG output)2; project98-to-96,
+  apply one TF-Locoformer block and a 96-to-2 RI residual decoder. Add its
+  complex residual to the CG output. This one block/decoder is shared between
+  speakers (two speakers still incur two passes' computation). The output
+  layer is zero-initialized, so the initial final output equals the CG output.
 
-The same PIT assignment selected using S0 in Stage 1 or the final Clean output
-in Stage 2 is applied to every branch. Clean losses combine waveform negative
-SI-SNR with a linear complex-STFT spectral term, coefficient 1. Active component
-gradient norms are logged every 100 training steps; B1 disables this extra
-diagnostic. Reverb and
-true-Direct-to-true-Reverb CTF spectral losses each have coefficient 1.
-Stage 2 also keeps the S0 loss. B1 has only its Clean loss. A conventional
-SI-SNR-only B0 remains in `../enh7_baseline` and must use the same data/teachers
-for comparison. Training/validation loss determines the saved best checkpoint;
-report final test SI-SDRi separately.
+The supplied joint/no-CG configurations each contain 5,380,359 parameters;
+the four-block baseline contains 5,125,252. The proposal adds approximately 5.0%
+relative to the baseline. Four distinct TF-Locoformer blocks therefore
+do not imply the same total parameter count or computation as the baseline.
 
-## Data definition and verified local source
+Inference is mixture-only. It returns `reverb`, `ctf`, `clean_deconv` and
+`clean_final`, valid lengths, the common scale and decoded waveforms. There is
+no `clean_prior`. Native complex spectra are [B,N,F,T], CTFs [B,N,F,L].
 
-The initial recipe uses noisy WHAMR `mix_both_reverb_min_8k`, 20,000 training,
-5,000 validation and 3,000 test utterances, left microphone. Existing paired
-indexes and the full audio verification manifest are in
-`../enh_rir/dump_ctf_joint` in the original checkout. A new Git worktree does
-not contain ignored audio/results; pass the original checkout's absolute
-directory with `--paired_dump` when running from a worktree.
+## Losses and training
 
-`../enh_rir/local/prepare_ctf_joint_dump.py` checks the exact baseline mixture
-and Direct references against original WHAMR files, checks aligned sample
-counts and speaker slots, and verifies `Y1 + Y2 + noise = mixture`. The paired
-dump retains the baseline's actual mixture/Direct WAVs and references original
-Reverb WAVs without rewriting them. `enh7_baseline/dump` and `enh1/dump` share
-the original baseline audio; preparation therefore defaults to `../enh1`.
-Existing shape files are retained. The prepared manifest records index hashes
-and PCM16 quantization/clipping differences. In the existing local manifest,
-the baseline has 2,650/1,350/646 clipped source samples for train/valid/test;
-Direct/Reverb physical consistency at those samples is consequently imperfect.
+`L = L_clean + L_reverb + L_ctf`, with all three initial weights1.
 
-The current WHAMR generator in
-`../enh_rir/whamr_scripts/wham_room.py` creates its anechoic RIR using
-`max_order=0`; this represents the microphone Direct path with propagation
-delay/filtering, rather than the original dry WSJ waveform. The paired audio
-generator applies each speaker's same spatial gain to its Direct and full
-Reverb versions. These code definitions and verified pairings support the
-initial recipe; original generator versions and independent physical RIR
-metadata have not been audited by this implementation. Do not infer such
-metadata from filenames or call an effective Direct-to-Reverb CTF the raw RIR.
+Clean and Reverb use the original baseline's actual `SISNRLoss` plus PIT:
+zero-mean waveform SI-SNR, `eps=1e-7` (approximately70dB clamp). The configured
+SI-SNR PIT criterion is consumed by this model, not silently ignored. There
+are no RI/magnitude losses on predicted Clean or predicted Reverb. Select PIT
+once using final Clean; reuse that assignment for Reverb and CTF supervision.
 
-The light startup check verifies manifest hashes, paired split IDs, shape
-alignment/folding limits and one WAV's existence per index. It relies on the
-original full preparation for waveform identity. Host-specific absolute audio
-paths must be prepared again on another host; copying midgar indexes to
-TSUBAME is insufficient. NF-WHAMR is not silently substituted.
+CTF supervision remains RI-L1 + magnitude-L1 on `H_hat * true_Direct` versus
+`true_Reverb`, using linear STFTs and the same speaker assignment. It never
+uses predicted Reverb as its only target. All teachers share mixture-derived
+normalization. Component losses and gradient norms (every100 updates) are
+recorded. SI-SNR does not constrain output gain; scale-dependent SNR remains
+an evaluation diagnostic, and these losses do not guarantee matched branch gain.
 
-## Crop, normalization and STFT
+| phase | Configuration |
+|---|---|
+| `joint` | 3+1 blocks, CTF estimator and CG; all trained from scratch |
+| `joint_nocg` | Same parameters/losses; predicted Reverb bypasses CG into restoration |
+| `b1` | Ordinary 4-block baseline, same SI-SNR loss and revised data/context handling |
 
-The target training interval remains 32,000 samples. Context covers the causal
-CTF history plus centered STFT boundary windows, and a right STFT guard. Losses
-and reported metrics use only the target interval; full validation uses the
-whole utterance. The extra context increases actual network input duration and
-changes training context relative to the original four-second B0. B1 uses the
-same context policy as the proposed models to control this change.
+All use seed0, Xavier (preserving Mamba initialization and zero residual head),
+FP32, batch4, AdamW lr0.001/eps1e-8/weight_decay0.01, gradient clip5,
+warmup4000, plateau factor0.5/patience3, max150 epochs and early-stop patience10.
+LR scheduling and early stopping monitor the common `valid.loss_clean`;
+checkpoints are selected by `valid.si_snr`, with 5-best averaging at training
+end. Unlike the previous configs, auxiliary losses do not select the checkpoint
+or control LR. Independent early stopping does not ensure equal update counts;
+match update budgets for a strict CG versus no-CG comparison and record them.
 
-For L=128 and hop 64, the minimum causal frame history is `(L-1)*64 = 8128`
-samples, in addition to the 128-sample centered-window guard. The implementation
-uses conservative 256-sample window guards, hop-aligned crops, and explicit
-target offsets and valid lengths; utterance-edge and padded
-frames are excluded appropriately. CTF reconstruction and the CG observation
-mask use the same target/context boundary definition. Output waveforms are
-cropped only after iSTFT of the extended predictions.
+`b1` matches the proposal's context and valid-length normalization, not the old
+baseline's arbitrary-sample 4-second crops/padded-batch normalization. Thus it
+controls these implementation differences too. A historical noisy WHAMR B0
+exists at `../enh7_baseline`; its saved RESULTS report test SI-SNR11.46dB,
+not SI-SNR improvement. Re-evaluate B0 with the same scoring/export convention
+before comparing. Its generated5-best average was verified, but which weight
+file its historical evaluation actually used remains unconfirmed.
 
-STFT/iSTFT use FFT/window 256, periodic Hann, hop 64, `center=true`, reflected
-true-utterance boundaries, `normalized=false`, `onesided=true`, and explicit
-waveform output lengths. There is no spectral power/log compression. Mixture,
-Direct and Reverb use one scale derived from valid mixture samples. Padding
-and added context never become evaluation targets. CG uses FP32/complex64,
-causal linear convolution with its complex adjoint, and no circular division.
+## Data and context
 
-Fold thresholds are 200,000 samples for each of the original three shape
-files, so the validated utterance lengths do not reduce batch size 4. The
-additional two Reverb shape files are deliberately not added to batching.
+Noisy WHAMR `mix_both_reverb_min_8k`, 20k/5k/3k train/valid/test, left microphone,
+Direct speech teachers. Existing paired data are in the original checkout's
+`egs2/whamr/enh_rir/dump_ctf_joint`. Pass its absolute path from this worktree.
+The paired manifest/indexes preserve the baseline mixture and Direct files,
+original speaker ordering and shape statistics; Reverb references original FLOAT
+WAVs. Baseline mixture/Direct are PCM16. Recorded source clipping counts
+2650/1350/646 aggregate mixture and Direct files, not Direct alone.
+
+Original dataset-local `enh1/data/whamr/whamr_scripts/wham_room.py` uses
+`max_order=0` for Direct, preserving propagation delay. Its paired generator
+applies the same per-speaker gain to Direct/Reverb. An effective Direct-to-Reverb
+CTF is not simply the original source-to-microphone RIR's STFT.
+
+Train losses use a 32000-sample target, plus real past8384/future256 samples
+when available (maximum40640 input samples =5.08s); starts are hop-aligned.
+Validation uses full utterances. CTF losses and CG observation masks exclude
+missing-history/artificial-boundary observations, while retaining genuine
+preceding input context. iSTFT precedes waveform target cropping.
+
+STFT/iSTFT: actual8kHz, FFT/window256, hop64, periodic Hann, center/reflect,
+normalizedfalse, onesidedtrue, no spectral compression, explicit output lengths.
+Each utterance is encoded at its true boundary and every teacher uses its
+mixture's common scale. Padding never enters normalization or losses.
+
+`local/check_paired_dump.py` verifies existing manifest hashes, split IDs,
+aligned shapes, fold limits and one WAV existence per index. It relies on the
+full original adapter's waveform audit. Audio paths are host-specific; prepare
+paired indexes on TSUBAME rather than copying midgar's absolute paths.
 
 ## Commands
 
-Activate an existing ESPnet environment first. The launcher never allocates or
-submits GPU resources; on TSUBAME use the project's TSUBAME workflow first.
-All paths below are relative to this recipe unless absolute. A new output
-directory is used for every phase.
+Activate an existing compatible ESPnet + official `mamba_ssm` environment and
+an appropriate allocation. The launcher itself never submits scheduler jobs.
+From this recipe:
 
 ```bash
-# Inspect validated data and the command without launching any training.
-bash run.sh --phase stage1 --dry_run true --paired_dump /absolute/verified/dump_ctf_joint
-
-# Stage 1: train all branches without CG.
-bash run.sh --phase stage1 --paired_dump /absolute/verified/dump_ctf_joint
-
-# Stage 2: first compare fixed Stage 1 models over validation gamma/iterations,
-# then fine-tune. Supply model weights, not the trainer's checkpoint.pth.
-bash run.sh --phase stage2 --paired_dump /absolute/verified/dump_ctf_joint \
-    --init_param exp/enh_train_ctf_stage1_whamr_8k_1gpu_batch4/valid.loss.best.pth
-
-# Matched no-CG fine-tuning, initialized from the same Stage 1 model.
-bash run.sh --phase stage2_nocg --paired_dump /absolute/verified/dump_ctf_joint \
-    --init_param exp/enh_train_ctf_stage1_whamr_8k_1gpu_batch4/valid.loss.best.pth
-
-# Same Clean loss and input context, without auxiliary heads.
+bash run.sh --phase joint --dry_run true --paired_dump /absolute/verified/dump_ctf_joint
+bash run.sh --phase joint --paired_dump /absolute/verified/dump_ctf_joint
+bash run.sh --phase joint_nocg --paired_dump /absolute/verified/dump_ctf_joint
 bash run.sh --phase b1 --paired_dump /absolute/verified/dump_ctf_joint
+bash run.sh --phase joint --resume true --paired_dump /absolute/verified/dump_ctf_joint
 
-# Continue the selected phase's saved optimizer/model/iterator state.
-bash run.sh --phase stage2 --resume true --paired_dump /absolute/verified/dump_ctf_joint
-
-# Only if paired indexes need preparing on this host; refuses existing output.
+# Only when a new host-specific paired dump is needed; refuses existing output.
 bash run.sh --stage 1 --stop_stage 1 --paired_dump dump_paired \
     --baseline_root ../enh1 --source_data_root ../enh1/data
-```
 
-Evaluate the fixed Stage 1 model over validation before selecting Stage 2
-settings. The dedicated runner predicts from mixture only and saves S0,
-deconvolved Clean, final Clean and CTF separately:
-
-```bash
 python -m espnet2.bin.ctf_dereverb_inference \
-    --train_config exp/enh_train_ctf_stage1_whamr_8k_1gpu_batch4/config.yaml \
-    --model_file exp/enh_train_ctf_stage1_whamr_8k_1gpu_batch4/valid.loss.best.pth \
+    --train_config exp/enh_train_ctf_joint_whamr_8k_1gpu_batch4/config.yaml \
+    --model_file exp/enh_train_ctf_joint_whamr_8k_1gpu_batch4/valid.si_snr.ave_5best.pth \
     --wav_scp /absolute/verified/dump_ctf_joint/raw/cv_mix_both_reverb_min_8k/wav.scp \
-    --output_dir exp/stage1_valid_gamma01_iter8 --device cuda \
-    --enable_deconvolution true --gamma 0.1 --iterations 8 \
     --ref1_scp /absolute/verified/dump_ctf_joint/raw/cv_mix_both_reverb_min_8k/spk1.scp \
-    --ref2_scp /absolute/verified/dump_ctf_joint/raw/cv_mix_both_reverb_min_8k/spk2.scp
+    --ref2_scp /absolute/verified/dump_ctf_joint/raw/cv_mix_both_reverb_min_8k/spk2.scp \
+    --output_dir exp/joint_valid --device cuda --write_reverb true
 ```
 
-The two reference indexes enable SI-SDRi and scale-dependent SNR scoring with
-the same selected speaker assignment for all outputs; they are not model
-inputs. Mono files and the first (left) channel of stereo WHAMR files are read,
-matching training. Use `--device cpu` for CPU inference. STOI needs its optional
-dependency.
-Use a separate output directory per gamma/iteration pair. After Stage 2,
-evaluate the test set with that phase's config/weights and the test indexes;
-select settings using validation only.
+Export saves CG-before-restoration and final Clean separately, optionally Reverb,
+FLOAT WAVs at original amplitude, complex CTF NPYs and summary JSON. It reads
+mono or the left channel of stereo actual8kHz audio. References only score
+predictions, using one final-Clean assignment for all branches. Supplied Direct
+references also score an exported Reverb branch against Direct; that is not
+Reverb-to-Reverb separation performance. Training's `si_snr_reverb` diagnostic
+uses the paired Reverb teachers. STOI is optional.
+Use validation only to select gamma/iterations; do not reuse an output directory.
+For no-CG, `clean_deconv` denotes the bypassed Reverb input, not actual inversion.
 
-`--phase stage2` and `stage2_nocg` require `--init_param` unless resuming; an
-explicit `--allow_scratch true` enables the from-scratch ablation. Existing
-checkpoints require `--resume true`. Configuration overrides use `--enh_config`;
-keep a separate `--enh_exp` for changed settings. Temporary files use a newly
-created directory under the user's `/tmp/nitsu`, cleaned at exit; compiler and
-plotting caches stay under this recipe's `.cache`.
-
-## Validation still required before research conclusions
-
-From the repository root, the following runs the new operator/model/inference
-checks and the existing joint-CTF regression checks (42 tests). Use an existing
-ESPnet environment with PyTorch and official `mamba_ssm` installed; the small
-models use Mamba's CPU reference scan. Set `TMPDIR` and numerical-library caches
-to an owned temporary directory before running.
+Run new and existing regression checks from the repository root with an owned
+`TMPDIR` and numerical caches (the official CPU reference scan is slow):
 
 ```bash
 python -m unittest \
@@ -183,15 +169,14 @@ python -m unittest \
     test.espnet2.enh.test_ctf_joint
 ```
 
-Local unit/integration tests establish operator, gradient, masking and PIT
-behavior, rather than trained speech quality. A tiny synthetic CPU trainer
-smoke check also completed one train/validation minibatch in each stage,
-loaded Stage 1 weights into Stage 2, and saved optimizer state plus best-loss
-and best-SI-SNR checkpoints in both stages. No production training, GPU
-throughput measurement, independent-probe reference-CTF audit, unseen-RIR test,
-Refinement experiment or Sweep experiment is claimed by this recipe.
-Before production Stage 1, verify Direct/Reverb definitions for the intended
-corpus and characterize effective-CTF fitting error with independent probes.
-Before production Stage 2, evaluate fixed Stage 1 predictions on validation
-using the planned gamma/iteration candidates. Score S0 and deconvolved output
-separately, use the same teachers/PIT policy, and record wall time and memory.
+The revised implementation passed 45 unit/integration/regression tests. A tiny
+synthetic CPU trainer also completed joint training, saved its optimizer and
+best SI-SNR checkpoint, and resumed for another epoch (optimizer steps 1 to 2).
+This verifies training integration, not trained speech quality.
+
+Production GPU training/performance, CUDA memory/throughput, physical-RIR and
+independent-probe reference-CTF audits remain unverified. The earlier S0-model
+smoke results do not validate this revision. Establish real Direct-to-Reverb CTF
+approximation error before production training and use matched no-CG controls
+before claiming a benefit. No Sweep supervision or pretrained external network
+is included.

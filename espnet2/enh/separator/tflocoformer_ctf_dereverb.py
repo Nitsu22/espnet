@@ -1,5 +1,6 @@
-"""TF-Locoformer-S with two RI decoders and explicit CTF inversion."""
+"""Three TF-Locoformer blocks, CTF inversion, and one shared restoration block."""
 
+import copy
 import math
 from collections import OrderedDict
 
@@ -38,8 +39,8 @@ class TFLocoformerCTFDereverbBaselineSeparator(TFLocoformerSeparator):
         features = self.conv(torch.stack((spectrum.real, spectrum.imag), 1).float())
         for block in self.blocks:
             features = block(features)
-        prior = decode_ri(self.deconv, features, self.num_spk)
-        return dict(clean_prior=prior, clean_deconv=prior, clean_final=prior)
+        clean = decode_ri(self.deconv, features, self.num_spk)
+        return dict(clean_final=clean)
 
     def separate_all(self, spectrum, frame_lengths, observation_mask=None):
         if spectrum.ndim == 4 and spectrum.shape[2] == 1:
@@ -74,15 +75,23 @@ class TFLocoformerCTFDereverbBaselineSeparator(TFLocoformerSeparator):
 
 
 class TFLocoformerCTFDereverbSeparator(TFLocoformerCTFDereverbBaselineSeparator):
-    """Two decoders + speaker-conditioned shared CTF estimator + optional CG."""
+    """Stage 1 predicts Reverb/CTF; Stage 2 refines their CG reconstruction.
+
+    Stages are architectural parts, jointly trained from scratch. There is no
+    Clean decoder before CG and no S0. The single restoration block/decoder is
+    shared by speakers and predicts a residual on the CG output.
+    """
 
     def __init__(
         self, input_dim, ctf_taps=128, ctf_hidden_dim=64,
         mamba_d_state=16, mamba_d_conv=4, mamba_expand=2,
-        mamba_backend="auto", use_deconvolution=False,
+        mamba_backend="auto", use_deconvolution=True,
         cg_iterations=8, cg_gamma=0.1, cg_eps=1e-6, **kwargs,
     ):
+        kwargs.setdefault("n_layers", 3)
         super().__init__(input_dim, **kwargs)
+        if not self.blocks:
+            raise ValueError("The front end requires at least one TF-Locoformer block")
         if (not isinstance(cg_iterations, int) or isinstance(cg_iterations, bool)
                 or cg_iterations < 1 or not math.isfinite(cg_gamma)
                 or not math.isfinite(cg_eps) or cg_gamma < 0 or cg_eps <= 0):
@@ -92,32 +101,59 @@ class TFLocoformerCTFDereverbSeparator(TFLocoformerCTFDereverbBaselineSeparator)
         self.cg_iterations = cg_iterations
         self.cg_gamma = cg_gamma
         self.cg_eps = cg_eps
-        self.reverb_decoder = nn.ConvTranspose2d(
-            self.deconv.in_channels, self.num_spk * 2, 3, stride=1, padding=1
-        )
+        # Reuse the ordinary output head exclusively for Reverb. A Clean head
+        # is present only in the restoration stage below.
+        feature_dim = self.deconv.in_channels
+        self.reverb_decoder = self.deconv
+        del self.deconv
         self.ctf_estimator = SpeakerCTFEstimator(
-            feature_dim=self.deconv.in_channels, hidden_dim=ctf_hidden_dim,
+            feature_dim=feature_dim, hidden_dim=ctf_hidden_dim,
             ctf_taps=ctf_taps, d_state=mamba_d_state, d_conv=mamba_d_conv,
             expand=mamba_expand, backend=mamba_backend,
         )
+        self.restoration_projection = nn.Conv2d(feature_dim + 2, feature_dim, 1)
+        # Copy the configuration, with independent parameters. ESPnet's global
+        # initialization subsequently initializes both blocks independently.
+        self.restoration_block = copy.deepcopy(self.blocks[-1])
+        self.restoration_decoder = nn.ConvTranspose2d(
+            feature_dim, 2, 3, stride=1, padding=1
+        )
+        self.espnet_initialization_fn()
+
+    def espnet_initialization_fn(self):
+        # Initially Stage 2 preserves the CG output. Restore this after ESPnet's
+        # global Xavier initialization as well as direct module construction.
+        nn.init.zeros_(self.restoration_decoder.weight)
+        nn.init.zeros_(self.restoration_decoder.bias)
+
+    def restore(self, features, deconvolved):
+        """One utterance: shared [1,D,T,F] features + complex [1,N,F,T]."""
+        speakers = deconvolved.shape[1]
+        shared = features.expand(speakers, -1, -1, -1)
+        ri = torch.stack(
+            (deconvolved[0].real, deconvolved[0].imag), dim=1
+        ).transpose(-1, -2)
+        x = self.restoration_projection(torch.cat((shared, ri), dim=1))
+        x = self.restoration_block(x)
+        residual = decode_ri(self.restoration_decoder, x, 1)[:, 0].unsqueeze(0)
+        return deconvolved + residual
 
     def _single(self, spectrum, observation_mask=None):
         features = self.conv(torch.stack((spectrum.real, spectrum.imag), 1).float())
         for block in self.blocks:
             features = block(features)
-        prior = decode_ri(self.deconv, features, self.num_spk)
         reverb = decode_ri(self.reverb_decoder, features, self.num_spk)
         lengths = torch.tensor([spectrum.shape[1]], device=spectrum.device)
         ctf = self.ctf_estimator(features, reverb, lengths)
         if self.use_deconvolution:
             clean = regularized_deconvolution(
-                reverb, ctf, prior, frame_lengths=lengths,
+                reverb, ctf, frame_lengths=lengths,
                 observation_mask=observation_mask, gamma=self.cg_gamma,
                 eps=self.cg_eps, iterations=self.cg_iterations,
             )
         else:
-            clean = prior
+            clean = reverb
+        final = self.restore(features, clean)
         return dict(
-            reverb=reverb, ctf=ctf, clean_prior=prior,
-            clean_deconv=clean, clean_final=clean,
+            reverb=reverb, ctf=ctf, clean_deconv=clean, clean_final=final,
         )

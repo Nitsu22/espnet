@@ -6,7 +6,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "${script_dir}"
 main_root=$(cd ../../.. && pwd)
 
-phase=stage1
+phase=joint
 stage=6
 stop_stage=6
 paired_dump=../enh_rir/dump_ctf_joint
@@ -21,26 +21,24 @@ python=python3
 cuda_cmd=run.pl
 resume=false
 init_param=
-allow_scratch=false
 dry_run=false
 help_message="Usage: bash run.sh [options]
-  --phase stage1|stage2|stage2_nocg|b1
+  --phase joint|joint_nocg|b1
   --stage 1 --stop_stage 1    Verify source audio and prepare a NEW paired dump
   --stage 6 --stop_stage 6    Train (default; existing paired dump required)
   --paired_dump PATH         Verified Direct/Reverb dump with manifest and stats
   --enh_exp PATH             Separate output directory (required for batch changes)
-  --init_param PATH          Stage 1 model weights for Stage 2, e.g. valid.loss.best.pth
+  --init_param PATH          Optional compatible model weights; default is from scratch
   --resume true              Continue this output's checkpoint; do not reinitialize
-  --allow_scratch true       Explicit Stage 2 ablation from random initialization
   --ngpu 1 --python python3  Use caller's existing environment/allocation
   --dry_run true             Validate inputs and print the training command"
 . "${main_root}/egs2/TEMPLATE/asr1/utils/parse_options.sh"
 
 case ${phase} in
-    stage1|stage2|stage2_nocg|b1) ;;
+    joint|joint_nocg|b1) ;;
     *) echo "Unknown phase: ${phase}" >&2; exit 2 ;;
 esac
-for flag in resume allow_scratch dry_run; do
+for flag in resume dry_run; do
     if [[ ${!flag} != true && ${!flag} != false ]]; then
         echo "--${flag} must be true or false" >&2; exit 2
     fi
@@ -89,12 +87,6 @@ fi
 if [[ -n ${init_param} && ! -f ${init_param%%:*} ]]; then
     echo "Missing initial model weights: ${init_param%%:*}" >&2; exit 2
 fi
-if [[ ${phase} == stage2* && ${resume} == false && -z ${init_param} &&
-      ${allow_scratch} != true ]]; then
-    echo "Stage 2 requires --init_param STAGE1_WEIGHTS (or explicit --allow_scratch true)." >&2
-    exit 2
-fi
-
 data_args=()
 for split in train valid; do
     dataset=tr_mix_both_reverb_min_8k

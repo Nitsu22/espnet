@@ -1,4 +1,4 @@
-# Noisy WHAMR Direct/Reverb, TF-Locoformer-S and paired context crops.
+# Joint training; Stage 1/2 denote network parts, not training phases.
 seed: 0
 init: xavier_uniform
 max_epoch: 150
@@ -22,33 +22,27 @@ avoid_allzero_segment: true
 model_conf:
   normalize_variance: true
   component_grad_interval: 100
-  training_stage: 2
-  clean_spectral_weight: 1.0
-  loss_w_clean0: 1.0
   loss_w_clean: 1.0
   loss_w_reverb: 1.0
   loss_w_ctf: 1.0
   baseline_mode: false
 optim: adamw
 optim_conf:
-  lr: 0.0001
+  lr: 0.001
   eps: 1.0e-08
   weight_decay: 0.01
 patience: 10
 early_stopping_criterion:
 - valid
-- loss
+- loss_clean
 - min
 val_scheduler_criterion:
 - valid
-- loss
+- loss_clean
 best_model_criterion:
 - - valid
   - si_snr
   - max
-- - valid
-  - loss
-  - min
 keep_nbest_models: 5
 scheduler: warmupreducelronplateau
 scheduler_conf:
@@ -68,7 +62,7 @@ encoder_conf:
 separator: tflocoformer_ctf_dereverb
 separator_conf:
   num_spk: 2
-  n_layers: 4
+  n_layers: 3
   emb_dim: 96
   norm_type: rmsgroupnorm
   num_groups: 4
@@ -91,10 +85,11 @@ separator_conf:
   mamba_d_conv: 4
   mamba_expand: 2
   mamba_backend: auto
-  use_deconvolution: true
+  use_deconvolution: false
   cg_iterations: 8
   cg_gamma: 0.1
   cg_eps: 1.0e-06
+  attention_dim: 128
 decoder: stft
 decoder_conf:
   n_fft: 256
@@ -105,13 +100,14 @@ decoder_conf:
   normalized: false
   onesided: true
 criterions:
-- name: si_snr
-  conf:
+- conf:
     eps: 1.0e-07
+  name: si_snr
   wrapper: pit
   wrapper_conf:
-    weight: 1.0
     independent_perm: true
+    weight: 1.0
 valid_batch_size: 1
 num_att_plot: 0
 log_interval: 50
+sample_rate: 8000

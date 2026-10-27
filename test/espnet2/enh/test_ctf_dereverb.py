@@ -14,6 +14,8 @@ from espnet2.enh.decoder.stft_decoder import STFTDecoder
 from espnet2.enh.encoder.stft_encoder import STFTEncoder
 from espnet2.enh.espnet_model_ctf_dereverb import ESPnetCTFDereverbModel
 from espnet2.enh.layers.ctf_deconvolution import ctf_forward
+from espnet2.enh.loss.criterions.time_domain import SISNRLoss
+from espnet2.enh.loss.wrappers.pit_solver import PITSolver
 from espnet2.enh.separator.tflocoformer_ctf_dereverb import (
     TFLocoformerCTFDereverbBaselineSeparator,
     TFLocoformerCTFDereverbSeparator,
@@ -21,7 +23,7 @@ from espnet2.enh.separator.tflocoformer_ctf_dereverb import (
 from espnet2.train.preprocessor_ctf_dereverb import CTFDereverbPreprocessor
 
 
-def model(stage=1, baseline=False, gradients=0):
+def model(cg=True, baseline=False, gradients=0):
     conf = dict(n_layers=1, emb_dim=8, n_heads=2, attention_dim=8,
                 num_groups=2, ffn_hidden_dim=[8, 8], conv1d_kernel=4)
     if baseline:
@@ -30,13 +32,13 @@ def model(stage=1, baseline=False, gradients=0):
         separator = TFLocoformerCTFDereverbSeparator(
             33, ctf_taps=4, ctf_hidden_dim=8, mamba_d_state=2,
             mamba_d_conv=2, mamba_backend="torch", cg_iterations=8,
-            use_deconvolution=stage == 2, **conf,
+            use_deconvolution=cg, **conf,
         )
     return ESPnetCTFDereverbModel(
         encoder=STFTEncoder(n_fft=64, hop_length=16),
         separator=separator, decoder=STFTDecoder(n_fft=64, hop_length=16),
         mask_module=None, loss_wrappers=[], normalize_variance=True,
-        training_stage=stage, baseline_mode=baseline,
+        baseline_mode=baseline,
         component_grad_interval=gradients,
     )
 
@@ -87,9 +89,9 @@ class TestCTFDereverb(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(5)
 
-    def test_stage1_stage2_backprop_and_silence(self):
-        for stage in (1, 2):
-            network = model(stage, gradients=1)
+    def test_joint_backprop_and_silence(self):
+        for cg in (False, True):
+            network = model(cg, gradients=1)
             lengths = torch.tensor([256, 192])
             refs = [torch.randn(2, 256) for _ in range(2)]
             for ref in refs:
@@ -101,6 +103,8 @@ class TestCTFDereverb(unittest.TestCase):
             self.assertTrue(torch.isfinite(loss))
             self.assertEqual(int(weight), 2)
             self.assertIn("grad_norm_ctf", stats)
+            self.assertIn("grad_norm_clean", stats)
+            self.assertNotIn("loss_clean0", stats)
             loss.backward()
             for name, parameter in network.named_parameters():
                 if parameter.requires_grad:
@@ -115,7 +119,7 @@ class TestCTFDereverb(unittest.TestCase):
             self.assertTrue(torch.isfinite(loss))
 
     def test_padding_scale_and_mixture_only_prediction(self):
-        network = model(stage=2).eval()
+        network = model().eval()
         x = torch.randn(2, 256)
         lengths = torch.tensor([256, 192])
         with torch.no_grad():
@@ -124,7 +128,8 @@ class TestCTFDereverb(unittest.TestCase):
             changed = network.predict_all(x, lengths)
             single = network.predict_all(x[1:2, :192])
             scaled = network.predict_all(7 * x, lengths)
-        for key in ("reverb", "clean_prior", "clean_deconv", "clean_final"):
+        self.assertNotIn("clean_prior", original)
+        for key in ("reverb", "clean_deconv", "clean_final"):
             torch.testing.assert_close(original[key], changed[key])
             torch.testing.assert_close(original[key][1:2, ..., :13], single[key])
             torch.testing.assert_close(scaled[key], 7*original[key], rtol=2e-4, atol=2e-4)
@@ -135,16 +140,16 @@ class TestCTFDereverb(unittest.TestCase):
         self.assertEqual(original["waveforms"]["clean_final"].shape, (2, 2, 256))
 
     def test_shared_pit_and_teacher_ctf_reconstruction(self):
-        network = model(stage=2)
+        network = model()
         refs = torch.randn(1, 2, 256)
         lengths = torch.tensor([256])
         spectrum = network._encode_sources(refs, lengths)
         ctf = torch.zeros(1, 2, 33, 4, dtype=torch.complex64)
         ctf[..., 0] = 1
         target = torch.ones(1, 1, 1, 17, dtype=torch.bool)
-        results = dict(clean_prior=spectrum, clean_final=spectrum,
+        results = dict(clean_deconv=spectrum, clean_final=spectrum,
                        reverb=spectrum, ctf=ctf)
-        waves = dict(clean_prior=refs, clean_final=refs)
+        waves = dict(clean_deconv=refs, clean_final=refs, reverb=refs)
         expected = network._loss_one(results, waves, refs, refs, lengths, 0, 256, target)
         flipped = network._loss_one(
             {k: v.flip(1) for k, v in results.items()},
@@ -154,13 +159,16 @@ class TestCTFDereverb(unittest.TestCase):
             torch.testing.assert_close(expected[key], flipped[key])
         self.assertLess(float(expected["ctf"]), 1e-5)
         mismatched = dict(results, reverb=spectrum.flip(1))
-        bad = network._loss_one(mismatched, waves, refs, refs, lengths, 0, 256, target)
+        bad_waves = dict(waves, reverb=refs.flip(1))
+        bad = network._loss_one(
+            mismatched, bad_waves, refs, refs, lengths, 0, 256, target
+        )
         self.assertGreater(float(bad["reverb"]), .1)
         # A predicted Reverb error is not silently used as the CTF teacher.
         torch.testing.assert_close(bad["ctf"], expected["ctf"])
 
     def test_crop_guard_and_actual_context_reconstruction(self):
-        network = model(stage=2)
+        network = model()
         metadata = {key: torch.tensor([[value]]) for key, value in (
             ("ctf_loss_start", 112), ("ctf_loss_end", 240),
             ("ctf_crop_start", 208), ("ctf_crop_end", 512),
@@ -194,7 +202,11 @@ class TestCTFDereverb(unittest.TestCase):
                 ctf_hidden_dim=8, mamba_d_state=2, mamba_backend="torch",
                 use_deconvolution=True,
             )
-            options.model_conf = dict(training_stage=2, normalize_variance=True)
+            options.model_conf = dict(normalize_variance=True)
+            options.criterions = [dict(
+                name="si_snr", conf=dict(eps=1e-7), wrapper="pit",
+                wrapper_conf=dict(weight=1.0, independent_perm=True),
+            )]
             network = EnhancementTask.build_model(options).eval()
             config = Path(directory) / "config.yaml"
             config.write_text(yaml.safe_dump(vars(options)))
@@ -205,8 +217,53 @@ class TestCTFDereverb(unittest.TestCase):
             x = torch.randn(1, 256)
             with torch.no_grad():
                 a, b = network.predict_all(x), loaded.predict_all(x)
-            for key in ("ctf", "reverb", "clean_prior", "clean_final"):
+            for key in ("ctf", "reverb", "clean_deconv", "clean_final"):
                 torch.testing.assert_close(a[key], b[key])
+
+    def test_clean_and_reverb_losses_are_exact_baseline_si_snr(self):
+        network = model()
+        refs = torch.randn(1, 2, 256)
+        predicted = refs * 2 + torch.randn_like(refs) * .1
+        lengths = torch.tensor([256])
+        clean_spec = network._encode_sources(predicted, lengths)
+        ctf = torch.zeros(1, 2, 33, 4, dtype=torch.complex64)
+        ctf[..., 0] = 1
+        result = dict(clean_final=clean_spec, clean_deconv=clean_spec,
+                      reverb=clean_spec, ctf=ctf)
+        waves = dict(clean_final=predicted, clean_deconv=predicted, reverb=predicted)
+        target = torch.ones(1, 1, 1, 17, dtype=torch.bool)
+        components = network._loss_one(
+            result, waves, refs, refs, lengths, 0, 256, target
+        )
+        baseline = PITSolver(SISNRLoss(eps=1e-7))
+        expected, _, _ = baseline(list(refs.unbind(1)), list(predicted.unbind(1)))
+        torch.testing.assert_close(components["clean"], expected)
+        torch.testing.assert_close(components["reverb"], expected)
+        # Arbitrarily changing spectra cannot introduce an RI/magnitude loss.
+        changed = dict(result, clean_final=clean_spec * 100, reverb=clean_spec * 100)
+        actual = network._loss_one(changed, waves, refs, refs, lengths, 0, 256, target)
+        torch.testing.assert_close(actual["clean"], expected)
+        torch.testing.assert_close(actual["reverb"], expected)
+
+    def test_no_clean_prior_and_speaker_shared_restoration(self):
+        separator = model().separator
+        self.assertFalse(hasattr(separator, "deconv"))
+        self.assertEqual(separator.restoration_decoder.out_channels, 2)
+        features = torch.randn(1, 8, 17, 33)
+        deconvolved = torch.randn(1, 2, 33, 17, dtype=torch.complex64)
+        torch.testing.assert_close(separator.restore(features, deconvolved), deconvolved)
+        # Exercise the correction (not just its zero-initialized identity).
+        with torch.no_grad():
+            separator.restoration_decoder.weight.normal_(std=.02)
+        restored = separator.restore(features, deconvolved)
+        self.assertGreater(float((restored - deconvolved).abs().max()), 1e-4)
+        swapped = separator.restore(features, deconvolved.flip(1))
+        torch.testing.assert_close(swapped, restored.flip(1))
+        restored.abs().sum().backward()
+        for parameter in separator.restoration_block.parameters():
+            if parameter.requires_grad:
+                self.assertIsNotNone(parameter.grad)
+                self.assertTrue(torch.isfinite(parameter.grad).all())
 
 
 if __name__ == "__main__":
