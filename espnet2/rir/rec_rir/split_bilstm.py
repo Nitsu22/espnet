@@ -56,6 +56,10 @@ class SpeakerInteraction(nn.Module):
         super().__init__()
         _positive_integer(ffn_dim, "speaker_ffn_dim")
         self.dim = dim
+        # Conservatively bound both the batch and batch*head grid sizes used
+        # by CUDA SDPA kernels. TF positions are independent, so chunking this
+        # batch axis preserves the attention operation and its gradients.
+        self._max_attention_batch_heads = 65535
         self.attention = PostPoolingAttention(dim, heads, eps, axis="speaker")
         self.norm_ffn = nn.LayerNorm(dim, eps=eps)
         self.ffn = nn.Sequential(
@@ -66,11 +70,17 @@ class SpeakerInteraction(nn.Module):
         if x.ndim != 5 or x.shape[-1] != self.dim:
             raise ValueError("Expected speaker features [B, S, T, F, dim]")
         batch, speakers, frames, freqs, dim = x.shape
-        # The reused attention receives [B*T, S, F, D] and attends only to S.
-        frames_first = x.permute(0, 2, 1, 3, 4).reshape(
-            batch * frames, speakers, freqs, dim)
-        output = self.attention(frames_first).reshape(
-            batch, frames, speakers, freqs, dim).permute(0, 2, 1, 3, 4)
+        # Attend only to S. The singleton F axis lets each chunk contain an
+        # arbitrary number of independent TF positions without a large CUDA
+        # batch (e.g. B=4,T=251,F=129 would otherwise make 129516 sequences).
+        tf_first = x.permute(0, 2, 3, 1, 4).reshape(
+            batch * frames * freqs, speakers, 1, dim)
+        chunk_size = max(1, self._max_attention_batch_heads // self.attention.heads)
+        attended = torch.cat([
+            self.attention(chunk) for chunk in tf_first.split(chunk_size, dim=0)
+        ], dim=0)
+        output = attended.reshape(
+            batch, frames, freqs, speakers, dim).permute(0, 3, 1, 2, 4)
         return output + self.ffn(self.norm_ffn(output))
 
 

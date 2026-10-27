@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scratch early-split BiLSTM CTF training, with GPU checks and completion records.
 set -euo pipefail
-[[ $# == 2 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: script GPU_INDEX RESULT_RECIPE [RUN_TAG]' >&2; exit 2; }
 gpu_index=$1
 variant=split_bilstm_enc4_dec4_post4_mse
 [[ "$gpu_index" =~ ^[0-9]+$ ]] || { echo 'GPU_INDEX must be an integer' >&2; exit 2; }
@@ -22,7 +22,10 @@ cd "$recipe"
 code_root=$(git rev-parse --show-toplevel)
 python=${RIR_LAB_PYTHON:-/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python}
 prefix=train_split_bilstm_2spk_nf_8k_sweep_v2_enc4_dec4_post4_rir_mse
-run_tag="${variant}_$(hostname -s)_20261027"
+run_tag=${3:-${variant}_$(hostname -s)_20261027}
+[[ "$run_tag" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+    echo 'RUN_TAG must be a single safe directory name' >&2; exit 2;
+}
 config="conf/tuning/${prefix}.yaml"
 run_dir="$output_root/${run_tag}_job"
 stats_dir="$output_root/rir_stats_${run_tag}"

@@ -22,6 +22,8 @@ Conv encoder → [時間BiLSTM → 軽量周波数処理] × 4
 - 後半の各段は `時間 → 周波数 → 話者` の順序。話者Attentionは各TF点で長さ2の
   Self-Attention（4 heads、pre-LayerNorm、残差）、続いて `64 → 256 → 64` の
   ReLU FFN（pre-LayerNorm、残差）。話者位置エンコーディングは使わない。
+  独立したTF位置は小さなバッチに分けて処理し、CUDA SDPAのグリッド制限を避ける。
+  話者方向のAttention範囲や勾配の定義は変えない。
 - Poolingは各話者・周波数・チャネルで時間softmaxを取る。スコアネットは
   `64 → 32 → 64`（GELU）で話者間共有。既存の2話者生成Poolingとslot埋め込みを置換する。
 - Split後の時間・周波数処理、Pooling、CTF headはすべて話者間で重み共有。
@@ -71,18 +73,21 @@ bash run_split_bilstm_2spk_nf_8k_sweep_v2.sh \
 実行前に既存の `local/check_two_speaker_training.py` で実データ・batch4・最長検証入力・
 PIT・逆伝播・2話者RIR推論を確認する。今回のコードは実行中の4条件と別のworktreeに置く。
 
-ラボ用の `local/run_split_bilstm_8k_lab.sh GPU_INDEX RESULT_RECIPE` は、GPUの空きを確認し、
+ラボ用の `local/run_split_bilstm_8k_lab.sh GPU_INDEX RESULT_RECIPE [RUN_TAG]` は、GPUの空きを確認し、
 上記のGPU検証に成功した場合だけスクラッチ学習を開始する。専用結果名には実行ホストを含め、
 既存結果を上書きせず、開始情報・検証結果・終了状態・最良チェックポイントの完了記録を保存する。
+任意の `RUN_TAG` を使うと、失敗した事前検証の記録を残したまま別の保存先で再実行できる。
 
 ## 実装時の検証
 
-- 新規7テスト成功：Split、話者Attentionの局所性・他話者への依存、LSTMの処理軸、
+- 新規8テスト成功：Split、話者Attentionの局所性・他話者への依存、LSTMの処理軸、
   Split後全体の話者交換同変性、共通PIT、全パラメータの有限勾配、保存・再読み込み・2話者RIR推論。
+  TFバッチ分割の上限と端数処理、分割前後の出力・入力勾配・パラメータ勾配の同値性も確認。
 - 既存関連38テスト中37件成功。CUDA依存の既存Mambaテスト1件はCPU検証のためスキップ。
 - 実設定（129周波数、60 taps、2秒RIR、MSE重み10,000）のCPU順伝播・逆伝播を確認。
   この確認のみ入力音声は合成1024サンプル・batch1。CTF出力は `[2,129,60]`。
-- GPUでのbatch4検証、本学習、性能評価は未実施。
+- 上記は初回実装時のCPU検証。GPU検証・本学習の状態は各実行の
+  `gpu_check.json`、`training_complete.json`、学習ログと終了状態で確認する。
 
 ## 参考資料
 

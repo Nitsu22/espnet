@@ -110,6 +110,57 @@ def test_speaker_attention_is_local_cross_speaker_and_equivariant():
                                output.detach()[0, :, 2, 3], rtol=0, atol=0)
 
 
+def test_speaker_attention_chunking_preserves_outputs_and_gradients():
+    torch.manual_seed(5)
+    reference = SpeakerInteraction(dim=8, heads=2, ffn_dim=12, eps=1e-5).double()
+    assert reference._max_attention_batch_heads == 65535
+    chunked = copy.deepcopy(reference)
+    # Force several chunks and a partial final chunk on a small CPU fixture.
+    chunked._max_attention_batch_heads = 12
+    x = torch.randn(2, 2, 5, 7, 8, dtype=torch.float64, requires_grad=True)
+    split_x = x.detach().clone().requires_grad_(True)
+    calls = {"reference": [], "chunked": []}
+
+    def record(name):
+        def hook(module, args):
+            value = args[0]
+            assert value.shape[2] == 1
+            calls[name].append(value.shape[0] * module.heads)
+        return hook
+
+    handles = [reference.attention.register_forward_pre_hook(record("reference")),
+               chunked.attention.register_forward_pre_hook(record("chunked"))]
+    try:
+        output, split_output = reference(x), chunked(split_x)
+    finally:
+        for handle in handles:
+            handle.remove()
+    assert len(calls["reference"]) == 1
+    assert len(calls["chunked"]) > 1
+    assert max(calls["chunked"]) <= chunked._max_attention_batch_heads
+    assert calls["chunked"][-1] < chunked._max_attention_batch_heads
+    assert sum(calls["reference"]) == sum(calls["chunked"]) == 2 * 5 * 7 * 2
+    torch.testing.assert_close(split_output, output, rtol=1e-10, atol=1e-10)
+
+    # Check the earlier frame/frequency grouping too: attention stays TF-local.
+    with torch.no_grad():
+        previous = reference.attention(x.permute(0, 2, 1, 3, 4).reshape(10, 2, 7, 8))
+        previous = previous.reshape(2, 5, 2, 7, 8).permute(0, 2, 1, 3, 4)
+        previous = previous + reference.ffn(reference.norm_ffn(previous))
+    torch.testing.assert_close(output, previous, rtol=1e-10, atol=1e-10)
+
+    weights = torch.randn_like(output)
+    (output * weights).sum().backward()
+    (split_output * weights).sum().backward()
+    torch.testing.assert_close(split_x.grad, x.grad, rtol=1e-9, atol=1e-10)
+    for (name, parameter), (other_name, other) in zip(
+            reference.named_parameters(), chunked.named_parameters()):
+        assert name == other_name
+        assert parameter.grad is not None and other.grad is not None, name
+        assert torch.isfinite(parameter.grad).all() and torch.isfinite(other.grad).all(), name
+        torch.testing.assert_close(other.grad, parameter.grad, rtol=1e-9, atol=1e-10)
+
+
 def test_recurrent_axes_change_only_after_the_speaker_split():
     model = small_model().ctf_predictor.eval()
     assert isinstance(model, SplitBiLSTMCTFPredictor)
