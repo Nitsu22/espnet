@@ -52,8 +52,8 @@ Submit from enh_rir in a dedicated synchronized checkout. Use paid group jobs,
 priority -5. Do not run inference/scoring on a login node.
 
 - prepare: cpu_4=1, h_rt=00:30:00.
-- infer: gpu_1=1, h_rt=02:00:00; hold_jid prepare; pass predecessor job ID.
-- score: cpu_4=1, h_rt=02:00:00; hold_jid infer; pass predecessor job ID.
+- infer: gpu_1=1, h_rt=01:00:00; hold_jid prepare; pass predecessor job ID.
+- score: cpu_4=1, h_rt=01:00:00; hold_jid infer; pass predecessor job ID.
 
 Script: qsub/eval_ctf_audio_controls.sh MODE OUTPUT [PREDECESSOR_ID].
 Dependents require predecessor exit_status=0 and identical Git commit, not

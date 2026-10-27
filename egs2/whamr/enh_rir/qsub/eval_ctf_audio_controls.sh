@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Submit three paid jobs with explicit resource/time overrides:
 # prepare: cpu_4=1, 00:30:00
-# infer:   gpu_1=1, 02:00:00, hold_jid PREP_ID; args: infer OUTPUT PREP_ID
-# score:   cpu_4=1, 02:00:00, hold_jid INFER_ID; args: score OUTPUT INFER_ID
+# infer:   gpu_1=1, 01:00:00, hold_jid PREP_ID; args: infer OUTPUT PREP_ID
+# score:   cpu_4=1, 01:00:00, hold_jid INFER_ID; args: score OUTPUT INFER_ID
 #$ -cwd
 #$ -p -5
 #$ -N ctf_input_ctrl
