@@ -18,6 +18,13 @@ spec.loader.exec_module(groups)
 
 
 class TestConcatGroups(unittest.TestCase):
+    def test_fine_bin_boundaries(self):
+        edges = groups.FINE_DISTANCES["source_separation_m"]
+        idx = groups.bin_index([.16, .1999, .2, .3, .99, 1., 4.], edges)
+        np.testing.assert_array_equal(idx, [0, 0, 1, 2, 6, 7, 10])
+        edges = groups.FINE_DISTANCES["distance_gap_m"]
+        np.testing.assert_array_equal(groups.bin_index([0., .049, .05, .1], edges), [0, 0, 1, 2])
+
     def test_paired_gain_and_mixture_count(self):
         a = {metric: np.array([10., 20., 30.]) for metric in groups.METRICS}
         b = {metric: values + np.array([1., 2., 100.]) for metric, values in a.items()}

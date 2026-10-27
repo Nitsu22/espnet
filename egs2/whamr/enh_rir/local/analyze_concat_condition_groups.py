@@ -17,6 +17,11 @@ from analyze_bimamba_condition_gains import (
 
 SELECTED = ("rt60_s", "mean_distance_m", "distance_gap_m",
             "source_separation_m", "doa_separation_deg", "volume_m3")
+FINE_DISTANCES = {
+    "source_separation_m": [0, .2, .3, .4, .5, .6, .8, 1, 1.5, 2, 3, np.inf],
+    "mean_distance_m": [0, .75, 1, 1.25, 1.5, 1.75, 2, np.inf],
+    "distance_gap_m": [0, .05, .1, .2, .3, .5, .75, 1, np.inf],
+}
 
 
 def load_scores(folder, expected):
@@ -72,9 +77,10 @@ def analyze(args):
             data[condition, model] = load_scores(folder, keys)
             sources.extend(folder / f"{metric}_spk{i}"
                            for metric in METRICS for i in (1, 2))
+    edges_by_feature = (FINE_DISTANCES if args.fine_distances else
+                        {feature: FEATURES[feature][1] for feature in SELECTED})
     groups = [("all", "All", np.ones(len(keys), dtype=bool))]
-    for feature in SELECTED:
-        edges = FEATURES[feature][1]
+    for feature, edges in edges_by_feature.items():
         idx = bin_index([r[feature] for r in rows], edges)
         for i in range(len(edges)-1):
             label = f"[{edges[i]:g},{edges[i+1]:g}{']' if i == len(edges)-2 else ')'}"
@@ -107,7 +113,7 @@ def analyze(args):
         unit="one paired scene, mean of two reference-aligned source scores",
         distance_definition="3D Euclidean distance; left microphone; mean_distance_m=(d1+d2)/2",
         source_sha256={str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-        boundaries={k: [None if np.isinf(x) else x for x in FEATURES[k][1]] for k in SELECTED},
+        boundaries={k: [None if np.isinf(x) else x for x in edges] for k, edges in edges_by_feature.items()},
         caveats=["One training seed; confidence intervals resample scenes, not training runs.",
                  "Pointwise exploratory subgroup intervals; no multiple-comparison correction.",
                  "Scenes share utterances/speakers; intervals condition on this fixed speech pool.",
@@ -115,6 +121,9 @@ def analyze(args):
                  "RT60 is nominal generation T60, not a measured decay estimate.",
                  "Same-speaker scenes change utterance content as well as speaker pairing.",
                  "Both models use normalized output WAVs in both conditions."])
+    if args.fine_distances:
+        provenance["caveats"].append(
+            "Fine distance bins chosen after coarse analysis and inspecting distance counts; exploratory, not preregistered. Very small groups are unstable.")
     (args.output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     for row in summaries:
         print(f'{row["condition"]:8s} {row["feature"]:24s} {row["bin"]:14s} '
@@ -130,6 +139,8 @@ if __name__ == "__main__":
     parser.add_argument("--expected-count", type=int, default=3000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bootstrap", type=int, default=5000)
+    parser.add_argument("--fine-distances", action="store_true",
+                        help="Exploratory fine distance bins, especially below 1 m")
     args = parser.parse_args()
     if args.bootstrap < 1 or args.expected_count < 1:
         parser.error("Positive bootstrap count and expected mixture count required")
