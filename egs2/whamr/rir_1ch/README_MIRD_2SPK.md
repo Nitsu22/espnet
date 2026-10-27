@@ -16,15 +16,42 @@ not 23,400 independent rooms or physical geometries.
 
 ## Current status
 
-Only the reproducible assignment planner is implemented and tested. The measured
-MIRD archives have not been acquired, the native MAT fields/angle convention have
-not been verified, and audio synthesis has not been implemented or run. An
-assignment plan is explicitly marked `awaiting_measured_rir_data`; it is not an
-audio dump and must not be used as evidence of completed dataset generation.
+The 3,000-mixture assignment is prepared. All nine official ZIPs and the SP tools
+were downloaded on 2026-10-27 from the public Google Drive folder linked by the
+[author's downloads page](https://sharongannot.group/resources/downloads/).
+Eight recording conditions passed verification of all 208 native MAT files.
+Each contains a 480,000 × 8 floating-point RIR at 48 kHz (ten seconds).
 
-Official distribution routes were identified, but the university server timed
-out and subsequent external fetches were prevented by automatic approval review
-timeouts on 2026-10-27. No source-file substitutes or simulated RIRs were used.
+**Generation is blocked by a mispackaged official archive.** The ZIP labeled
+`Reverberation_0.610s)_3-3-3-8-3-3-3.zip` contains only another ZIP, labeled
+`Reverberation_0.360s)_8-8-8-8-8-8-8.zip`. The inner ZIP is byte-identical to the
+separately downloaded 360-ms / 8-cm archive. These are locally computed SHA256s:
+
+- Incorrect outer archive:
+  `0431db78c6718b46c6a42d8decd244f2a8bb63389935f05c389bdbc28a8863c1`
+- Inner archive and the separate 360-ms / 8-cm archive:
+  `c24f10845b2624648868faf5153a42e0a19d83bdd8986c86d10e7bc62a05231a`
+
+The university's old distribution server was unreachable. A FullSubNet research
+mirror was also inspected, but it contains only 119 of the required 208 mono
+responses for the missing condition, at 16 kHz / PCM16 rather than native MATs.
+It was not used as a replacement. The user has no separate native copy.
+
+The missing session affects 334 assigned mixtures (325 base cases plus nine
+additions). Completing the approved nine-condition protocol requires the correct
+26 native MATs for 610 ms / `3-3-3-8-3-3-3`, including all eight microphones.
+Changing to eight conditions would change the approved coverage design.
+
+The downloader and native archive/metadata validator are implemented. Audio
+synthesis has not been implemented or run; no completed audio dump is claimed.
+Assignment plans remain marked `awaiting_measured_rir_data`. ZIP integrity alone
+does not validate a recording condition; the downloader now fails when native
+condition validation fails. An older `download_complete.json` is only a transport
+record, not evidence of a complete usable MIRD database.
+
+Detailed source verification is saved locally in
+`exp/mird_2spk_preparation_20261027/native_rir_audit.json`, with all 208 checked
+recordings, archive hashes and the failing archive's nested-ZIP fingerprint.
 
 ## Assignment protocol
 
@@ -65,15 +92,34 @@ python -m unittest discover -s test/espnet2/rir -p test_mird_pair_assignment.py
 ```
 
 Plans refuse an existing output directory and record source-index and assignment
-implementation hashes. The source-grid angles use the paper's broadside
-convention; the native MAT filename/coordinate mapping must be checked before
-any audio is generated.
+implementation hashes. The official SP package's `sample_create_soundfield.m`
+and native MAT metadata establish the angle convention: 0° is front, 90° is left
+(toward mic1), and 270° is right (toward mic8). Plans record the native azimuth as
+`angle_deg % 360`, retaining the signed source-grid order. No signal is trimmed,
+resampled or normalized by the source validator.
 
 Schema 2 plans label each record `base` or `additional` and identify this sampling
 method explicitly. Schema 1 plans from the earlier receiver-based sampler do
 not guarantee complete 2,925-case coverage and must not be used for this protocol.
 The regenerated production plan is stored separately under
-`exp/mird_2spk_preparation_20261027/assignment_plan_2925_plus75/`.
-The full WHAMR-ID assignment and twelve unit/integration tests were verified on
-2026-10-27; this validation does not include measured RIR files or synthesized
-speech audio.
+`exp/mird_2spk_preparation_20261027/assignment_plan_2925_plus75/`; a new plan with
+verified native angles is in `assignment_plan_native_angles/` alongside it.
+The full WHAMR-ID assignment, nineteen unit/integration tests, and all eight valid
+native recording conditions were verified on 2026-10-27. The source audit exits
+with failure because the ninth condition is missing. No synthesized speech
+audio was validated.
+
+To rerun native verification without extracting or modifying the archives:
+
+```bash
+python egs2/whamr/rir_1ch/local/mird_rir.py \
+  --archives egs2/whamr/rir_1ch/downloads/MIRD/archives \
+  --report egs2/whamr/rir_1ch/exp/mird_native_audit_new.json
+
+python -m unittest discover -s test/espnet2/rir -p 'test_mird*.py'
+```
+
+The report refuses an existing output file. `download_mird.py` accepts the saved
+public Drive inventory (`--inventory`) and a destination (`--output`); it verifies
+ZIP CRCs, computes transport hashes, then runs the same native metadata audit.
+It uses no account cookies or user cache. No downloaded MATLAB code is executed.

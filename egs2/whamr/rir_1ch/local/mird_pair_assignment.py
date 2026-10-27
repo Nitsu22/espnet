@@ -295,9 +295,10 @@ def prepare_plan(filenames, scaling, output, seed=20261027):
         },
         assignment_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         planned_sample_rates=[8000, 16000], planned_conditions=["clean", "noisy"],
-        source_grid=[dict(distance_m=distance, angle_deg=angle)
+        source_grid=[dict(distance_m=distance, angle_deg=angle,
+                          native_azimuth_deg=angle % 360)
                      for distance in (1, 2) for angle in range(-90, 91, 15)],
-        angle_convention="Paper broadside convention; native MAT mapping requires verification",
+        angle_convention="0 front; positive left toward mic1; native MAT azimuth = angle % 360",
         records=records,
     )
     # A unique new directory ensures existing plans/data are never overwritten.

@@ -199,6 +199,12 @@ class TestMIRDPairAssignment(unittest.TestCase):
             self.assertEqual(payload["status"], "awaiting_measured_rir_data")
             self.assertEqual([r["filename"] for r in payload["records"]], ids)
             self.assertEqual(len(payload["source_grid"]), 26)
+            for source in payload["source_grid"]:
+                self.assertEqual(source["native_azimuth_deg"], source["angle_deg"] % 360)
+            self.assertEqual(
+                {r["native_azimuth_deg"] for r in payload["source_grid"]},
+                {0, 15, 30, 45, 60, 75, 90, 270, 285, 300, 315, 330, 345},
+            )
             for path, content in original.items():
                 self.assertEqual(path.read_bytes(), content)
                 self.assertEqual(payload["source_index_sha256"][str(path.resolve())],
