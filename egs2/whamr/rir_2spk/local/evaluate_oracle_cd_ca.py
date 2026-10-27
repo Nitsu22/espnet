@@ -25,6 +25,8 @@ VARIANTS = {
     'bilstm': ('rir_train_pooled_bilstm_2spk_nf_8k_sweep_v2_pre8_post4_time_l1_plateau_200ep',
                'bilstm_pre8_post4_time_l1_training_20261023', '141epoch.pth'),
     'rec_rir': (None, 'rec_rir_ls8k_20261015', '97epoch.pth'),
+    'damsep': ('oracle_cd_ca_damsep_weights_20261027',
+               'oracle_cd_ca_damsep_weights_20261027', '29epoch.pth'),
 }
 
 
@@ -54,6 +56,13 @@ def select_pairs(candidates, references, score_pair, sr=8000, length=16000):
     return best, permutations[best], matrix
 
 
+def damsep_ctf_to_pim_order(native):
+    """DAMSEP stores causal taps; common CA synthesis expects PIM tap order."""
+    if native.shape != (2, 2, 257, 60) or not torch.isfinite(native).all():
+        raise ValueError('Expected finite DAMSEP [speaker, RI, frequency, taps]')
+    return torch.complex(native[:, 0].float(), native[:, 1].float()).flip(-1)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--recipe', required=True, type=Path)
@@ -78,7 +87,10 @@ def main():
                  recipe.parent / 'rir/exp/rir_train_rec_rir_2spk_pit_clean_8192')
     checkpoint = model_dir / checkpoint_name
     control = recipe / 'exp' / control_name
-    if args.variant == 'rec_rir':
+    if args.variant == 'damsep':
+        completed = dict(checkpoint_sha256='f5c39e3172533fb390e026940fde0965c08c3af02d4f33b87f1a275b9d212667',
+                         config_sha256='f923514eb16e85819070a84ca1b7a610bf153bdfdf3c53375b46de3261f61b75')
+    elif args.variant == 'rec_rir':
         completed = json.loads((control / 'metadata.json').read_text())
         assert json.loads((control / 'complete.json').read_text())['count'] == 3000
     else:
@@ -89,8 +101,17 @@ def main():
     assert digest(checkpoint) == completed['checkpoint_sha256']
     assert digest(model_dir / 'config.yaml') == completed['config_sha256']
     config = yaml.safe_load((model_dir / 'config.yaml').read_text())
-    assert config['sample_rate'] == config['model_conf']['sr'] == 8000
-    assert config['model_conf']['pim_sweep_duration'] == 8.192
+    if args.variant == 'damsep':
+        assert config['model_conf']['network_conf']['sample_rate'] == 8000
+        assert config['model_conf']['loss_w_reverb'] == 0.1
+        assert config['model_conf']['loss_w_reconstruction'] == 0.5
+        assert config['model_conf']['loss_n_fft'] == 512
+        assert config['model_conf']['loss_win_length'] == 256
+        assert config['model_conf']['loss_hop_length'] == 128
+        assert config['model_conf']['loss_window'] == 'sqrthann'
+    else:
+        assert config['sample_rate'] == config['model_conf']['sr'] == 8000
+        assert config['model_conf']['pim_sweep_duration'] == 8.192
     data = recipe / 'dump_nf_2spk_8k_min/raw/tt_rir_2spk_nf_min_8k'
     names = ('wav.scp', 'rir_direct1.scp', 'rir_direct2.scp', 'rir_ref1.scp', 'rir_ref2.scp')
     indexes = {name: read_index(data / name) for name in names}
@@ -104,9 +125,15 @@ def main():
         keys = keys[:args.limit]
     output.mkdir(parents=True)
     start = time.monotonic()
-    model, _ = RIRTask.build_model_from_file(str(model_dir / 'config.yaml'), str(checkpoint), device=args.device)
+    if args.variant == 'damsep':
+        from espnet2.tasks.damsep import DAMSEPTask
+        from espnet2.rir.rec_rir.pim import RecRIRPIM
+        task, pim = DAMSEPTask, RecRIRPIM(8000, 8.192)
+    else:
+        task, pim = RIRTask, None
+    model, _ = task.build_model_from_file(str(model_dir / 'config.yaml'), str(checkpoint), device=args.device)
     model.eval()
-    reconstructor = CAReconstructor(model.pim, model.transforms, 16000)
+    reconstructor = CAReconstructor(pim if pim is not None else model.pim, model.transforms, 16000)
     metadata = dict(started_at=datetime.datetime.now().astimezone().isoformat(),
         host=socket.gethostname(), gpu_index=int(__import__('os').environ.get('CUDA_VISIBLE_DEVICES', '-1')),
         variant=args.variant, model_directory=str(model_dir.resolve()), checkpoint=str(checkpoint.resolve()),
@@ -119,6 +146,9 @@ def main():
         inverse_calibration='fixed known sweep gain and delay; no prediction gain/peak fit',
         reference_sweep_processing=False, align='peak', scale_mode='peak', polarity_align=False,
         pit='one global permutation per utterance, paired reference CD and CA, minimum full RIR RMSE',
+        transform=dict(n_fft=model.transforms.n_fft, win_length=model.transforms.win_len,
+                       hop_length=model.transforms.hop_len, window='sqrthann'),
+        ctf_native_order='causal' if args.variant == 'damsep' else 'reversed PIM',
         limit=args.limit)
     (output/'started.json').write_text(json.dumps(metadata, indent=2)+'\n')
     all_rows, utterances, strict_rows = [], [], []
@@ -142,8 +172,13 @@ def main():
             if any(not np.any(r) for r in references):
                 raise ValueError('Zero CA RIR')
             with torch.no_grad():
-                ctf = model.estimate_ctf(torch.as_tensor(wav, device=args.device))
-                assert ctf.shape == (2, 129, 60)
+                waveform = torch.as_tensor(wav, device=args.device)
+                if args.variant == 'damsep':
+                    native = model.separate(waveform[None])['rir']
+                    ctf = damsep_ctf_to_pim_order(native)
+                else:
+                    ctf = model.estimate_ctf(waveform)
+                assert ctf.shape == (2, model.transforms.n_fft // 2 + 1, 60)
                 candidates = reconstructor.candidate_rirs(ctf, torch.as_tensor(direct, device=args.device)).cpu().numpy()
             if not np.isfinite(candidates).all():
                 raise ValueError('Nonfinite CA predictions')

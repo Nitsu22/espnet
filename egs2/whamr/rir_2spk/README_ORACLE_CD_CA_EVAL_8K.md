@@ -54,3 +54,27 @@ Variants: bimamba, rec_rir, bilstm. Each launcher verifies a free GPU,
 checks the pinned checkpoint/data hashes, runs a 2-mixture smoke test,
 then the full test, and records exit status. Outputs use distinct
 exp/oracle_cd_ca_VARIANT_eval8k_20261027 directories. No training changes.
+
+## Additional DAMSEP comparison
+
+DAMSEP uses the existing three-loss best 29epoch checkpoint transferred
+from the user's TSUBAME experiment, checkpoint SHA256
+f5c39e3172533fb390e026940fde0965c08c3af02d4f33b87f1a275b9d212667,
+config SHA256 f923514eb16e85819070a84ca1b7a610bf153bdfdf3c53375b46de3261f61b75.
+Its unmodified ESPnet adapter/vendor code is imported from commit
+47d90bb4c0a7473577d0e35ca0b1c8a979b487fe (licenses retained).
+
+Recompute CTFs from exactly the SAME canonical FLOAT NF mixture as the
+other three models. Previous DAMSEP CTF exports used formatted PCM16
+mixtures with quantization/clipping, so those exports are not reused.
+Preserve DAMSEP's learned CTF reconstruction basis FFT512/window256/hop128/
+sqrt-Hann (257 bins, 60 taps), distinct from its own network input STFT.
+Convert its native causal tap order to the common helper's reversed-PIM
+input order exactly once. The helper converts back to causal convolution.
+All raw CD/CA indexes, original Sweep/inverse, 2s output, reference-paired
+PIT and metrics are unchanged. Model training and STFT bases differ, so
+this is a trained-method comparison, not an architecture-only ablation.
+
+Use the same launcher with variant `damsep`. Results use
+exp/oracle_cd_ca_damsep_eval8k_20261027. The original three-model
+comparison JSON is preserved; a four-model comparison is written separately.

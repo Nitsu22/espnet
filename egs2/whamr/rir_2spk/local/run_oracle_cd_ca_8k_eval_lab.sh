@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # One GPU per variant; smoke-test two mixtures before the full raw-CA test.
 set -euo pipefail
-[[ $# == 3 ]] || { echo 'Usage: GPU_INDEX RESULT_RECIPE bimamba|rec_rir|bilstm' >&2; exit 2; }
+[[ $# == 3 ]] || { echo 'Usage: GPU_INDEX RESULT_RECIPE bimamba|rec_rir|bilstm|damsep' >&2; exit 2; }
 gpu=$1
 result=$(realpath "$2")
 variant=$3
 [[ "$gpu" =~ ^[0-9]+$ ]] || exit 2
-case "$variant" in bimamba|rec_rir|bilstm) ;; *) exit 2 ;; esac
+case "$variant" in bimamba|rec_rir|bilstm|damsep) ;; *) exit 2 ;; esac
 case "$result" in /net/midgar/work2/nitsu/*|/gs/bs/tga-shinoda/nitsu/*) ;; *) exit 1 ;; esac
 [[ -O "$result" && -O "$result/exp" ]] || exit 1
 recipe=$(cd "$(dirname "$0")/.." && pwd)
