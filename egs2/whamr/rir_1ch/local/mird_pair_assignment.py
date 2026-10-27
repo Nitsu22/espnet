@@ -1,4 +1,4 @@
-"""Reproducible two-source assignments for all 72 MIRD receiver conditions.
+"""Cover all 2,925 MIRD source-pair/session cases, then add 75 mixtures.
 
 Receiver IDs refer to recordings, not independent rooms or physical positions.
 MIRD uses one room, three reverberation settings and overlapping array layouts.
@@ -21,7 +21,8 @@ SPACINGS = ("3-3-3-8-3-3-3", "4-4-4-8-4-4-4", "8-8-8-8-8-8-8")
 MICROPHONES = tuple(range(1, 9))
 SOURCE_COUNT = 26
 PAIR_TYPES = tuple(combinations(range(SOURCE_COUNT), 2))
-PAIR_INDEX = {pair: index for index, pair in enumerate(PAIR_TYPES)}
+BASE_CASE_COUNT = len(PAIR_TYPES) * len(RT60_MS) * len(SPACINGS)
+PRODUCTION_COUNT = 3000
 
 
 def _receiver_quotas(count, rng):
@@ -54,83 +55,132 @@ def _receiver_quotas(count, rng):
     return quotas
 
 
-def _candidate_pairs(count, rng):
-    """Cycle through every unordered pair with balanced speaker/source roles.
+def _complete_pairs(rng, high_sources=None):
+    """Orient every edge of K26 once; each source has 12/13 slots per side.
 
-    For the production receiver quotas (41 or 42), the first complete block
-    visits every source once on both speaker sides; the next partial block
-    visits distinct sources on each side. No unordered pair is repeated.
+    The first 12 blocks are directed cycle covers (one incoming/outgoing edge
+    per vertex); the final matching gives 13 chosen vertices one extra outgoing
+    edge, and the other 13 one extra incoming edge.
     """
-    result = []
-    while len(result) < count:
+    half = SOURCE_COUNT // 2
+    if high_sources is None:
         labels = rng.permutation(SOURCE_COUNT)
-        blocks = []
-        for offset in rng.permutation(np.arange(1, SOURCE_COUNT // 2)):
-            order = rng.permutation(SOURCE_COUNT)
-            block = np.column_stack(
-                (labels[order], labels[(order + offset) % SOURCE_COUNT])
-            )
-            if rng.integers(2):
-                block = block[:, ::-1]
-            blocks.extend(block.tolist())
-        half = SOURCE_COUNT // 2
-        matching = np.column_stack((labels[:half], labels[half:]))
-        result.extend(blocks)
-        result.extend(matching.tolist())
-    return np.asarray(result[:count], dtype=int).reshape(count, 2)
+    else:
+        high = sorted(high_sources)
+        low = sorted(set(range(SOURCE_COUNT)) - set(high))
+        labels = np.concatenate((rng.permutation(high), rng.permutation(low)))
+    blocks = []
+    for offset in rng.permutation(np.arange(1, half)):
+        order = rng.permutation(SOURCE_COUNT)
+        block = np.column_stack(
+            (labels[order], labels[(order + offset) % SOURCE_COUNT])
+        )
+        if rng.integers(2):
+            block = block[:, ::-1]
+        blocks.append(block)
+    blocks.append(np.column_stack((labels[:half], labels[half:])))
+    return np.concatenate(blocks)
 
 
-def _histogram(pairs):
-    return np.bincount(
-        [PAIR_INDEX[tuple(sorted(pair))] for pair in pairs],
-        minlength=len(PAIR_TYPES),
-    )
+def _additional_pairs(rng):
+    """75 distinct pairs, with each source used 2/3 times on each side."""
+    pairs = _complete_pairs(rng)
+    third_block = pairs[2 * SOURCE_COUNT:3 * SOURCE_COUNT]
+    removed, occupied = set(), set()
+    for position in rng.permutation(SOURCE_COUNT):
+        pair = third_block[position]
+        if not occupied.intersection(pair):
+            removed.add(int(position))
+            occupied.update(pair)
+            if len(removed) == 3:
+                break
+    # Removing three vertex-disjoint edges keeps the deficient incoming and
+    # outgoing source sets disjoint, so both speaker roles can be balanced later.
+    keep = [i for i in range(SOURCE_COUNT) if i not in removed]
+    return np.concatenate((pairs[:2 * SOURCE_COUNT], third_block[keep]))
+
+
+def _assign_microphones(records, quotas, rng):
+    """Select a seeded random channel under balanced receiver-count quotas."""
+    channels = np.repeat(MICROPHONES, [quotas[mic] for mic in MICROPHONES])
+    rng.shuffle(channels)
+    base = {
+        tuple(sorted(record["sources"])): i
+        for i, record in enumerate(records) if record["assignment_phase"] == "base"
+    }
+    additional = [i for i, record in enumerate(records)
+                  if record["assignment_phase"] == "additional"]
+    extra_pairs = {tuple(sorted(records[i]["sources"])) for i in additional}
+    singles = [i for pair, i in base.items() if pair not in extra_pairs]
+    for i in additional:
+        original = base[tuple(sorted(records[i]["sources"]))]
+        if channels[i] == channels[original]:
+            # Swap with a single-occurrence case: this preserves all channel
+            # quotas and cannot create another repeated full condition.
+            choices = [j for j in singles if channels[j] != channels[i]]
+            partner = int(rng.choice(choices))
+            channels[i], channels[partner] = channels[partner], channels[i]
+    for record, microphone in zip(records, channels):
+        record["microphone"] = int(microphone)
 
 
 def assign_pairs(count=3000, seed=20261027):
-    """Return shuffled records with distinct source ranks at one shared receiver.
+    """Cover 325 unordered pairs in each of nine RT/array recording sessions.
 
-    RT/array/microphone quotas are exact up to integer rounding. Candidate
-    schedules also reduce source-pair imbalance across receivers; their actual
-    global coverage is reported by the independent audit, rather than assumed.
+    Choose one balanced random microphone per base case, and use another
+    microphone for each of 75 additional cases. Additional pair types are
+    distinct globally. Smaller counts are explicit subsets of the base phase,
+    followed by additional cases only after all 2,925 base cases are included.
     """
-    if not isinstance(count, Integral) or isinstance(count, bool) or count < 0:
-        raise ValueError("count must be a nonnegative integer")
+    if (not isinstance(count, Integral) or isinstance(count, bool)
+            or not 0 <= count <= PRODUCTION_COUNT):
+        raise ValueError("count must be an integer from 0 through 3000")
+    if not count:
+        return []
     rng = np.random.default_rng(seed)
-    quotas = _receiver_quotas(int(count), rng)
-    total = np.zeros(len(PAIR_TYPES), dtype=int)
-    per_rt = {rt: np.zeros_like(total) for rt in RT60_MS}
+    quotas = _receiver_quotas(PRODUCTION_COUNT, rng)
+    additional = _additional_pairs(rng)
+    out_counts = np.bincount(additional[:, 0], minlength=SOURCE_COUNT)
+    in_counts = np.bincount(additional[:, 1], minlength=SOURCE_COUNT)
+    high = set(np.flatnonzero(out_counts == 2).tolist())
+    eligible = sorted(set(range(SOURCE_COUNT)) - high
+                      - set(np.flatnonzero(in_counts == 2).tolist()))
+    high.update(rng.choice(eligible, SOURCE_COUNT // 2 - len(high), replace=False).tolist())
+    low = set(range(SOURCE_COUNT)) - high
+    additional = additional[rng.permutation(len(additional))]
+    sessions = list(product(RT60_MS, SPACINGS))
     records = []
-    keys = sorted(quotas)
-    for position in rng.permutation(len(keys)):
-        rt, spacing, mic = key = keys[position]
-        quota = quotas[key]
-        if not quota:
-            continue
-        best = None
-        for _ in range(64):
-            pairs = _candidate_pairs(quota, rng)
-            histogram = _histogram(pairs)
-            score = int(
-                np.dot(total + histogram, total + histogram)
-                + np.dot(per_rt[rt] + histogram, per_rt[rt] + histogram)
-            )
-            if best is None or score < best[0]:
-                best = score, pairs, histogram
-        _, pairs, histogram = best
-        total += histogram
-        per_rt[rt] += histogram
-        records.extend(
-            dict(rt60_ms=rt, spacing=spacing, microphone=mic, sources=pair.tolist())
-            for pair in pairs
+    cursor = 0
+    for position, session_index in enumerate(rng.permutation(len(sessions))):
+        rt, spacing = sessions[session_index]
+        receiver_quotas = {mic: quotas[rt, spacing, mic] for mic in MICROPHONES}
+        extra_count = sum(receiver_quotas.values()) - len(PAIR_TYPES)
+        pairs = _complete_pairs(rng, high if position % 2 == 0 else low)
+        current = [dict(rt60_ms=rt, spacing=spacing, sources=pair.tolist(),
+                        assignment_phase="base") for pair in pairs]
+        current.extend(
+            dict(rt60_ms=rt, spacing=spacing, sources=pair.tolist(),
+                 assignment_phase="additional")
+            for pair in additional[cursor:cursor + extra_count]
         )
-    return [records[i] for i in rng.permutation(len(records))]
+        cursor += extra_count
+        _assign_microphones(current, receiver_quotas, rng)
+        records.extend(current)
+    records = [records[i] for i in rng.permutation(len(records))]
+    if count < PRODUCTION_COUNT:
+        base = [r for r in records if r["assignment_phase"] == "base"]
+        extras = [r for r in records if r["assignment_phase"] == "additional"]
+        records = base[:min(count, BASE_CASE_COUNT)] + extras[:max(0, count - BASE_CASE_COUNT)]
+        records = [records[i] for i in rng.permutation(len(records))]
+    return records
 
 
 def audit_assignment(records, require_production=False):
     """Inspect generated assignments without calling the allocation algorithm."""
     rt_counts, array_counts, mic_counts = Counter(), Counter(), Counter()
     by_receiver = defaultdict(list)
+    cases, base_cases, extra_cases, extra_pairs = Counter(), Counter(), Counter(), Counter()
+    base_microphones, extra_microphones = {}, {}
     for record in records:
         rt, spacing, mic = (record[k] for k in ("rt60_ms", "spacing", "microphone"))
         first, second = record["sources"]
@@ -138,12 +188,23 @@ def audit_assignment(records, require_production=False):
             rt not in RT60_MS or spacing not in SPACINGS or mic not in MICROPHONES
             or not 0 <= first < SOURCE_COUNT or not 0 <= second < SOURCE_COUNT
             or first == second
+            or record.get("assignment_phase") not in ("base", "additional")
         ):
             raise ValueError("Invalid MIRD receiver or source pair")
         rt_counts[rt] += 1
         array_counts[spacing] += 1
         mic_counts[mic] += 1
         by_receiver[rt, spacing, mic].append((first, second))
+        pair = tuple(sorted((first, second)))
+        case = rt, spacing, pair
+        cases[case] += 1
+        if record["assignment_phase"] == "base":
+            base_cases[case] += 1
+            base_microphones[case] = mic
+        else:
+            extra_cases[case] += 1
+            extra_pairs[pair] += 1
+            extra_microphones[case] = mic
     rows = []
     global_pairs = Counter()
     for rt, spacing, mic in product(RT60_MS, SPACINGS, MICROPHONES):
@@ -155,11 +216,11 @@ def audit_assignment(records, require_production=False):
         if require_production:
             if len(pairs) not in (41, 42) or len(counts) != len(pairs):
                 raise ValueError("Expected 41/42 distinct source pairs per receiver")
-            if any(np.ptp(side) > 1 for side in roles):
-                raise ValueError("Unbalanced speaker/source roles at receiver")
         rows.append(dict(rt60_ms=rt, spacing=spacing, microphone=mic,
                          mixtures=len(pairs), unique_unordered_pairs=len(counts),
                          source_role_counts=[side.tolist() for side in roles]))
+    global_roles = [np.bincount([r["sources"][side] for r in records], minlength=SOURCE_COUNT)
+                    for side in (0, 1)]
     if require_production:
         if len(records) != 3000 or set(rt_counts.values()) != {1000}:
             raise ValueError("Expected 3000 mixtures with 1000 per RT setting")
@@ -167,6 +228,16 @@ def audit_assignment(records, require_production=False):
             raise ValueError("Unbalanced array or microphone coverage")
         if len(global_pairs) != len(PAIR_TYPES):
             raise ValueError("Not all 325 source-pair types are represented")
+        expected = set(product(RT60_MS, SPACINGS, PAIR_TYPES))
+        if set(cases) != expected or base_cases != Counter({key: 1 for key in expected}):
+            raise ValueError("Expected one base occurrence of every one of 2925 cases")
+        if (len(extra_cases) != 75 or set(extra_cases.values()) != {1}
+                or len(extra_pairs) != 75 or set(extra_pairs.values()) != {1}):
+            raise ValueError("Expected 75 distinct additional cases and source-pair types")
+        if any(extra_microphones[key] == base_microphones[key] for key in extra_cases):
+            raise ValueError("Additional cases must use a different microphone")
+        if any(np.ptp(role) > 1 for role in global_roles):
+            raise ValueError("Unbalanced global speaker/source roles")
     return dict(
         mixtures=len(records), physical_rooms=1, receiver_conditions=72,
         used_receiver_conditions=sum(row["mixtures"] > 0 for row in rows),
@@ -177,6 +248,12 @@ def audit_assignment(records, require_production=False):
         source_pair_types_covered=len(global_pairs),
         source_pair_count_min=min((global_pairs[pair] for pair in PAIR_TYPES), default=0),
         source_pair_count_max=max(global_pairs.values(), default=0),
+        pair_session_cases_available=BASE_CASE_COUNT,
+        pair_session_cases_covered=len(cases),
+        base_records=sum(base_cases.values()), additional_records=sum(extra_cases.values()),
+        additional_cases=len(extra_cases),
+        pair_session_count_histogram=dict(Counter(cases.values())),
+        global_source_role_counts=[role.tolist() for role in global_roles],
         receivers=rows,
         limitation="Receiver recording IDs include overlapping physical microphone positions",
     )
@@ -208,8 +285,10 @@ def prepare_plan(filenames, scaling, output, seed=20261027):
                       source_paths=[row["s1_path"], row["s2_path"]])
     audit = audit_assignment(records, require_production=True)
     payload = dict(
-        schema=1, artifact_type="mird_two_speaker_assignment_plan",
+        schema=2, artifact_type="mird_two_speaker_assignment_plan",
         status="awaiting_measured_rir_data", seed=seed, count=3000,
+        sampling="all_2925_pair_rt_array_cases_plus_75_distinct_additions",
+        microphone_selection="seeded balanced random; additions differ from their base mic",
         source_index_sha256={
             str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (filenames, scaling)

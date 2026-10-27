@@ -1,4 +1,4 @@
-"""MIRD receiver coverage and two-speaker geometry sampling invariants."""
+"""MIRD source-pair/session coverage and single-microphone assignments."""
 
 import importlib.util
 import csv
@@ -26,16 +26,28 @@ class TestMIRDPairAssignment(unittest.TestCase):
     def setUpClass(cls):
         cls.records = MODULE.assign_pairs(seed=20261027)
 
-    def test_production_coverage_and_source_roles(self):
+    @staticmethod
+    def macro_key(record):
+        return (record["rt60_ms"], record["spacing"],
+                tuple(sorted(record["sources"])))
+
+    def test_production_covers_every_pair_and_session(self):
         records = self.records
         self.assertEqual(len(records), 3000)
         grouped = defaultdict(list)
+        macro_counts = Counter()
         for record in records:
             key = record["rt60_ms"], record["spacing"], record["microphone"]
             first, second = record["sources"]
             self.assertNotEqual(first, second)
             self.assertTrue(0 <= first < 26 and 0 <= second < 26)
             grouped[key].append((first, second))
+            macro_counts[self.macro_key(record)] += 1
+        expected_macros = set(product(
+            (160, 360, 610), MODULE.SPACINGS, combinations(range(26), 2)
+        ))
+        self.assertEqual(set(macro_counts), expected_macros)
+        self.assertEqual(Counter(macro_counts.values()), {1: 2850, 2: 75})
         self.assertEqual(
             set(grouped),
             set(product((160, 360, 610), MODULE.SPACINGS, range(1, 9))),
@@ -43,27 +55,48 @@ class TestMIRDPairAssignment(unittest.TestCase):
         for key in ("rt60_ms", "spacing", "microphone"):
             expected = 375 if key == "microphone" else 1000
             self.assertEqual(set(Counter(r[key] for r in records).values()), {expected})
-        all_pairs = set()
+        session_counts = Counter((r["rt60_ms"], r["spacing"]) for r in records)
+        self.assertEqual(Counter(session_counts.values()), {333: 6, 334: 3})
         for key, pairs in grouped.items():
             with self.subTest(receiver=key):
                 self.assertIn(len(pairs), (41, 42))
                 unordered = {tuple(sorted(pair)) for pair in pairs}
                 self.assertEqual(len(unordered), len(pairs))
-                all_pairs.update(unordered)
-                for side in (0, 1):
-                    counts = Counter(pair[side] for pair in pairs)
-                    self.assertEqual(set(counts), set(range(26)))
-                    self.assertLessEqual(max(counts.values()) - min(counts.values()), 1)
-        self.assertEqual(all_pairs, set(combinations(range(26), 2)))
+        pair_counts = Counter(tuple(sorted(r["sources"])) for r in records)
+        self.assertEqual(Counter(pair_counts.values()), {9: 250, 10: 75})
+        for side in (0, 1):
+            source_counts = Counter(record["sources"][side] for record in records)
+            self.assertEqual(set(source_counts), set(range(26)))
+            self.assertEqual(Counter(source_counts.values()), {115: 16, 116: 10})
         report = MODULE.audit_assignment(records, require_production=True)
         self.assertEqual(report["used_receiver_conditions"], 72)
         self.assertEqual(report["unique_recorded_unordered_conditions"], 3000)
         self.assertEqual(report["source_pair_types_covered"], 325)
 
+    def test_additional_cases_use_distinct_microphones_and_source_pairs(self):
+        phases = Counter(record["assignment_phase"] for record in self.records)
+        self.assertEqual(phases, {"base": 2925, "additional": 75})
+        base = {self.macro_key(r): r for r in self.records
+                if r["assignment_phase"] == "base"}
+        additional = [r for r in self.records
+                      if r["assignment_phase"] == "additional"]
+        self.assertEqual(len(base), 2925)
+        self.assertEqual(len({self.macro_key(r) for r in additional}), 75)
+        self.assertEqual(len({tuple(sorted(r["sources"])) for r in additional}), 75)
+        for record in additional:
+            with self.subTest(case=self.macro_key(record)):
+                self.assertNotEqual(record["microphone"],
+                                    base[self.macro_key(record)]["microphone"])
+
     def test_reproducibility_and_seed_variation(self):
         self.assertEqual(self.records, MODULE.assign_pairs(seed=20261027))
         other = MODULE.assign_pairs(seed=11)
         self.assertNotEqual(self.records, other)
+        base_mics = {self.macro_key(r): r["microphone"] for r in self.records
+                     if r["assignment_phase"] == "base"}
+        other_base_mics = {self.macro_key(r): r["microphone"] for r in other
+                           if r["assignment_phase"] == "base"}
+        self.assertNotEqual(base_mics, other_base_mics)
         MODULE.audit_assignment(other, require_production=True)
 
     def test_utterance_order_is_shuffled(self):
@@ -86,20 +119,63 @@ class TestMIRDPairAssignment(unittest.TestCase):
         key = tuple(first[k] for k in ("rt60_ms", "spacing", "microphone"))
         partner = next(i for i, record in enumerate(records[1:], 1)
                        if tuple(record[k] for k in ("rt60_ms", "spacing", "microphone")) == key)
-        records[partner]["sources"] = list(first["sources"])
-        with self.assertRaisesRegex(ValueError, "distinct source pairs"):
+        records[partner]["sources"] = list(reversed(first["sources"]))
+        with self.assertRaises(ValueError):
+            MODULE.audit_assignment(records, require_production=True)
+
+    def test_audit_rejects_missing_cases_despite_balanced_marginals(self):
+        records = [dict(record) for record in self.records]
+        extra_pairs = {tuple(sorted(r["sources"])) for r in records
+                       if r["assignment_phase"] == "additional"}
+        base = {self.macro_key(r): r for r in records
+                if r["assignment_phase"] == "base"}
+        eligible = [r for r in records if r["assignment_phase"] == "base"
+                    and tuple(sorted(r["sources"])) not in extra_pairs]
+        first = eligible[0]
+        rt1, array1, pair1 = self.macro_key(first)
+        second = next(r for r in eligible
+                      if (r["rt60_ms"], r["spacing"]) != (rt1, array1)
+                      and tuple(sorted(r["sources"])) != pair1
+                      and base[rt1, array1, tuple(sorted(r["sources"]))]["microphone"]
+                      != first["microphone"]
+                      and base[r["rt60_ms"], r["spacing"], pair1]["microphone"]
+                      != r["microphone"])
+        first["sources"], second["sources"] = second["sources"], first["sources"]
+        # All receiver and source-pair totals survive this swap, as does full
+        # receiver/pair uniqueness. Only complete macro-case coverage is lost.
+        for key in ("rt60_ms", "spacing", "microphone"):
+            self.assertEqual(Counter(r[key] for r in records),
+                             Counter(r[key] for r in self.records))
+        self.assertEqual(Counter(tuple(sorted(r["sources"])) for r in records),
+                         Counter(tuple(sorted(r["sources"])) for r in self.records))
+        full_conditions = {(self.macro_key(r), r["microphone"]) for r in records}
+        self.assertEqual(len(full_conditions), 3000)
+        self.assertEqual(len({self.macro_key(r) for r in records}), 2923)
+        with self.assertRaises(ValueError):
+            MODULE.audit_assignment(records, require_production=True)
+
+    def test_audit_rejects_additional_case_at_its_base_microphone(self):
+        records = [dict(record) for record in self.records]
+        base = {self.macro_key(r): r for r in records
+                if r["assignment_phase"] == "base"}
+        additional = next(r for r in records
+                          if r["assignment_phase"] == "additional")
+        additional["microphone"] = base[self.macro_key(additional)]["microphone"]
+        with self.assertRaises(ValueError):
             MODULE.audit_assignment(records, require_production=True)
 
     def test_empty_and_small_assignments(self):
         self.assertEqual(MODULE.assign_pairs(0), [])
-        for count in (1, 9, 71, 73):
+        for count in (1, 9, 71, 73, 2924, 2925, 2926):
             with self.subTest(count=count):
                 records = MODULE.assign_pairs(count, seed=0)
                 self.assertEqual(len(records), count)
                 self.assertEqual(MODULE.audit_assignment(records)["mixtures"], count)
+                self.assertEqual(len({self.macro_key(r) for r in records}),
+                                 min(count, 2925))
 
     def test_invalid_counts(self):
-        for count in (-1, 3.5, True, "3000"):
+        for count in (-1, 3.5, True, "3000", 3001):
             with self.subTest(count=count), self.assertRaises(ValueError):
                 MODULE.assign_pairs(count)
 
@@ -119,6 +195,7 @@ class TestMIRDPairAssignment(unittest.TestCase):
             audit = MODULE.prepare_plan(filenames, scaling, output)
             payload = json.loads((output / "assignment_plan.json").read_text())
             self.assertEqual(audit["mixtures"], 3000)
+            self.assertEqual(payload["schema"], 2)
             self.assertEqual(payload["status"], "awaiting_measured_rir_data")
             self.assertEqual([r["filename"] for r in payload["records"]], ids)
             self.assertEqual(len(payload["source_grid"]), 26)
