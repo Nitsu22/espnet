@@ -1,4 +1,4 @@
-# MIRD / WHAMR two-speaker evaluation preparation
+# MIRD / WHAMR two-speaker evaluation generation
 
 Target: the same 3,000 WHAMR `tt/min` source mixtures used by the BUT evaluation,
 with MIRD measured RIRs, at 8/16 kHz and clean/WHAM-noisy conditions. Both speakers
@@ -42,12 +42,17 @@ additions). Completing the approved nine-condition protocol requires the correct
 26 native MATs for 610 ms / `3-3-3-8-3-3-3`, including all eight microphones.
 Changing to eight conditions would change the approved coverage design.
 
-The downloader and native archive/metadata validator are implemented. Audio
-synthesis has not been implemented or run; no completed audio dump is claimed.
-Assignment plans remain marked `awaiting_measured_rir_data`. ZIP integrity alone
-does not validate a recording condition; the downloader now fails when native
-condition validation fails. An older `download_complete.json` is only a transport
-record, not evidence of a complete usable MIRD database.
+The downloader, native archive/metadata validator, audio generator and independent
+audio validator are implemented. An eight-mixture smoke run covers every valid
+recording condition, at both sample rates and with both clean/noisy mixtures.
+This is **not the production 3,000-mixture dataset**. Full production generation
+rejects incomplete native conditions before creating its output directory.
+
+Assignment plans remain marked `awaiting_measured_rir_data` until all nine native
+conditions can be used. ZIP integrity alone does not validate a recording
+condition; the downloader fails when native condition validation fails. An older
+`download_complete.json` is only a transport record, not evidence of a complete
+usable MIRD database.
 
 Detailed source verification is saved locally in
 `exp/mird_2spk_preparation_20261027/native_rir_audit.json`, with all 208 checked
@@ -104,10 +109,9 @@ not guarantee complete 2,925-case coverage and must not be used for this protoco
 The regenerated production plan is stored separately under
 `exp/mird_2spk_preparation_20261027/assignment_plan_2925_plus75/`; a new plan with
 verified native angles is in `assignment_plan_native_angles/` alongside it.
-The full WHAMR-ID assignment, nineteen unit/integration tests, and all eight valid
+The full WHAMR-ID assignment, 31 unit/integration tests, and all eight valid
 native recording conditions were verified on 2026-10-27. The source audit exits
-with failure because the ninth condition is missing. No synthesized speech
-audio was validated.
+with failure because the ninth condition is missing.
 
 To rerun native verification without extracting or modifying the archives:
 
@@ -123,3 +127,62 @@ The report refuses an existing output file. `download_mird.py` accepts the saved
 public Drive inventory (`--inventory`) and a destination (`--output`); it verifies
 ZIP CRCs, computes transport hashes, then runs the same native metadata audit.
 It uses no account cookies or user cache. No downloaded MATLAB code is executed.
+
+## Audio protocol and verified smoke output
+
+`local/create_whamr_mird_2spk_dump.py` reads the immutable complete assignment.
+Production uses all 3,000 entries; `--smoke-per-condition N` selects the first N
+planned entries for each available RT/array session, retaining their original
+WHAM source IDs, plan indices, source positions and microphone. Smoke selection
+does not redraw or repair missing assignments.
+
+- Select the same recorded microphone column for both source positions.
+- Keep the full native ten-second RIR, including its delay. Resample to 8/16 kHz,
+  divide each mono RIR by its absolute peak, and store FLOAT WAV references.
+  This peak normalization follows the BUT evaluation convention; absolute
+  measured distance attenuation is not preserved.
+- Resample the original WSJ speech and crop to the shorter source. Apply each
+  original WHAM WSJ gain, MATLAB-compatible int16 quantization, then the shared
+  WHAM speech gain. Convolve with the complete RIR and crop to the speech length.
+- Construct direct references from one signed absolute-peak tap of each RIR.
+  This is a peak-tap target, not an independently verified physical direct onset.
+- Use the original WHAM noise gain and start index, with the left-channel mono
+  convention. Apply one common attenuation to all nine outputs: `source1/2`,
+  `direct1/2`, `reverb1/2`, `noise`, `mix_clean`, and `mix_both`.
+- Write four ESPnet SCP sets, one per sample rate and clean/noisy condition.
+  Preserve the same assignment across all four. No SIR/SNR is forced after
+  measured-RIR convolution.
+
+The actual smoke result is
+`dump_mird_2spk_smoke_native10s_20261027_v2/`: eight mixtures in each of four
+sets, 16 rate/utterance records, and 32 saved mono RIRs. Independent reconstruction
+from the native MATs and original CSV/NPZ/audio gave zero RIR error and maximum
+signal error `5.78e-8` (FLOAT rounding; tolerance `3e-6`). The validator checks the
+selected microphone, both convolutions/direct targets, source/noise gains,
+independently recomputed common attenuation, mixture sums, paired sample rates,
+archive hashes and all SCP mappings.
+
+Smoke outputs have `smoke_complete.json` and a `validation.json` explicitly marked
+`is_production_dataset: false`. Production uses `generation_complete.json`, then
+requires the independent validation result `validated_production`. Neither a
+smoke marker nor an assignment plan is a production completion claim.
+
+Example from a checkout with the raw assets available (use explicit asset paths
+when running from an isolated worktree):
+
+```bash
+python egs2/whamr/rir_1ch/local/create_whamr_mird_2spk_dump.py \
+  --output egs2/whamr/rir_1ch/dump_mird_smoke_new \
+  --plan egs2/whamr/rir_1ch/exp/mird_2spk_preparation_20261027/assignment_plan_native_angles/assignment_plan.json \
+  --archives egs2/whamr/rir_1ch/downloads/MIRD/archives \
+  --audit-report egs2/whamr/rir_1ch/exp/mird_2spk_preparation_20261027/native_rir_audit.json \
+  --smoke-per-condition 1 --workers 2
+
+python egs2/whamr/rir_1ch/local/create_whamr_mird_2spk_dump.py \
+  --output egs2/whamr/rir_1ch/dump_mird_smoke_new --validate-only
+```
+
+Use a fresh output directory. Omitting `--smoke-per-condition` selects production
+and requires the correct native 610-ms / 3-cm archive. If any native archive is
+replaced, rerun the complete source audit with a new report path first. Cached
+audit reuse always verifies all archive hashes against the saved report.
