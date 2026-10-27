@@ -4,12 +4,20 @@ from espnet2.rir.rec_rir.tflocoformer_sweep_v2_pit import ESPnetTFLocoformerSwee
 
 
 class ESPnetPooledBiMambaSweepV2PITModel(ESPnetTFLocoformerSweepV2PITModel):
-    def __init__(self, num_freqs=257, num_spk=2, ctf_taps=60, predictor_conf=None, **kwargs):
+    def __init__(self, num_freqs=257, num_spk=2, ctf_taps=60, predictor_conf=None,
+                 predictor_type="pooled", **kwargs):
         conf = dict(predictor_conf or {})
         reserved = {'input_dim', 'num_spk', 'ctf_taps'} & conf.keys()
         if reserved:
             raise ValueError(f"Specify {sorted(reserved)} in model_conf, not predictor_conf")
-        predictor = PooledBiMambaCTFPredictor(input_dim=num_freqs, num_spk=num_spk,
-                                            ctf_taps=ctf_taps, **conf)
+        if predictor_type == "pooled":
+            predictor_class = PooledBiMambaCTFPredictor
+        elif predictor_type == "split_bilstm":
+            from espnet2.rir.rec_rir.split_bilstm import SplitBiLSTMCTFPredictor
+            predictor_class = SplitBiLSTMCTFPredictor
+        else:
+            raise ValueError("predictor_type must be 'pooled' or 'split_bilstm'")
+        predictor = predictor_class(input_dim=num_freqs, num_spk=num_spk,
+                                    ctf_taps=ctf_taps, **conf)
         super().__init__(num_freqs=num_freqs, num_spk=num_spk, ctf_taps=ctf_taps,
                          ctf_predictor=predictor, **kwargs)
