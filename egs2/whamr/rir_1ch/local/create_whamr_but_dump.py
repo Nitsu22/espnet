@@ -84,14 +84,19 @@ def extract_rirs(root):
         dict(files=count, archive=str(archive), sha256=expected), indent=2))
 
 
-def load_rirs(root, out):
+def load_rirs(root, out, microphones=('01',)):
     if not (root / 'extraction_complete.json').is_file():
         raise ValueError('BUT RIR extraction is incomplete')
+    microphones = set(microphones)
+    if not microphones or not microphones <= {f'{i:02d}' for i in range(1, 32)}:
+        raise ValueError('Expected microphone IDs 01 through 31')
     result, inventory, seen = [], [], set()
-    for path in sorted(root.glob('*/MicID01/SpkID*/01/RIR/*.v00.wav'),
+    for path in sorted(root.glob('*/MicID01/SpkID*/*/RIR/*.v00.wav'),
                        key=lambda p: (not p.parts[-4].endswith('_S'), str(p))):
         relative = path.relative_to(root)
         room, setup, source, mic, _, _ = relative.parts
+        if mic not in microphones:
+            continue
         position = source.split('_')[0]
         key = (room, setup, position, mic)
         if key in seen:
@@ -107,6 +112,8 @@ def load_rirs(root, out):
         meta_path = path.parent.parent / 'mic_meta.txt'
         metadata = dict(line.split(maxsplit=1) for line in meta_path.read_text().splitlines()
                         if line.startswith('$') and len(line.split(maxsplit=1)) == 2)
+        if int(metadata['$EnvMicID']) != int(mic):
+            raise ValueError('Microphone ID/metadata mismatch: ' + str(path))
         inventory.append(dict(name=name, room=room, microphone_setup=setup,
                               microphone=mic, source_position=position, session=source,
                               source_path=str(path.resolve()), sha256=digest(path),
@@ -114,7 +121,12 @@ def load_rirs(root, out):
         result.append((name, x, fs, str(relative)))
     rooms = {r['room'] for r in inventory}
     if len(rooms) != 9:
-        raise ValueError(f'Expected 9 rooms with microphone-01 v00 RIRs, got {len(rooms)}')
+        raise ValueError(f'Expected 9 rooms with selected v00 RIRs, got {len(rooms)}')
+    coverage = defaultdict(set)
+    for item in inventory:
+        coverage[item['room'], item['source_position']].add(item['microphone'])
+    if any(ids != microphones for ids in coverage.values()):
+        raise ValueError('Selected microphone coverage differs between source positions')
     (out / 'rir_inventory.json').write_text(json.dumps(inventory, indent=2) + '\n')
     return sorted(result, key=lambda item: item[0])
 

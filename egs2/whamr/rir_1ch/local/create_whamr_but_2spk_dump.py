@@ -11,6 +11,7 @@ import math
 import shutil
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ import soundfile as sf
 from scipy.signal import fftconvolve, resample_poly
 
 import create_whamr_but_dump as common
+from but_pair_assignment import assign_all_microphone_pairs
 
 RECIPE = common.RECIPE
 RATES = (8000, 16000)
@@ -38,7 +40,86 @@ def coordinates(item, kind):
     return xyz
 
 
-def assign_pairs(rirs, inventory, count, seed):
+def microphone_coordinates(item):
+    return coordinates(item, 'Mic' + str(int(item['microphone'])))
+
+
+def same_position(left, right):
+    # Metadata contains sub-femtometre decimal roundoff across source sessions.
+    return bool(np.allclose(left, right, rtol=0, atol=1e-9))
+
+
+def audit_assignment(records, inventory, full_dataset, all_microphones):
+    """Audit measured geometry and sampling independently of the allocator."""
+    by_name = {item['name']: item for item in inventory}
+    source_ids = defaultdict(set)
+    for item in inventory:
+        source_ids[item['room'], item['microphone_setup'], item['microphone']].add(item['source_position'])
+    expected = set(source_ids)
+    receiver_counts, room_counts, microphone_counts = Counter(), Counter(), Counter()
+    unordered, ordered = defaultdict(Counter), defaultdict(Counter)
+    roles = defaultdict(lambda: (Counter(), Counter()))
+    room_pairs = defaultdict(Counter)
+    for record in records:
+        left, right = [by_name[name] for name in record['but_rirs']]
+        key = tuple(left[k] for k in ('room', 'microphone_setup', 'microphone'))
+        if key != tuple(right[k] for k in ('room', 'microphone_setup', 'microphone')):
+            raise ValueError('Pair does not share a receiver')
+        pair = (left['source_position'], right['source_position'])
+        if pair[0] == pair[1]:
+            raise ValueError('Pair repeats a source position')
+        receiver_counts[key] += 1
+        room_counts[key[0]] += 1
+        microphone_counts[key[2]] += 1
+        unordered[key][tuple(sorted(pair))] += 1
+        ordered[key][pair] += 1
+        room_pairs[key[0]][tuple(sorted(pair))] += 1
+        for side, source in enumerate(pair):
+            roles[key][side][source] += 1
+    receiver_rows = []
+    for key in sorted(expected):
+        possible = list(combinations(sorted(source_ids[key]), 2))
+        counts = [unordered[key][pair] for pair in possible]
+        role_counts = [[roles[key][side][s] for s in sorted(source_ids[key])] for side in (0, 1)]
+        if full_dataset and all_microphones:
+            if len(unordered[key]) != min(receiver_counts[key], len(possible)):
+                raise ValueError('Repeated source pair before exhausting receiver geometry')
+            if max(counts) - min(counts) > 1:
+                raise ValueError('Unbalanced unordered pairs at receiver')
+            if any(max(values) - min(values) > 1 for values in role_counts):
+                raise ValueError('Unbalanced speaker/source roles at receiver')
+        receiver_rows.append(dict(room=key[0], microphone_setup=key[1], microphone=key[2],
+                                  mixtures=receiver_counts[key], source_positions=len(source_ids[key]),
+                                  unique_unordered_pairs=len(unordered[key]),
+                                  possible_unordered_pairs=len(possible),
+                                  pair_count_min=min(counts), pair_count_max=max(counts),
+                                  source_role_counts=role_counts))
+    if full_dataset and all_microphones:
+        if set(receiver_counts) != expected or len(expected) != 9 * 31:
+            raise ValueError('Full all-microphone set must cover all 279 receivers')
+        if max(room_counts.values()) - min(room_counts.values()) > 1:
+            raise ValueError('Unbalanced rooms')
+        for room in room_counts:
+            counts = [receiver_counts[key] for key in expected if key[0] == room]
+            if max(counts) - min(counts) > 1:
+                raise ValueError('Unbalanced receivers within room')
+        if len(microphone_counts) != 31 or max(microphone_counts.values()) - min(microphone_counts.values()) > 1:
+            raise ValueError('Unbalanced global microphone counts')
+    room_pair_rows = {}
+    for room in sorted(room_counts):
+        sources = set.union(*(value for key, value in source_ids.items() if key[0] == room))
+        counts = [room_pairs[room][pair] for pair in combinations(sorted(sources), 2)]
+        room_pair_rows[room] = dict(possible_unordered_pairs=len(counts),
+                                    covered_unordered_pairs=sum(value > 0 for value in counts),
+                                    minimum=min(counts), maximum=max(counts))
+    return dict(mixtures=len(records), receivers_available=len(expected), receivers_used=len(receiver_counts),
+                room_counts=dict(sorted(room_counts.items())), microphone_counts=dict(sorted(microphone_counts.items())),
+                unique_unordered_receiver_pairs=sum(len(value) for value in unordered.values()),
+                unique_ordered_receiver_pairs=sum(len(value) for value in ordered.values()),
+                room_source_pair_counts=room_pair_rows, receivers=receiver_rows)
+
+
+def assign_pairs(rirs, inventory, count, seed, all_microphones=False):
     """Preserve single-source assignments; balance partners for each source."""
     index = {item['name']: item for item in inventory}
     groups = defaultdict(list)
@@ -47,10 +128,13 @@ def assign_pairs(rirs, inventory, count, seed):
         groups[item['room'], item['microphone_setup'], item['microphone']].append(i)
     for key, indices in groups.items():
         items = [index[rirs[i][0]] for i in indices]
-        if len(items) < 2 or len({coordinates(x, 'Mic1') for x in items}) != 1:
+        if len(items) < 2 or any(not same_position(microphone_coordinates(x), microphone_coordinates(items[0]))
+                                 for x in items):
             raise ValueError('Need >=2 sources at one fixed microphone: ' + str(key))
         if len({coordinates(x, 'Spk1') for x in items}) != len(items):
             raise ValueError('Repeated physical source coordinates: ' + str(key))
+    if all_microphones:
+        return assign_all_microphone_pairs(groups, count, seed)
     first = common.assign_rirs(rirs, count, seed)
     second = np.empty(count, dtype=int)
     rng = np.random.default_rng(seed + 1)
@@ -118,9 +202,10 @@ def generate(args):
         raise OSError('Insufficient space for estimated output plus 100 GiB reserve')
     out.mkdir(parents=True)
     save_json(out / 'capacity.json', dict(estimated_bytes=estimated, reserve_bytes=RESERVE))
-    rirs = common.load_rirs(args.rir_root, out)
+    microphone_ids = tuple(f'{i:02d}' for i in range(1, 32)) if args.microphones == 'all' else ('01',)
+    rirs = common.load_rirs(args.rir_root, out, microphone_ids)
     inventory = json.loads((out / 'rir_inventory.json').read_text())
-    assignment = assign_pairs(rirs, inventory, len(ids), args.seed)
+    assignment = assign_pairs(rirs, inventory, len(ids), args.seed, args.microphones == 'all')
     inventory_by_name = {r['name']: r for r in inventory}
     config = dict(
         generator_sha256=common.digest(Path(__file__)), helper_sha256=common.digest(Path(common.__file__)),
@@ -131,8 +216,11 @@ def generate(args):
         wsj_root=str(args.wsj_root.resolve()), noise_root=str(args.noise_root.resolve()),
         rir_root=str(args.rir_root.resolve()), inventory_sha256=common.digest(out / 'rir_inventory.json'),
         archive_sha256_record=(args.rir_root.parent / 'SHA256SUMS').read_text().strip(),
-        microphone='01', microphone_setup='MicID01', rir_version='v00',
-        assignment='same s1 assignment as single-speaker seed; balance distinct s2 partners per s1; shared across rates/conditions',
+        microphone=args.microphones, microphones=list(microphone_ids), microphone_setup='MicID01', rir_version='v00',
+        assignment=('balance rooms, room/channel counts, global channel counts, source roles and distinct unordered pairs; shared across rates/conditions'
+                    if args.microphones == 'all' else
+                    'same s1 assignment as single-speaker seed; balance distinct s2 partners per s1; shared across rates/conditions'),
+        assignment_implementation_sha256=common.digest(Path(__file__).with_name('but_pair_assignment.py')),
         rir='full distributed 1-second RIR, resampled and abs-peak normalized; retain distributed delay compensation',
         direct='one signed absolute-peak tap, not an independently verified physical direct onset',
         gains='per-speaker WHAM wsjmix gains -> int16 quantization -> shared WHAM speech gain; original noise gain/crop',
@@ -141,6 +229,11 @@ def generate(args):
         snr='not fixed; no SIR matching after convolution',
     )
     save_json(out / 'generation_config.json', config)
+    planned_records = [dict(utterance_id=Path(uid).stem, but_rirs=[rirs[j][0] for j in pair])
+                       for uid, pair in zip(ids[:limit], assignment[:limit])]
+    save_json(out / 'assignment_plan.json', dict(count=limit, records=planned_records))
+    save_json(out / 'assignment_audit.json', audit_assignment(
+        planned_records, inventory, args.limit is None, args.microphones == 'all'))
     cached, rir_meta = {}, []
     for sr in RATES:
         for name, wave, fs, member in rirs:
@@ -205,6 +298,7 @@ def generate(args):
                 but_rirs=names, rir_paths=rir_paths, direct_peak_samples=peaks,
                 wsj_gains=wsj_gains, speech_gain=speech_gain, noise_gain=noise_gain,
                 noise_start_sample=start, joint_gain=joint_gain, paths=paths,
+                microphone=inventory_by_name[names[0]]['microphone'],
                 sir_reverberant_db=common.power_ratio(signals['reverb1'], signals['reverb2']),
                 snr_reverberant_db=common.power_ratio(signals['mix_clean'], noise)))
         return results
@@ -276,16 +370,28 @@ def validate(out, workers=4):
     by_key = {(r['sample_rate'], r['utterance_id']): r for r in records}
     if len(by_key) != len(records):
         raise ValueError('Duplicate records')
+    selected = [record for record in records if record['sample_rate'] == 16000]
+    if config['limit'] is None and {r['utterance_id'] for r in selected} != set(source_rows):
+        raise ValueError('Full dump does not cover WHAMR test IDs exactly')
+    plan_path = out / 'assignment_plan.json'
+    if plan_path.exists():
+        plan = json.loads(plan_path.read_text())
+        actual = [dict(utterance_id=r['utterance_id'], but_rirs=r['but_rirs']) for r in selected]
+        if plan['count'] != len(actual) or plan['records'] != actual:
+            raise ValueError('Published RIR assignment differs from plan')
 
     def check_record(rec):
         sr, n, uid = rec['sample_rate'], rec['samples'], rec['utterance_id']
         left, right = [by_name[name] for name in rec['but_rirs']]
         if any(left[k] != right[k] for k in ('room', 'microphone_setup', 'microphone')):
             raise ValueError('Sources do not share a receiver')
-        if coordinates(left, 'Mic1') != coordinates(right, 'Mic1') or coordinates(left, 'Spk1') == coordinates(right, 'Spk1'):
+        if (not same_position(microphone_coordinates(left), microphone_coordinates(right))
+                or same_position(coordinates(left, 'Spk1'), coordinates(right, 'Spk1'))):
             raise ValueError('Invalid source/receiver geometry')
         if rec['room'] != left['room']:
             raise ValueError('Room label mismatch')
+        if rec.get('microphone', left['microphone']) != left['microphone']:
+            raise ValueError('Microphone label mismatch')
         pair = by_key[16000 if sr == 8000 else 8000, uid]
         if pair['but_rirs'] != rec['but_rirs']:
             raise ValueError('RIR assignment differs between rates')
@@ -372,13 +478,20 @@ def validate(out, workers=4):
                   audio_tuples_checked=len(records), room_counts=dict(sorted(rooms.items())),
                   rir_count=len(inventory), max_signal_identity_error=worst,
                   checks='source gains/quantization; paired rates; distinct source geometry at fixed microphone; both convolutions/direct references; mixture/noise sums; RIR hashes; all SCP mappings')
+    if config.get('microphone') == 'all':
+        audit = audit_assignment(selected, inventory, config['limit'] is None, True)
+        save_json(out / 'assignment_audit.json', audit)
+        report['receiver_conditions_checked'] = audit['receivers_used']
     save_json(out / 'validation.json', report)
     print(json.dumps(report, indent=2), flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=RECIPE / 'dump_but_2spk')
+    parser.add_argument('--output', type=Path,
+                        help='Default: dump_but_2spk, or dump_but_2spk_all31 with --microphones all')
+    parser.add_argument('--microphones', choices=('01', 'all'), default='01',
+                        help='Legacy microphone 01, or balanced sampling over all 31 channels')
     parser.add_argument('--rir-root', type=Path, default=Path('/net/midgar/work2/nitsu/data/BUT_ReverbDB/rir_metadata'))
     parser.add_argument('--wsj-root', type=Path, default=RECIPE.parent / 'enh_rir/data/wsj0/wsj0_wav')
     parser.add_argument('--noise-root', type=Path, default=Path('/net/midgar/work2/nitsu/data/wsj/wham_noise'))
@@ -389,6 +502,8 @@ def main():
     parser.add_argument('--limit', type=int)
     parser.add_argument('--validate-only', action='store_true')
     args = parser.parse_args()
+    if args.output is None:
+        args.output = RECIPE / ('dump_but_2spk_all31' if args.microphones == 'all' else 'dump_but_2spk')
     if args.workers < 1 or (args.limit is not None and args.limit < 1):
         parser.error('workers and limit must be positive')
     if not args.validate_only:

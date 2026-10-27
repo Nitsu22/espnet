@@ -4,7 +4,8 @@ This evaluation set mixes two WSJ speakers convolved with measured BUT RIRs.
 It is mono audio with two speakers, not a two-channel recording. The existing
 single-speaker `dump_but/` remains unchanged.
 
-From the ESPnet repository root:
+The default mode uses microphone 01 for compatibility with the original
+evaluation. From the ESPnet repository root:
 
 ```bash
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python \
@@ -17,7 +18,7 @@ or `--validate-only` to revalidate an existing output. The default is four CPU
 workers; no GPU is required. The script estimates storage before generation
 and checks that at least 100 GiB remains free during generation.
 
-## Sources and construction
+## Sources and construction (microphone 01)
 
 - WHAMR `tt/min`, all 3,000 original mixture IDs, both speakers. The original
   shorter source determines observation length. Eight and sixteen kHz, with
@@ -57,10 +58,73 @@ does not recover reverberation beyond one second. This dataset consists of
 synthetic mixtures using measured RIRs, not recorded two-speaker conversations.
 Use it for held-out evaluation, not training or model selection.
 
+## Evaluation using all 31 microphone channels
+
+To create a separate all-channel set from the ESPnet repository root:
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python \
+  egs2/whamr/rir_1ch/local/create_whamr_but_2spk_dump.py --microphones all
+```
+
+The default output for this mode is
+`egs2/whamr/rir_1ch/dump_but_2spk_all31/`. It uses the same 3,000 original
+WHAMR `tt/min` mixture IDs and creates the same four clean/noisy, 8/16 kHz
+sets described below. Source gains, noise crops and gains, RIR normalization,
+direct references, common attenuation, and observation/tail truncation follow
+the protocol above. Assignments are shared across rates and noise conditions.
+
+- The selected inventory contains 1,581 RIRs: 51 room/source positions for each
+  of 31 microphone channels. Every room/channel has the same source-position
+  coverage as the other channels in that room. Selection uses `MicID01`,
+  version `v00`, preferring dedicated `_S` sessions and then the earliest
+  repeated session.
+- There are **279 room/channel conditions in nine physical rooms**. Some
+  channels have coincident receiver coordinates in the metadata, including
+  different microphone types; the 279 conditions are not 279 independent rooms
+  or necessarily 279 distinct receiver coordinates.
+- Each mixture uses two distinct measured source positions at the same room,
+  microphone channel, receiver setup, and receiver coordinates. The two
+  sources are never combined from different receiver channels.
+- With seed 20260909, allocate 333 or 334 mixtures per room, 10 or 11 per
+  room/channel, and 96 or 97 per microphone channel across rooms. Within each
+  receiver condition, maximize distinct unordered source-position pairs
+  before repeating them, balance pair counts, and balance each position's
+  assignment to speaker 1 and speaker 2.
+- There are 4,650 possible unordered source-position pairs across these
+  receiver conditions, or 9,300 when speaker assignment is distinguished.
+  A 3,000-mixture set therefore cannot exhaust every pair. Balanced coverage
+  of receiver conditions is the sampling target; the microphone-01 rule that
+  preserves the single-speaker set's speaker-1 assignment does not apply.
+
+`assignment_plan.json` saves the planned RIR pair for every mixture.
+`assignment_audit.json` reports the realized room/channel and source-pair
+coverage and role counts. Generation also runs geometry checks and the full
+waveform and manifest validation described below; only a passing
+`validation.json` establishes that a generated output passed validation.
+The original `dump_but_2spk/` can be retained alongside this set.
+
+Completed on 2026-10-27: all four sets contain 3,000 mixtures and all 6,000
+utterance/rate tuples passed validation. All 279 receiver conditions have
+10 or 11 mixtures; rooms have 333 or 334, and microphone-ID totals across
+rooms are 96 or 97. All 1,581 RIRs occur in both speaker roles. The set covers
+2,264 unordered receiver/source-pair conditions and 2,582 ordered conditions.
+Within each receiver, both pair-frequency and per-speaker source-frequency
+differences are at most one. Across microphones within a room, unordered
+source-pair frequency differences are at most three; this secondary balance
+is optimized heuristically. Maximum signal identity error was
+`7.058216300315223e-08`. Fifteen regression tests passed, and all original
+microphone-01 RIR assignments still match the existing 3,000-mixture set.
+Logs, the 12-mixture smoke check, and an independent assignment/source-hash
+audit are in `exp/but_all31_generation_20261027/`. Run the regression tests
+from the repository root with `python -m unittest discover -s
+test/espnet2/rir -p 'test_but*.py'` in the existing ESPnet Python environment.
+
 ## Saved signals and ESPnet manifests
 
-Four sets are generated directly under `dump_but_2spk/raw/`; no intermediate
-Kaldi `data/` directory is required:
+Four sets are generated directly under `dump_but_2spk/raw/`, or
+`dump_but_2spk_all31/raw/` for all-channel mode; no intermediate Kaldi `data/`
+directory is required:
 
 ```
 tt_but_2spk_clean_reverb_min_8k
@@ -104,6 +168,7 @@ rate pairing, RIR hashes, and every manifest mapping. `generation_complete.json`
 marks completed generation; `validation.json` is written only after validation
 passes. Revalidation removes any previous validation report before checking.
 
+The following completed run describes the original microphone-01 set only.
 Production log: `exp/but_2spk_generation_20261005/run.log`.
 
 Completed on 2026-10-05: all four sets contain 3,000 mixtures and all 6,000
