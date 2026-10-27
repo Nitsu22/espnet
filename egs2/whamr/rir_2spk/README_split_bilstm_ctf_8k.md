@@ -71,6 +71,10 @@ bash run_split_bilstm_2spk_nf_8k_sweep_v2.sh \
 実行前に既存の `local/check_two_speaker_training.py` で実データ・batch4・最長検証入力・
 PIT・逆伝播・2話者RIR推論を確認する。今回のコードは実行中の4条件と別のworktreeに置く。
 
+ラボ用の `local/run_split_bilstm_8k_lab.sh GPU_INDEX RESULT_RECIPE` は、GPUの空きを確認し、
+上記のGPU検証に成功した場合だけスクラッチ学習を開始する。専用結果名には実行ホストを含め、
+既存結果を上書きせず、開始情報・検証結果・終了状態・最良チェックポイントの完了記録を保存する。
+
 ## 実装時の検証
 
 - 新規7テスト成功：Split、話者Attentionの局所性・他話者への依存、LSTMの処理軸、
