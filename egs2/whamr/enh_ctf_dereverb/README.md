@@ -190,6 +190,14 @@ of the longest validation utterance. The report records time and memory; no
 probe weights are used for production training. This is a charged job, not a
 free-trial measurement.
 
+The base `tf-locoformer` conda environment does not itself contain Mamba.
+Both jobs add the existing user-owned dependency directory
+`/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet/egs2/whamr/damsep_clean/.deps/mamba-cu118-torch21-py310`
+to PYTHONPATH, read-only. It contains Mamba1.2.0.post1 and causal-conv1d1.2.0.post2, matching
+PyTorch2.1/CUDA11.8/Python3.10. `CTF_MAMBA_DEPS` can select another compatible
+isolated directory. The shared conda environment is never installed into or
+modified by these jobs; the CUDA report records dependency versions.
+
 Training requests `gpu_1=1` (8 cores, 96 GB host RAM, one full GPU), priority -5,
 24 hours. It verifies a passed readiness report with exactly matching source
 commit, configuration and paired manifest, and starts from scratch or resumes

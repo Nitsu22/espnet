@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import subprocess
 import time
@@ -97,6 +98,10 @@ def check(config, paired_dump, output, steps):
             torch_version=torch.__version__,
             cuda_version=torch.version.cuda,
         )
+        report["dependencies"] = {
+            package: importlib.metadata.version(package)
+            for package in ("mamba-ssm", "causal-conv1d", "transformers")
+        }
         report["mamba_kernel"] = kernel_check()
         model = EnhancementTask.build_model(options).cuda().train()
         if len(model.separator.blocks) != 3 or hasattr(model.separator, "deconv"):
