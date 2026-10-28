@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit three paid jobs with explicit resource/time overrides:
-# prepare: cpu_4=1, 00:30:00
+# prepare: cpu_4=1; optional third argument overrides the source audio dump.
 # infer:   gpu_1=1, 01:00:00, hold_jid PREP_ID; args: infer OUTPUT PREP_ID
 # score:   cpu_4=1, 01:00:00, hold_jid INFER_ID; args: score OUTPUT INFER_ID
 #$ -cwd
@@ -53,10 +53,12 @@ export PYTHONPATH="$repo:$shared/egs2/whamr/damsep_clean/.deps/mamba-cu118-torch
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1
 python="$CONDA_PREFIX/bin/python"
 if [[ $mode == prepare ]]; then
+    dump_root="$PWD/dump_nf8k_ctf_controls_seed0"
+    if [[ -n $predecessor ]]; then dump_root=$predecessor; fi
     previous=/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_concat_s/egs2/whamr/enh_rir
     model="$previous/exp/enh_train_tflocoformer_s_nf8k_bimamba_ctf_concat_seed0"
     "$python" -B local/evaluate_ctf_audio_controls.py prepare \
-        --dump-root "$PWD/dump_nf8k_ctf_controls_seed0" \
+        --dump-root "$dump_root" \
         --original-test "$previous/exp/bimamba_nf8k_baseline_inputs/raw/tt_mix_clean_reverb_min_8k" \
         --original-recipe "$shared/egs2/whamr/enh7_baseline" \
         --model-exp "$model" --output "$output" \

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate two CPU-only, test-only NF-WHAMR conditioning-audio controls.
+"""Generate CPU-only, test-only NF-WHAMR conditioning-audio controls.
 
 The output mixtures are inputs for a FUTURE CTF estimation experiment, not
 replacement separation/scoring inputs. No CTFs, model inference, or scores are
-generated. Both conditions retain the original scene UID and length. Read the
+generated. All conditions retain the original scene UID and length. Read the
 audit before interpreting the original UID as the new speech/RIR assignment.
 """
 
@@ -39,7 +39,9 @@ from prepare_nf8k_same_speaker_test import (
 CONDITIONS = {
     "same_rir_other_utt": "tt_same_rir_other_utt_8k",
     "same_utt_swapped_rir": "tt_same_utt_swapped_rir_8k",
+    "same_utt_other_rir": "tt_same_utt_other_rir_8k",
 }
+DEFAULT_CONDITIONS = ("same_rir_other_utt", "same_utt_swapped_rir")
 DEFINITIONS = {
     "same_rir_other_utt": (
         "s1_prime*h1 + s2_prime*h2; independently select two different-speaker "
@@ -50,6 +52,13 @@ DEFINITIONS = {
         "s1*h2 + s2*h1; the original two utterances are retained and both "
         "anechoic and reverberant RIR assignments are swapped; this retains "
         "the RIR set and is NOT a wrong-RIR-set control"
+    ),
+    "same_utt_other_rir": (
+        "s1*h3 + s2*h4; retain the original dry utterances and use the complete "
+        "anechoic/reverberant RIR pair from one different original test scene; "
+        "fixed-seed Sattolo derangement over the complete test ensures distinct "
+        "target/donor scene UIDs and bijective donor use; reject hash-identical "
+        "RIR sets, including order-insensitive reverberant pairs"
     ),
 }
 
@@ -111,6 +120,37 @@ def choose_donors(scenes, seed):
         target["donor_origin_scene_uids"] = [first["scene_uids"], second["scene_uids"]]
 
 
+def choose_rir_donors(scenes, seed):
+    """Assign each complete physical RIR scene once using a Sattolo cycle."""
+    ordered = sorted(scenes, key=lambda scene: scene["uid"])
+    if len(ordered) < 2 or len({scene["uid"] for scene in ordered}) != len(ordered):
+        raise ValueError("RIR derangement requires at least two unique scene UIDs")
+    permutation = list(range(len(ordered)))
+    rng = np.random.default_rng(seed)
+    for index in range(len(permutation) - 1, 0, -1):
+        other = int(rng.integers(index))  # Strictly below index: no fixed points.
+        permutation[index], permutation[other] = permutation[other], permutation[index]
+    hashes = {
+        scene["uid"]: {key: sha256(path) for key, path in scene["rir_paths"].items()}
+        for scene in ordered
+    }
+    for index, target in enumerate(ordered):
+        donor = ordered[permutation[index]]
+        target_hashes, donor_hashes = hashes[target["uid"]], hashes[donor["uid"]]
+        target_reverb = sorted(target_hashes[f"rir{k}_reverb"] for k in (1, 2))
+        donor_reverb = sorted(donor_hashes[f"rir{k}_reverb"] for k in (1, 2))
+        if (sorted(target_hashes.values()) == sorted(donor_hashes.values())
+                or target_reverb == donor_reverb):
+            raise ValueError(
+                "Donor RIR set equals target RIR set by hashes "
+                f"(including order-insensitive reverb pairs): "
+                f"target={target['uid']}, donor={donor['uid']}"
+            )
+        target["donor_rir_uid"] = donor["uid"]
+        target["donor_rir_paths"] = donor["rir_paths"]
+        target["donor_rir_t60"] = float(donor["metadata"]["target_t60"])
+
+
 def write_audits(root, records):
     with (root / "audit.tsv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, list(records[0]), delimiter="\t", lineterminator="\n")
@@ -122,7 +162,12 @@ def write_audits(root, records):
 def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             output, seed=0, workers=4, expected_count=3000, limit=None,
             control_tolerance=5e-5, power_tolerance_db=0.01,
-            destination_root=None, peak_policy="common-attenuate"):
+            destination_root=None, peak_policy="common-attenuate", conditions=None):
+    condition_names = DEFAULT_CONDITIONS if conditions is None else tuple(conditions)
+    if (not condition_names or len(set(condition_names)) != len(condition_names)
+            or any(name not in CONDITIONS for name in condition_names)):
+        raise ValueError("Conditions must be a nonempty, unique subset of known controls")
+    selected_conditions = {name: CONDITIONS[name] for name in condition_names}
     output_argument = Path(output)
     output = authorized_output(output_argument)
     if output.exists() or output_argument.is_symlink():
@@ -207,7 +252,10 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             original_sources=sources, raw_frames_16k=frames,
             original_gains=gains, metadata=meta, rir_paths=rirs,
         ))
-    choose_donors(scenes, seed)
+    if "same_rir_other_utt" in selected_conditions:
+        choose_donors(scenes, seed)
+    if "same_utt_other_rir" in selected_conditions:
+        choose_rir_donors(scenes, seed)
     selected = scenes if limit is None else scenes[:limit]
 
     def identity_check(scene):
@@ -249,7 +297,7 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
     try:
-        for dataset in CONDITIONS.values():
+        for dataset in selected_conditions.values():
             for signal in ("wav", "spk1", "spk2"):
                 (temporary / "raw" / dataset / "data" / signal).mkdir(parents=True)
 
@@ -257,16 +305,16 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             uid, length = scene["uid"], scene["frames_8k"]
             references = [read_left(baseline[f"spk{k}.scp"][uid], 8000) for k in (1, 2)]
             powers = [float(np.mean(audio ** 2)) for audio in references]
-            rirs = {key: read_left(path, 16000) for key, path in scene["rir_paths"].items()}
-            rir_hashes = {key: sha256(path) for key, path in scene["rir_paths"].items()}
-            source_sets = {
-                "same_rir_other_utt": scene["donor_sources"],
-                "same_utt_swapped_rir": scene["original_sources"],
-            }
+            original_rir_hashes = {key: sha256(path) for key, path in scene["rir_paths"].items()}
             records = []
-            for condition, dataset in CONDITIONS.items():
-                sources = source_sets[condition]
-                assignments = (1, 2) if condition == "same_rir_other_utt" else (2, 1)
+            for condition, dataset in selected_conditions.items():
+                sources = (scene["donor_sources"] if condition == "same_rir_other_utt"
+                           else scene["original_sources"])
+                assignments = (2, 1) if condition == "same_utt_swapped_rir" else (1, 2)
+                rir_paths = (scene["donor_rir_paths"] if condition == "same_utt_other_rir"
+                             else scene["rir_paths"])
+                rirs = {key: read_left(path, 16000) for key, path in rir_paths.items()}
+                rir_hashes = {key: sha256(path) for key, path in rir_paths.items()}
                 direct, reverb, applied = [], [], []
                 for k, (path, rir_slot) in enumerate(zip(sources, assignments)):
                     raw = read_left(path, 16000)
@@ -316,6 +364,9 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
                     source1_rir_slot=assignments[0], source2_rir_slot=assignments[1],
                     source1_speaker=sources[0].parent.name, source2_speaker=sources[1].parent.name,
                     target_t60=float(scene["metadata"]["target_t60"]),
+                    source_t60=(scene["donor_rir_t60"] if condition == "same_utt_other_rir"
+                                else float(scene["metadata"]["target_t60"])),
+                    donor_rir_uid=scene["donor_rir_uid"] if condition == "same_utt_other_rir" else uid,
                     common_peak_gain=common_gain, unattenuated_peak=unattenuated_peak,
                     power_ratio_error_db=ratio_error_db,
                     control_spk1_max_error=control_map[uid]["control_spk1_max_error"],
@@ -335,9 +386,11 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
                         f"pcm16_power{k + 1}": actual_powers[k],
                         f"power_error_db{k + 1}": errors_db[k],
                     })
-                for key, path in scene["rir_paths"].items():
+                for key, path in rir_paths.items():
                     record[key] = str(path)
                     record[f"{key}_sha256"] = rir_hashes[key]
+                    record[f"original_{key}"] = str(scene["rir_paths"][key])
+                    record[f"original_{key}_sha256"] = original_rir_hashes[key]
                 for name, signal in zip(NAMES, ("wav", "spk1", "spk2")):
                     record[f"baseline_{signal}"] = str(baseline[name][uid])
                     record[f"baseline_{signal}_sha256"] = sha256(baseline[name][uid])
@@ -350,8 +403,8 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             for count, result in enumerate(executor.map(generate, selected), 1):
                 records.extend(result)
                 if count % 100 == 0 or count == len(selected):
-                    print(f"Generated both conditions for {count}/{len(selected)} scenes", flush=True)
-        for condition, dataset in CONDITIONS.items():
+                    print(f"Generated {len(selected_conditions)} condition(s) for {count}/{len(selected)} scenes", flush=True)
+        for condition, dataset in selected_conditions.items():
             folder = temporary / "raw" / dataset
             subset = [record for record in records if record["condition"] == condition]
             for name, signal in zip(NAMES, ("wav", "spk1", "spk2")):
@@ -383,18 +436,20 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             *[csv_dir / f"mix_2_spk_filenames_{split}.csv" for split in ("tr", "cv", "tt")],
         ]
         provenance = dict(
-            condition_definitions=DEFINITIONS,
+            condition_definitions={name: DEFINITIONS[name] for name in selected_conditions},
             intended_use="CTF-estimator input audio only; keep original test mixture/references fixed for future separation/scoring",
             ctf_estimation_run=False, model_inference_run=False, scoring_run=False,
             train_valid_created=False, original_scene_ids_retained=True,
             expected_original_test_scene_count=expected_count,
             original_identity_verified_count=len(controls),
-            scene_count=len(selected), condition_count=len(CONDITIONS),
+            scene_count=len(selected), condition_count=len(selected_conditions),
             generated_wav_count=3 * len(records), limit=limit,
             pilot_selection="lexicographically first N original scene UIDs; no metric/score selection",
             seed=seed, rng="numpy.default_rng/PCG64",
-            donor_selection="sequential uniform selection from eligible raw test utterances; second donor restricted to a different speaker from first; donor reuse across targets permitted; selected over complete original test before applying limit",
-            donor_eligibility="neither donor utterance equals either target utterance; both mono16k raw lengths >= 2*target_frames_8k-1; donor speakers differ from one another but may match original speakers",
+            donor_selection=("sequential uniform selection from eligible raw test utterances; second donor restricted to a different speaker from first; donor reuse across targets permitted; selected over complete original test before applying limit"
+                             if "same_rir_other_utt" in selected_conditions else "not applicable; original raw utterances retained"),
+            donor_eligibility=("neither donor utterance equals either target utterance; both mono16k raw lengths >= 2*target_frames_8k-1; donor speakers differ from one another but may match original speakers"
+                               if "same_rir_other_utt" in selected_conditions else "not applicable; no speech donor selection"),
             padding_repetition_or_shortening_used=False,
             filtering="raw16 -> saved physical RIR16 convolution -> resample_poly(1,2) -> truncate original target length",
             source_normalization="match original prepared anechoic channel0 source power independently using the same gain for direct/reverb, then optional common whole-example attenuation",
@@ -417,6 +472,13 @@ def prepare(baseline_test, baseline_recipe, raw_root, physical_root, csv_dir,
             output_hashes={str(path.relative_to(temporary)): sha256(path)
                            for path in sorted(temporary.rglob("*")) if path.is_file()},
         )
+        if "same_utt_other_rir" in selected_conditions:
+            provenance.update(
+                rir_donor_selection="Sattolo single-cycle derangement over lexicographically sorted complete original test UIDs before applying limit; one coherent physical scene pair per donor; no hash-identical target/donor RIR sets",
+                rir_donor_scene_count=len(scenes),
+                rir_donor_fixed_point_count=sum(scene["uid"] == scene["donor_rir_uid"] for scene in scenes),
+                rir_donor_unique_count=len({scene["donor_rir_uid"] for scene in scenes}),
+            )
         (temporary / "preparation.json").write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
         if output.exists() or output.is_symlink():
             raise FileExistsError(f"Refusing to overwrite concurrently created dump: {output}")
@@ -439,6 +501,8 @@ def main():
     parser.add_argument("--power-tolerance-db", type=float, default=0.01)
     parser.add_argument("--destination-root", type=Path, help="Authorized absolute final path prefix embedded in SCPs")
     parser.add_argument("--peak-policy", choices=("error", "common-attenuate"), default="common-attenuate")
+    parser.add_argument("--conditions", nargs="+", choices=tuple(CONDITIONS),
+                        help="Generate only selected controls; default is the original two controls")
     args = parser.parse_args()
     report = prepare(**vars(args))
     print(json.dumps({key: report[key] for key in (

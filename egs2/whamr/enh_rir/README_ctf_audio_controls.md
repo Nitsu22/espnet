@@ -12,6 +12,20 @@ The separation mixture and both scoring references are ALWAYS the original
 - same_utt_swapped_rir: s1*h2 + s2*h1, with original utterances and exchanged
   RIR assignments. This retains the SAME RIR SET. It is not a wrong-RIR-set
   negative control; interpret it as speech/RIR-assignment sensitivity.
+- same_utt_other_rir: s1*h3 + s2*h4, retaining the ORIGINAL utterances but
+  selecting both physical RIRs from ONE OTHER original test scene. A seed-0
+  Sattolo derangement over all 3,000 sorted test UIDs gives no fixed points and
+  uses every donor pair once. Even a swapped hash-identical reverberant pair
+  is rejected. This is the RIR-set-mismatch negative control.
+
+The generator defaults remain the first TWO controls. Select only the new
+control with --conditions same_utt_other_rir. It does not select any speech
+donors. Pilot selection is applied AFTER building the full RIR derangement,
+so the pilot and full mappings agree. Source power matching, shared
+direct/reverberant gains, common attenuation, original duration and PCM16
+format are unchanged. Audit records actual/original physical RIR paths and
+hashes, donor_rir_uid, target_t60 and source_t60 (nominal donor-scene RT60).
+Nominal RT60 need not differ; the physical RIR pair must differ by hashes.
 
 The existing standard Baseline and matched-CTF scores are read-only comparison
 inputs. They are not recomputed or overwritten. No checkpoint reselection.
@@ -56,6 +70,11 @@ priority -5. Do not run inference/scoring on a login node.
 - score: cpu_4=1, h_rt=01:00:00; hold_jid infer; pass predecessor job ID.
 
 Script: qsub/eval_ctf_audio_controls.sh MODE OUTPUT [PREDECESSOR_ID].
+For prepare only, the optional third argument is instead an absolute source
+dump root. For the single wrong-RIR condition, the current resource/time
+plan is cpu_4/15 min preparation, gpu_1/30 min inference, cpu_4/30 min scoring.
+CPU audio generation is local/run_prepare_nf8k_wrong_rir_cpu.sh RECIPE JOBDIR
+on a lab CPU; it runs a 10-scene pilot and then the complete 3,000 scenes.
 Dependents require predecessor exit_status=0 and identical Git commit, not
 merely scheduler completion. Original data and model paths are explicit there.
 

@@ -24,6 +24,7 @@ METRICS = ("SI_SNR", "SDR", "SAR", "SIR", "STOI")
 
 CONDITIONS = {"same_rir_other_utt": "tt_same_rir_other_utt_8k",
               "same_utt_swapped_rir": "tt_same_utt_swapped_rir_8k"}
+SUPPORTED_CONDITIONS = {**CONDITIONS, "same_utt_other_rir": "tt_same_utt_other_rir_8k"}
 NAMES = ("wav.scp", "spk1.scp", "spk2.scp")
 PIN = "728afa1b8d27d526ba87cb73ca48193ee08f91ee48023cc1f26d9f44bd8a990e"
 ALLOWED = (Path("/net/midgar/work2/nitsu"), Path("/gs/bs/tga-shinoda/nitsu"))
@@ -84,6 +85,49 @@ def metric_values(directory, keys):
     return result
 
 
+def selected_conditions(source, generation=False):
+    """Old evaluation manifests retain their original two-condition meaning."""
+    names = (source.get("condition_definitions") if generation
+             else source.get("conditions", CONDITIONS))
+    if not isinstance(names, dict) or not names or set(names) - set(SUPPORTED_CONDITIONS):
+        raise ValueError("Unknown/empty conditioning intervention selection")
+    result = {name: SUPPORTED_CONDITIONS[name] for name in names}
+    if not generation and dict(names) != result:
+        raise ValueError("Unexpected conditioning dataset names")
+    return result
+
+
+def validate_other_rir_audit(audits, keys):
+    """Verify a paired-RIR derangement, including physical hash inequality."""
+    donors = []
+    for uid in keys:
+        row = audits["same_utt_other_rir", uid]
+        donor = row["donor_rir_uid"]
+        if donor == uid or donor not in keys:
+            raise ValueError("Wrong-RIR donor must be another original test scene")
+        donors.append(donor)
+        donor_row = audits["same_utt_other_rir", donor]
+        source_t60, donor_t60 = float(row["source_t60"]), float(donor_row["target_t60"])
+        if not math.isfinite(source_t60) or not math.isclose(source_t60, donor_t60):
+            raise ValueError("Wrong-RIR RT60 metadata differs from the donor scene")
+        if (row["source1"] != row["original_source1"]
+                or row["source2"] != row["original_source2"]
+                or (row["source1_rir_slot"], row["source2_rir_slot"]) != ("1", "2")):
+            raise ValueError("Wrong-RIR intervention must retain original utterances")
+        for k in (1, 2):
+            for kind in ("anechoic", "reverb"):
+                name = f"rir{k}_{kind}"
+                if (row[name] != donor_row[f"original_{name}"]
+                        or row[f"{name}_sha256"] != donor_row[f"original_{name}_sha256"]):
+                    raise ValueError("Wrong-RIRs must be the coherent pair from one donor")
+        actual = sorted(row[f"rir{k}_reverb_sha256"] for k in (1, 2))
+        original = sorted(row[f"original_rir{k}_reverb_sha256"] for k in (1, 2))
+        if actual == original:
+            raise ValueError("Wrong-RIR donor has the original physical RIR set")
+    if len(donors) != len(set(donors)) or set(donors) != set(keys):
+        raise ValueError("Wrong-RIR donors must be a bijection within test")
+
+
 def prepare(args):
     if args.expected_count < 4:
         raise ValueError("At least four scenes are required for four scoring shards")
@@ -98,8 +142,9 @@ def prepare(args):
             raise ValueError("Output must not overlap data/model directories")
     marker = dump / "preparation.json"
     generation = json.loads(marker.read_text())
+    conditions = selected_conditions(generation, generation=True)
     if (generation["scene_count"] != args.expected_count
-            or generation["condition_count"] != 2
+            or generation["condition_count"] != len(conditions)
             or generation["original_identity_verified_count"] != args.expected_count
             or generation["sample_rate"] != 8000
             or any(generation[k] for k in
@@ -117,7 +162,9 @@ def prepare(args):
     with (dump / "audit.tsv").open() as stream:
         records = list(csv.DictReader(stream, delimiter="\t"))
     audits = {(r["condition"], r["scene_uid"]): r for r in records}
-    if len(records) != args.expected_count * 2 or len(audits) != len(records):
+    if (len(records) != args.expected_count * len(conditions) or len(audits) != len(records)
+            or set(audits) != {(c, uid) for c in conditions
+                              for uid in read_index(original / "wav.scp")}):
         raise ValueError("Unexpected/duplicate audit keys")
     indexes = {}
     for name in NAMES:
@@ -128,8 +175,10 @@ def prepare(args):
     if len(keys) != args.expected_count or any(set(v) != set(keys) for v in indexes.values()):
         raise ValueError("Original test key mismatch")
     lengths, hashes = {}, {}
+    if "same_utt_other_rir" in conditions:
+        validate_other_rir_audit(audits, set(keys))
     for uid in keys:
-        record = audits["same_rir_other_utt", uid]
+        record = audits[next(iter(conditions)), uid]
         for name, signal in zip(NAMES, ("wav", "spk1", "spk2")):
             path = indexes[name][uid]
             lengths[uid] = audio(path, lengths.get(uid))
@@ -138,7 +187,7 @@ def prepare(args):
     with ThreadPoolExecutor(max_workers=4) as executor:
         list(executor.map(verify_hash, hashes.items()))
     controls = {}
-    for condition, dataset in CONDITIONS.items():
+    for condition, dataset in conditions.items():
         values = read_index(dump / "raw" / dataset / "wav.scp")
         if set(values) != set(keys):
             raise ValueError("Conditioning keys differ from original")
@@ -155,7 +204,7 @@ def prepare(args):
                 if ({row["source1"], row["source2"]} & {row["original_source1"], row["original_source2"]}
                         or row["source1_speaker"] == row["source2_speaker"] or slots != ("1", "2")):
                     raise ValueError("Invalid independent-utterance intervention")
-            elif (row["source1"] != row["original_source1"]
+            elif condition == "same_utt_swapped_rir" and (row["source1"] != row["original_source1"]
                   or row["source2"] != row["original_source2"] or slots != ("2", "1")):
                 raise ValueError("Invalid swapped-RIR intervention")
             if generation["output_hashes"][str(relative)] != row["new_wav_sha256"]:
@@ -192,6 +241,7 @@ def prepare(args):
             save_index(temporary / "inputs" / f"{condition}.scp", values)
         write_json(temporary / "provenance.json", dict(
             schema_version=1, count=len(keys), keys=keys, lengths=lengths,
+            conditions=conditions, condition_definitions=generation["condition_definitions"],
             original_test=str(original), dump_root=str(dump), model_exp=str(model),
             config=str(config), checkpoint=str(checkpoint), frozen_bimamba_sha256=PIN,
             source_hashes=source_hashes, audio_hashes=hashes, matched_outputs=matched_outputs,
@@ -206,7 +256,7 @@ def prepare(args):
     except BaseException:
         shutil.rmtree(temporary)
         raise
-    print(f"Prepared {len(keys)} paired scenes for both conditions", flush=True)
+    print(f"Prepared {len(keys)} paired scenes for {len(conditions)} condition(s)", flush=True)
 
 
 def load_spec(root):
@@ -228,7 +278,8 @@ def infer(root):
     from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
     from ctf_audio_intervention import conditioning_override
     spec = load_spec(root)
-    if (root / "inference_complete.json").exists() or any((root / c).exists() for c in CONDITIONS):
+    conditions = selected_conditions(spec)
+    if (root / "inference_complete.json").exists() or any((root / c).exists() for c in conditions):
         raise FileExistsError("Refuse to overwrite previous inference; use a new output")
     if not torch.cuda.is_available():
         raise RuntimeError("Real BiMamba inference requires a GPU allocation")
@@ -242,7 +293,7 @@ def infer(root):
             or model.bimamba_sample_rate != 8000 or model.ref_channel != 0):
         raise ValueError("Unexpected model/predictor/source/channel")
     original = read_index(root / "inputs/original/wav.scp")
-    controls = {c: read_index(root / "inputs" / f"{c}.scp") for c in CONDITIONS}
+    controls = {c: read_index(root / "inputs" / f"{c}.scp") for c in conditions}
     by_length = sorted(spec["keys"], key=lambda uid: (spec["lengths"][uid], uid))
     smoke_keys = sorted({by_length[0], by_length[len(by_length)//2], by_length[-1]})
     smoke = []
@@ -261,16 +312,16 @@ def infer(root):
             raise ValueError(f"Identity/saved matched parity failed: {uid}: {error}, {saved_error}")
         entry = dict(uid=uid, identity_max_error=error, saved_matched_max_error=saved_error,
                      identity_ctf_sha256=checksum, conditions={})
-        for condition in CONDITIONS:
+        for condition in conditions:
             waves, checksum = conditioning_override(separate, mixture, read_wave(controls[condition][uid]))
             if len(waves) != 2 or any(w.shape != mixture.shape or not np.isfinite(w).all() for w in waves):
                 raise ValueError("Invalid smoke inference")
             entry["conditions"][condition] = checksum
         smoke.append(entry)
     write_json(root / "smoke.json", dict(passed=True, scenes=smoke, seconds=time.monotonic()-started))
-    print("PASS: identity, saved matched outputs and both interventions; start full inference", flush=True)
+    print("PASS: identity, saved matched outputs and selected interventions; start full inference", flush=True)
     output_hashes = {}
-    for condition in CONDITIONS:
+    for condition in conditions:
         directory = root / condition
         directory.mkdir()
         writers = [SoundScpWriter(str(directory / "wavs" / str(k)), str(directory / f"spk{k}.scp"))
@@ -308,6 +359,7 @@ def infer(root):
 
 def score(root):
     spec = load_spec(root)
+    conditions = selected_conditions(spec)
     complete = json.loads((root / "inference_complete.json").read_text())
     if complete["count_per_condition"] != spec["count"] or complete["input_hashes"] != spec["input_hashes"]:
         raise ValueError("Incomplete inference provenance")
@@ -315,7 +367,7 @@ def score(root):
         list(executor.map(verify_hash, complete["output_hashes"].items()))
         # Recheck original references as well as estimator inputs before scoring.
         list(executor.map(verify_hash, spec["audio_hashes"].items()))
-    for condition in CONDITIONS:
+    for condition in conditions:
         directory = root / condition
         for k in (1, 2):
             index = read_index(directory / f"spk{k}.scp")
@@ -360,12 +412,13 @@ def score(root):
         metric_values(destination, spec["keys"])
     summarize(root, spec)
     write_json(root / "score_complete.json", dict(count_per_condition=spec["count"],
-               conditions=list(CONDITIONS), summary_sha256=digest(root / "summary.csv")))
+               conditions=list(conditions), summary_sha256=digest(root / "summary.csv")))
 
 
 def summarize(root, spec):
+    conditions = selected_conditions(spec)
     dirs = {**{k: Path(v) for k, v in spec["score_dirs"].items()},
-            **{c: root / c / "score" for c in CONDITIONS}}
+            **{c: root / c / "score" for c in conditions}}
     values = {label: metric_values(directory, spec["keys"]) for label, directory in dirs.items()}
     rows = []
     for metric in METRICS:
@@ -373,7 +426,7 @@ def summarize(root, spec):
         for label in dirs:
             row[label] = math.fsum(values[label][f"{metric}_spk{k}"][uid]
                                   for k in (1, 2) for uid in spec["keys"]) / (2 * spec["count"])
-        for condition in CONDITIONS:
+        for condition in conditions:
             row[f"{condition}_delta_matched"] = row[condition] - row["matched"]
             row[f"{condition}_delta_baseline"] = row[condition] - row["baseline"]
         rows.append(row)

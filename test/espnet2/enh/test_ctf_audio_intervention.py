@@ -1,6 +1,7 @@
 """CPU tests: intervention routes audio only to CTF, never the separator."""
 
 import argparse
+import copy
 import csv
 import importlib.util
 import json
@@ -25,6 +26,10 @@ fixture_spec = importlib.util.spec_from_file_location(
     "controls_fixture", Path(__file__).with_name("test_same_speaker_test_data.py"))
 fixtures = importlib.util.module_from_spec(fixture_spec)
 fixture_spec.loader.exec_module(fixtures)
+wrong_spec = importlib.util.spec_from_file_location(
+    "wrong_rir_eval_fixture", Path(__file__).with_name("test_ctf_wrong_rir_data.py"))
+wrong_fixtures = importlib.util.module_from_spec(wrong_spec)
+wrong_spec.loader.exec_module(wrong_fixtures)
 
 
 class Predictor(nn.Module):
@@ -104,10 +109,11 @@ class InterventionTest(unittest.TestCase):
             conditioning_override(self.separator, self.wave, self.wave)
 
 
-def prepared_fixture(root):
-    settings = fixtures.fixture(root)
+def prepared_fixture(root, wrong_rir=False):
+    settings = wrong_fixtures.fixture(root) if wrong_rir else fixtures.fixture(root)
     dump = root / "generated"
-    generate.prepare(**settings, output=dump)
+    generate.prepare(**settings, output=dump,
+                     conditions=["same_utt_other_rir"] if wrong_rir else None)
     moved = root / "transferred"
     shutil.copytree(dump, moved)
     keys = sorted(generate.read_scp(settings["baseline_test"] / "wav.scp"))
@@ -136,6 +142,71 @@ def prepared_fixture(root):
 
 
 class EvaluationPreparationTest(unittest.TestCase):
+    def test_single_wrong_rir_evaluation_keeps_original_refs(self):
+        with tempfile.TemporaryDirectory(prefix=".ctf_eval_test_", dir=ROOT) as directory:
+            root = Path(directory)
+            args, settings = prepared_fixture(root, wrong_rir=True)
+            evaluate.prepare(args)
+            spec = evaluate.load_spec(args.output)
+            self.assertEqual(spec["conditions"], {"same_utt_other_rir": "tt_same_utt_other_rir_8k"})
+            for name in evaluate.NAMES:
+                self.assertEqual(evaluate.read_index(args.output / "inputs/original" / name),
+                                 evaluate.read_index(settings["baseline_test"] / name))
+            values = evaluate.read_index(args.output / "inputs/same_utt_other_rir.scp")
+            self.assertTrue(all(Path(p).is_relative_to(args.dump_root) for p in values.values()))
+            for name in evaluate.CONDITIONS:
+                self.assertFalse((args.output / "inputs" / f"{name}.scp").exists())
+            target = args.output / "same_utt_other_rir/score"
+            target.mkdir(parents=True)
+            for metric in evaluate.METRICS:
+                for k in (1, 2):
+                    evaluate.save_index(target / f"{metric}_spk{k}", {uid: 16. for uid in spec["keys"]})
+            evaluate.summarize(args.output, spec)
+            with (args.output / "summary.csv").open() as stream:
+                row = next(csv.DictReader(stream))
+            self.assertEqual(float(row["same_utt_other_rir_delta_matched"]), -2.)
+            self.assertNotIn("same_rir_other_utt", row)
+
+    def test_wrong_rir_audit_rejects_fixedpoint_and_broken_pair(self):
+        with tempfile.TemporaryDirectory(prefix=".ctf_eval_test_", dir=ROOT) as directory:
+            args, _ = prepared_fixture(Path(directory), wrong_rir=True)
+            with (args.dump_root / "audit.tsv").open() as stream:
+                rows = list(csv.DictReader(stream, delimiter="\t"))
+            audits = {(r["condition"], r["scene_uid"]): r for r in rows}
+            keys = {r["scene_uid"] for r in rows}
+            evaluate.validate_other_rir_audit(audits, keys)
+            changed = copy.deepcopy(audits)
+            uid = rows[0]["scene_uid"]
+            changed["same_utt_other_rir", uid]["donor_rir_uid"] = uid
+            with self.assertRaisesRegex(ValueError, "another original test"):
+                evaluate.validate_other_rir_audit(changed, keys)
+            changed = copy.deepcopy(audits)
+            changed["same_utt_other_rir", uid]["rir1_reverb_sha256"] = "not-the-donor"
+            with self.assertRaisesRegex(ValueError, "coherent pair"):
+                evaluate.validate_other_rir_audit(changed, keys)
+            changed = copy.deepcopy(audits)
+            duplicate = next(row for row in rows if row["scene_uid"] != uid and row["donor_rir_uid"] != uid)
+            target = changed["same_utt_other_rir", uid]
+            target["donor_rir_uid"] = duplicate["donor_rir_uid"]
+            target["source_t60"] = duplicate["source_t60"]
+            for k in (1, 2):
+                for kind in ("anechoic", "reverb"):
+                    name = f"rir{k}_{kind}"
+                    target[name] = duplicate[name]
+                    target[f"{name}_sha256"] = duplicate[f"{name}_sha256"]
+            with self.assertRaisesRegex(ValueError, "bijection"):
+                evaluate.validate_other_rir_audit(changed, keys)
+
+    def test_condition_selection_is_backwards_compatible_and_strict(self):
+        self.assertEqual(evaluate.selected_conditions({}), evaluate.CONDITIONS)
+        self.assertEqual(evaluate.selected_conditions({"condition_definitions": {"same_utt_other_rir": "definition"}},
+                                                     generation=True),
+                         {"same_utt_other_rir": "tt_same_utt_other_rir_8k"})
+        for source in ({"conditions": {}}, {"conditions": {"unknown": "bad"}},
+                       {"conditions": {"same_utt_other_rir": "wrong_dataset"}}):
+            with self.assertRaises(ValueError):
+                evaluate.selected_conditions(source)
+
     def test_transfer_rebase_and_fixed_original_inputs(self):
         with tempfile.TemporaryDirectory(prefix=".ctf_eval_test_", dir=ROOT) as directory:
             root = Path(directory)
