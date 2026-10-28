@@ -14,7 +14,7 @@ mode=$1
 output=$2
 predecessor=
 if [[ $# -eq 3 ]]; then predecessor=$3; fi
-case $mode in prepare|infer|score) ;; *) exit 2 ;; esac
+case $mode in prepare|prepare-ctf-copy|infer|score) ;; *) exit 2 ;; esac
 case $output in /gs/bs/tga-shinoda/nitsu/*/exp/*) ;; *) exit 2 ;; esac
 cd "$SGE_O_WORKDIR"
 logs="$PWD/exp/ctf_controls_test_jobs/job_$JOB_ID"
@@ -38,7 +38,7 @@ trap finish EXIT
 date -Is
 hostname
 git rev-parse HEAD | tee "$logs/commit.txt"
-if [[ $mode != prepare ]]; then
+if [[ $mode != prepare && $mode != prepare-ctf-copy ]]; then
     [[ $predecessor =~ ^[0-9]+$ ]]
     [[ $(<"exp/ctf_controls_test_jobs/job_$predecessor/exit_status") == 0 ]]
     [[ $(git rev-parse HEAD) == $(<"exp/ctf_controls_test_jobs/job_$predecessor/commit.txt") ]]
@@ -52,7 +52,12 @@ repo=$(cd ../../.. && pwd -P)
 export PYTHONPATH="$repo:$shared/egs2/whamr/damsep_clean/.deps/mamba-cu118-torch21-py310"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1
 python="$CONDA_PREFIX/bin/python"
-if [[ $mode == prepare ]]; then
+if [[ $mode == prepare-ctf-copy ]]; then
+    test -n "$predecessor"
+    export CUDA_VISIBLE_DEVICES=''
+    "$python" -B local/evaluate_ctf_audio_controls.py prepare-ctf-copy \
+        --source-evaluation "$predecessor" --output "$output"
+elif [[ $mode == prepare ]]; then
     dump_root="$PWD/dump_nf8k_ctf_controls_seed0"
     if [[ -n $predecessor ]]; then dump_root=$predecessor; fi
     previous=/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet_nf8k_bimamba_concat_s/egs2/whamr/enh_rir

@@ -24,7 +24,8 @@ METRICS = ("SI_SNR", "SDR", "SAR", "SIR", "STOI")
 
 CONDITIONS = {"same_rir_other_utt": "tt_same_rir_other_utt_8k",
               "same_utt_swapped_rir": "tt_same_utt_swapped_rir_8k"}
-SUPPORTED_CONDITIONS = {**CONDITIONS, "same_utt_other_rir": "tt_same_utt_other_rir_8k"}
+AUDIO_CONDITIONS = {**CONDITIONS, "same_utt_other_rir": "tt_same_utt_other_rir_8k"}
+SUPPORTED_CONDITIONS = {**AUDIO_CONDITIONS, "ctf1_ctf1": "tt_ctf1_ctf1_8k"}
 NAMES = ("wav.scp", "spk1.scp", "spk2.scp")
 PIN = "728afa1b8d27d526ba87cb73ca48193ee08f91ee48023cc1f26d9f44bd8a990e"
 ALLOWED = (Path("/net/midgar/work2/nitsu"), Path("/gs/bs/tga-shinoda/nitsu"))
@@ -89,7 +90,8 @@ def selected_conditions(source, generation=False):
     """Old evaluation manifests retain their original two-condition meaning."""
     names = (source.get("condition_definitions") if generation
              else source.get("conditions", CONDITIONS))
-    if not isinstance(names, dict) or not names or set(names) - set(SUPPORTED_CONDITIONS):
+    allowed = AUDIO_CONDITIONS if generation else SUPPORTED_CONDITIONS
+    if not isinstance(names, dict) or not names or set(names) - set(allowed):
         raise ValueError("Unknown/empty conditioning intervention selection")
     result = {name: SUPPORTED_CONDITIONS[name] for name in names}
     if not generation and dict(names) != result:
@@ -271,12 +273,79 @@ def load_spec(root):
     return spec
 
 
+def prepare_ctf_copy(args):
+    """Reuse pinned original test/model/score inputs, not intervention audio."""
+    root = authorized(args.output)
+    if root.exists() or args.output.is_symlink():
+        raise FileExistsError("Use a new, separate evaluation output")
+    source = authorized(args.source_evaluation).resolve(strict=True)
+    spec = load_spec(source)
+    if (args.expected_count < 4 or spec["count"] != args.expected_count
+            or len(set(spec["keys"])) != args.expected_count
+            or spec["frozen_bimamba_sha256"] != PIN
+            or spec["settings"] != dict(fs=8000, batch_size=1, normalize_output_wav=True,
+                                        dtype="float32", segmented=False, seed=0)):
+        raise ValueError("Unexpected original evaluation/model/settings")
+    sources = [source, Path(spec["model_exp"]), Path(spec["original_test"]),
+               *map(Path, spec["score_dirs"].values())]
+    if any(root == p or root.is_relative_to(p) or p.is_relative_to(root) for p in sources):
+        raise ValueError("Output must not overlap source evaluation/data/model/scores")
+    indexes = {name: read_index(source / "inputs/original" / name) for name in NAMES}
+    hashes = {}
+    for name, values in indexes.items():
+        if set(values) != set(spec["keys"]):
+            raise ValueError("Original test key mismatch")
+        for uid, path in values.items():
+            audio(path, spec["lengths"][uid])
+            hashes[path] = spec["audio_hashes"][path]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(verify_hash, hashes.items()))
+    for directory in spec["score_dirs"].values():
+        metric_values(Path(directory), spec["keys"])
+    root.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{root.name}.", dir=root.parent))
+    try:
+        (temporary / "inputs/original").mkdir(parents=True)
+        for name, values in indexes.items():
+            save_index(temporary / "inputs/original" / name, values)
+        save_index(temporary / "inputs/ctf1_ctf1.scp", indexes["wav.scp"])
+        spec = dict(spec)
+        spec.pop("swapped_rir_caveat", None)
+        spec.update(schema_version=2, conditions={"ctf1_ctf1": "tt_ctf1_ctf1_8k"},
+                    condition_definitions={"ctf1_ctf1": "[CTF1, CTF1] from the ORIGINAL mixture; duplicate native predictor slot 0 along speaker axis 2; no oracle/PIT-based slot choice"},
+                    ctf_slot_indices={"ctf1_ctf1": [0, 0]},
+                    dump_root=None, audio_hashes=hashes,
+                    source_evaluation=str(source),
+                    intervention="Only estimated CTF speaker slots change; original estimator/separation waveform, references, weights and inference settings fixed",
+                    input_hashes={str(p.relative_to(temporary)): digest(p)
+                                  for p in sorted((temporary / "inputs").rglob("*.scp"))})
+        spec["source_hashes"] = {**spec["source_hashes"],
+                                 str(source / "provenance.json"): digest(source / "provenance.json")}
+        write_json(temporary / "provenance.json", spec)
+        temporary.rename(root)
+    except BaseException:
+        shutil.rmtree(temporary)
+        raise
+    print(f"Prepared {spec['count']} original scenes for [CTF1, CTF1]", flush=True)
+
+
+def run_condition(separate, mixture, conditioning, condition):
+    if condition == "ctf1_ctf1":
+        from ctf_audio_intervention import ctf_slot_override
+        if not np.array_equal(mixture, conditioning):
+            raise ValueError("CTF-copy estimation must use the original mixture")
+        return ctf_slot_override(separate, mixture, (0, 0))
+    from ctf_audio_intervention import conditioning_override
+    waves, checksum = conditioning_override(separate, mixture, conditioning)
+    return waves, dict(ctf_sha256=checksum)
+
+
 def infer(root):
     import torch
     from espnet2.bin.enh_inference import SeparateSpeech
     from espnet2.fileio.sound_scp import SoundScpWriter
     from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
-    from ctf_audio_intervention import conditioning_override
+    from ctf_audio_intervention import conditioning_override, ctf_slot_override
     spec = load_spec(root)
     conditions = selected_conditions(spec)
     if (root / "inference_complete.json").exists() or any((root / c).exists() for c in conditions):
@@ -294,6 +363,10 @@ def infer(root):
         raise ValueError("Unexpected model/predictor/source/channel")
     original = read_index(root / "inputs/original/wav.scp")
     controls = {c: read_index(root / "inputs" / f"{c}.scp") for c in conditions}
+    if "ctf1_ctf1" in conditions:
+        if (spec.get("ctf_slot_indices") != {"ctf1_ctf1": [0, 0]}
+                or controls["ctf1_ctf1"] != original):
+            raise ValueError("CTF-copy requires original estimator audio and native slot 0")
     by_length = sorted(spec["keys"], key=lambda uid: (spec["lengths"][uid], uid))
     smoke_keys = sorted({by_length[0], by_length[len(by_length)//2], by_length[-1]})
     smoke = []
@@ -301,7 +374,11 @@ def infer(root):
     for uid in smoke_keys:
         mixture = read_wave(original[uid])
         standard = separate(mixture, fs=8000)
-        identity, checksum = conditioning_override(separate, mixture, mixture)
+        if "ctf1_ctf1" in conditions:
+            identity, record = ctf_slot_override(separate, mixture, (0, 1))
+            checksum = record["ctf_sha256"]
+        else:
+            identity, checksum = conditioning_override(separate, mixture, mixture)
         if any(len(waves) != 2 or any(w.shape != mixture.shape or not np.isfinite(w).all()
                                      for w in waves) for waves in (standard, identity)):
             raise ValueError("Nonfinite/invalid identity-control output")
@@ -313,10 +390,10 @@ def infer(root):
         entry = dict(uid=uid, identity_max_error=error, saved_matched_max_error=saved_error,
                      identity_ctf_sha256=checksum, conditions={})
         for condition in conditions:
-            waves, checksum = conditioning_override(separate, mixture, read_wave(controls[condition][uid]))
+            waves, record = run_condition(separate, mixture, read_wave(controls[condition][uid]), condition)
             if len(waves) != 2 or any(w.shape != mixture.shape or not np.isfinite(w).all() for w in waves):
                 raise ValueError("Invalid smoke inference")
-            entry["conditions"][condition] = checksum
+            entry["conditions"][condition] = record
         smoke.append(entry)
     write_json(root / "smoke.json", dict(passed=True, scenes=smoke, seconds=time.monotonic()-started))
     print("PASS: identity, saved matched outputs and selected interventions; start full inference", flush=True)
@@ -333,18 +410,21 @@ def infer(root):
                     for path in paths:
                         verify_hash((path, spec["audio_hashes"][path]))
                     mixture = read_wave(paths[0])
-                    waves, checksum = conditioning_override(separate, mixture, read_wave(paths[1]))
+                    waves, record = run_condition(separate, mixture, read_wave(paths[1]), condition)
                     for writer, wave in zip(writers, waves):
                         if wave.shape != mixture.shape or not np.isfinite(wave).all():
                             raise ValueError(f"Invalid separated output: {uid}")
                         writer[uid] = 8000, wave[0]
                     audit.write(json.dumps(dict(uid=uid, mixture_path=paths[0],
-                                               conditioning_path=paths[1], ctf_sha256=checksum)) + "\n")
+                                               conditioning_path=paths[1], **record)) + "\n")
                     if n % 100 == 0:
                         print(f"{condition}: {n}/{spec['count']}", flush=True)
         finally:
             for writer in writers:
                 writer.close()
+        if condition == "ctf1_ctf1":
+            audit_path = directory / "ctf_inputs.jsonl"
+            output_hashes[str(audit_path)] = digest(audit_path)
         for k in (1, 2):
             index = read_index(directory / f"spk{k}.scp")
             if set(index) != set(spec["keys"]):
@@ -369,6 +449,16 @@ def score(root):
         list(executor.map(verify_hash, spec["audio_hashes"].items()))
     for condition in conditions:
         directory = root / condition
+        if condition == "ctf1_ctf1":
+            with (directory / "ctf_inputs.jsonl").open() as stream:
+                records = [json.loads(line) for line in stream]
+            if (len(records) != spec["count"] or {r["uid"] for r in records} != set(spec["keys"])):
+                raise ValueError("Incomplete CTF-copy audit")
+            for row in records:
+                if (row["slot_indices"] != [0, 0]
+                        or row["mixture_path"] != row["conditioning_path"]
+                        or row["used_slot_sha256"] != [row["source_slot_sha256"][0]] * 2):
+                    raise ValueError("Invalid CTF1 duplication audit")
         for k in (1, 2):
             index = read_index(directory / f"spk{k}.scp")
             if set(index) != set(spec["keys"]):
@@ -455,11 +545,17 @@ def main():
                  "baseline-score", "matched-score"):
         prep.add_argument("--" + name, type=Path, required=True)
     prep.add_argument("--expected-count", type=int, default=3000)
+    copy = sub.add_parser("prepare-ctf-copy")
+    copy.add_argument("--source-evaluation", type=Path, required=True)
+    copy.add_argument("--output", type=Path, required=True)
+    copy.add_argument("--expected-count", type=int, default=3000)
     for name in ("infer", "score"):
         sub.add_parser(name).add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.mode == "prepare":
         prepare(args)
+    elif args.mode == "prepare-ctf-copy":
+        prepare_ctf_copy(args)
     elif args.mode == "infer":
         infer(authorized(args.output))
     else:

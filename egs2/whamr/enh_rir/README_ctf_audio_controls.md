@@ -30,6 +30,28 @@ Nominal RT60 need not differ; the physical RIR pair must differ by hashes.
 The existing standard Baseline and matched-CTF scores are read-only comparison
 inputs. They are not recomputed or overwritten. No checkpoint reselection.
 
+## Single-estimated-CTF duplication control
+
+`prepare-ctf-copy --source-evaluation PREVIOUS_EVAL --output NEW_OUTPUT`
+reuses pinned ORIGINAL test waveforms, references, model and comparison scores.
+No new audio dump is generated. Condition `ctf1_ctf1` feeds the ORIGINAL mixture
+to both encoder and frozen BiMamba, then replaces the estimated CTF slots
+`[CTF1, CTF2]` with `[CTF1, CTF1]` using speaker axis 2 of `[1,60,2,129,2]`.
+CTF1 means native predictor slot 0, not an oracle/PIT-selected source label.
+No real/imaginary, frequency or time axes are altered. No retraining.
+
+The scoped forward hook returns a new tensor and never mutates predictor
+outputs or weights. Before full inference, shortest/median/longest examples
+must pass identity slot routing `(0,1)` versus standard inference and saved
+matched-output parity. Each scene records raw/used full CTF hashes and both
+speaker-slot hashes; scoring verifies both used slots equal original slot 0.
+The same seed0/batch1/full-waveform/normalization/ref_channel settings apply.
+
+Submit `qsub/eval_ctf_audio_controls.sh prepare-ctf-copy OUTPUT PREVIOUS_EVAL`
+on cpu_4 (15 min), then existing infer gpu_1 (30 min) and score cpu_4 (30 min)
+with guarded predecessor job IDs. Use a separate synchronized checkout/output.
+Tests: `test/espnet2/enh/test_ctf_slot_copy.py` plus existing control tests.
+
 ## Preparation / transfer
 
 The CPU generator and audits are in prepare_nf8k_ctf_controls.py. Transfer the
