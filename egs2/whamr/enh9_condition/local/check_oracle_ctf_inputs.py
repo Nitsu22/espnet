@@ -3,14 +3,15 @@ import argparse
 import json
 from pathlib import Path
 
-from prepare_oracle_ctf_dump import validate_prepared_dump
+from oracle_condition import validate_dump
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dump', type=Path, required=True)
+    parser.add_argument('--condition', choices=('nf_whamr', 'whamr'), default='nf_whamr')
     args = parser.parse_args()
-    report = validate_prepared_dump(args.dump, require_full=True)
+    report = validate_dump(args.dump, args.condition, require_full=True)
     print(json.dumps({'status': report['status'], 'counts': report['counts']}, indent=2))
 
 

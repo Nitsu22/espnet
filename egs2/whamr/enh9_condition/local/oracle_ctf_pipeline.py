@@ -13,10 +13,14 @@ import sys
 import time
 
 from check_oracle_ctf_readiness import digest, verify_readiness
+from oracle_condition import settings
 
 EXP = Path("exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_concat_seed0")
 STATE = EXP / ".pipeline"
 VARIANT = "concat"
+CONDITION = "nf_whamr"
+DUMP = Path("dump_oracle_ctf_nf8k")
+SUFFIX = "mix_clean_reverb_min_8k"
 RESOURCES = {
     "control": ("cpu_4", "00:10:00", 0.015),
     "train": ("gpu_1", "24:00:00", 0.2),
@@ -104,7 +108,7 @@ def submit(phase, dependency=None, previous=None):
     if dependency:
         args += ["-hold_jid", str(dependency)]
     args += ["qsub/oracle_ctf_pipeline.sh", "--phase", phase]
-    args += ["--variant", VARIANT]
+    args += ["--variant", VARIANT, "--condition", CONDITION]
     if previous:
         args += ["--previous-job", str(previous)]
     reply = subprocess.check_output(args, text=True).strip()
@@ -156,7 +160,7 @@ def run_stage(stage):
     subprocess.run(["bash", "run_oracle_ctf_concat.sh", "--stage", str(stage),
                     "--stop_stage", str(stage), "--ngpu", "1",
                     "--python", sys.executable, "--enh_exp", str(EXP),
-                    "--variant", VARIANT], check=True)
+                    "--variant", VARIANT, "--condition", CONDITION], check=True)
 
 
 def train():
@@ -167,7 +171,7 @@ def train():
             shutil.copy2(log, STATE / ("train_before_" + os.environ["JOB_ID"] + ".log"))
         subprocess.run(["bash", "qsub/train_oracle_ctf_concat_1gpu.sh",
                         "true" if (EXP / "checkpoint.pth").exists() else "false",
-                        VARIANT], check=True)
+                        VARIANT, CONDITION], check=True)
         epoch, finished = training_state()
     if not finished:
         raise RuntimeError("Training exited without reaching completion criterion")
@@ -180,7 +184,7 @@ def infer():
         raise RuntimeError("Stage 6 completion required")
     run_stage(7)
     for split, count in (("cv", 5000), ("tt", 3000)):
-        expected = read_scp(Path(f"dump_oracle_ctf_nf8k/raw/{split}_mix_clean_reverb_min_8k/wav.scp"))
+        expected = read_scp(DUMP / "raw" / f"{split}_{SUFFIX}" / "wav.scp")
         if len(expected) != count:
             raise RuntimeError("Unexpected inference input count")
         for speaker in (1, 2):
@@ -213,10 +217,10 @@ def score():
     if json.loads(marker.read_text())["model_sha256"] != digest(EXP / "valid.loss.best.pth"):
         raise RuntimeError("Inference model changed")
     subprocess.run([sys.executable, "local/check_oracle_ctf_inputs.py",
-                    "--dump", "dump_oracle_ctf_nf8k"], check=True)
+                    "--dump", str(DUMP), "--condition", CONDITION], check=True)
     summary = {}
     for split in ("cv", "tt"):
-        folder = Path(f"dump_oracle_ctf_nf8k/raw/{split}_mix_clean_reverb_min_8k")
+        folder = DUMP / "raw" / f"{split}_{SUFFIX}"
         ids = list(read_scp(folder / "wav.scp"))
         work = STATE / "score_work" / split
         work.mkdir(parents=True, exist_ok=True)
@@ -264,7 +268,7 @@ def score():
                 "".join(f"{uid} {waves[uid]}\n" for uid in ids))
         summary[split] = {metric: sum(sum(merged[f"{metric}_spk{s}"].values()) for s in (1, 2))
                           / (2 * len(ids)) for metric in METRICS}
-    lines = ["# Oracle CTF NF-WHAMR 8 kHz", "", "Model: valid.loss.best.pth", "",
+    lines = ["# Oracle CTF " + ("WHAMR!" if CONDITION == "whamr" else "NF-WHAMR") + " 8 kHz", "", "Model: valid.loss.best.pth", "",
              "| Split | " + " | ".join(METRICS) + " |",
              "| --- | " + " | ".join(["---"] * len(METRICS)) + " |"]
     for split, values in summary.items():
@@ -274,20 +278,27 @@ def score():
 
 
 def main():
-    global EXP, STATE, VARIANT
+    global EXP, STATE, VARIANT, CONDITION, DUMP, SUFFIX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
     parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     parser.add_argument("--exp", type=Path)
     args = parser.parse_args()
     VARIANT = args.variant
-    default_exp = Path(f"exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_{VARIANT}_seed0")
+    CONDITION = args.condition
+    paths = settings(CONDITION, VARIANT)
+    if CONDITION == "whamr":
+        RESOURCES.update(infer=("gpu_1", "01:00:00", 0.2),
+                         score=("cpu_8", "01:00:00", 0.03))
+    DUMP, SUFFIX = paths["dump"], paths["suffix"]
+    default_exp = paths["exp"]
     if args.exp is not None and args.exp != default_exp and args.phase not in ("infer", "score"):
         parser.error("A separate --exp is supported for inference/scoring only")
     EXP = args.exp or default_exp
     STATE = EXP / ".pipeline"
-    report = verify_readiness(variant=VARIANT)
+    report = verify_readiness(variant=VARIANT, condition=CONDITION)
     STATE.mkdir(parents=True, exist_ok=True)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     pin = STATE / "run.json"

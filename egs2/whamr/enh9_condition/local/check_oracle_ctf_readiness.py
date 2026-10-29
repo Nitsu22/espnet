@@ -5,13 +5,16 @@ import json
 from pathlib import Path
 import subprocess
 
+from oracle_condition import settings
+
 
 CRITICAL_PATHS = [
     "espnet", "espnet2", "egs2/whamr/enh9_condition/conf",
     *["egs2/whamr/enh9_condition/" + name for name in (
         "run.sh", "path.sh", "cmd.sh",
         "local/prepare_oracle_ctf_dump.py", "local/check_oracle_ctf_inputs.py",
-        "local/check_oracle_ctf_training.py",
+        "local/check_oracle_ctf_training.py", "local/oracle_condition.py",
+        "local/prepare_whamr_oracle_dump.py",
         "qsub/oracle_environment.sh", "qsub/train_oracle_ctf_concat_1gpu.sh",
     )],
 ]
@@ -25,21 +28,24 @@ def digest(path):
     return h.hexdigest()
 
 
-def verify_readiness(root=Path("."), variant="concat"):
+def verify_readiness(root=Path("."), variant="concat", condition="nf_whamr"):
     if variant not in ("concat", "film"):
         raise ValueError("Unknown Oracle variant")
     root = Path(root).resolve()
-    marker = "oracle_ctf_cuda_check.json" if variant == "concat" else "oracle_ctf_film_cuda_check.json"
+    paths = settings(condition, variant)
+    marker = paths["marker"]
     report = json.loads((root / "exp" / marker).read_text())
     if (report["status"] != "passed" or report["device"] != "cuda"
             or report["counts"] != {"tr": 20000, "cv": 5000, "tt": 3000}):
         raise RuntimeError("Complete native CUDA validation is required")
+    if report.get("condition", "nf_whamr") != condition:
+        raise RuntimeError("CUDA validation dataset differs")
     for key, path in (
-        ("config_sha256", f"conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_{variant}.yaml"),
-        ("manifest_sha256", "dump_oracle_ctf_nf8k/preparation.json"),
+        ("config_sha256", paths["config"]),
+        ("manifest_sha256", paths["dump"] / "preparation.json"),
     ):
         if report[key] != digest(root / path):
-            raise RuntimeError("CUDA validation input changed: " + path)
+            raise RuntimeError("CUDA validation input changed: " + str(path))
     subprocess.run(["git", "merge-base", "--is-ancestor", report["commit"], "HEAD"],
                    cwd=root, check=True)
     changed = subprocess.check_output(
@@ -79,6 +85,7 @@ def verify_readiness(root=Path("."), variant="concat"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     args = parser.parse_args()
-    p = verify_readiness(variant=args.variant)
+    p = verify_readiness(variant=args.variant, condition=args.condition)
     print("Verified unchanged CUDA-tested runtime, configuration and dump: " + p["commit"])

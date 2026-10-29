@@ -1,4 +1,4 @@
-# NF-WHAMR 8 kHz: Oracle CTF temporal conditioning
+# WHAMR / NF-WHAMR 8 kHz: Oracle CTF temporal conditioning
 
 DAI-8 の TF-Locoformer-S ベースラインと比較するための実験。
 入力・無響教師は enh4_clean/dump_clean の元 WAV をそのまま使い、
@@ -173,3 +173,51 @@ Stage 7へ進む。時間切れ以外の異常、進捗のない再開、欠落�
 全再試行上限を使った場合の上限見積もりは47.828ポイント。
 投入ごとのID・資源・上限見積もりは `.pipeline/jobs.json` に記録する。
 確定課金とは異なる。制御・実行中はこのcheckoutを更新しない。
+
+## 雑音ありWHAMR!・Oracle時間連結 S
+
+DAI-7の1 GPU・実batch4・FP32・seed0 Baselineと比較する。
+Baselineの出力先は
+`/gs/bs/tga-shinoda/nitsu/research/tf-locoformer/espnet-baseline-pipeline/egs2/whamr/enh7_baseline/exp/enh_train_tflocoformer_s_whamr_8k_1gpu_batch4`。
+既存の最良単一checkpointによるtest絶対SI-SNRは11.46 dB、SDRは12.47 dB。
+論文のSI-SNRi/SDRiや5best平均とは区別する。
+
+入力はDAI-7の `mix_both_reverb_min_8k`、教師は同じ元の無響2話者音声。
+モデル・optimizer・scheduler・batch/crop/STFT・停止条件を保存済みconfigと照合し、
+元のStage 5の3種類のshapeと全train/validサンプル数・長さも照合する。
+separatorを時間連結版へ変更し、元の5,125,252パラメータへ288個だけ追加する。
+Baselineの重みを流用せず、スクラッチ学習する。
+
+専用 `dump_oracle_ctf_whamr8k` の音声はDAI-7のWAVへのsymlink、CTF配列は
+検証済みNF Oracle dumpの `features` へのsymlink。全28,000件でID、
+2話者教師のSHA256、音声長を照合し、同じ話者・RIRのCTFだけを再利用する。
+train/validは保存済みの独立した雑音トラックとも照合する。
+NF混合音の非飽和サンプルで `WHAMR = NF + noise` をPCM16量子化3 LSB以内で
+確認し、除外したNF飽和サンプル数を記録する。testの元dumpには雑音トラックが
+保存されていないため、testはID・教師・長さと非ゼロの混合差分までを検証し、
+独立した雑音との一致を検証したとは扱わない。
+元NF dumpの特徴・音声の全hash検証と、新WHAMR dumpの入力hash検証を行う。
+manifestへこの対応検証と索引hashを残し、音声・CTF・既存結果を再生成しない。
+
+専用checkoutでコードをcommit/push/syncした後、このレシピから投入する。
+
+```bash
+mkdir -p qsub_logs exp
+qsub -g tga-shinoda qsub/prepare_whamr_oracle.sh
+# CPU準備のexit0とmanifestを確認後:
+qsub -g tga-shinoda qsub/check_whamr_oracle_gpu.sh
+```
+
+GPU検証は実batch4の更新・CTF投影への勾配・最長valid・保存復元推論を確認し、
+検証成功時だけ `--condition whamr --phase control` を呼ぶ。
+その後は24時間枠の学習再開、最良単一checkpointのStage 7、Stage 8まで自動進行。
+Stage 7の `normalize_output_wav true` とStage 8の採点器はBaselineと同じ。
+NFのdump・モデル・結果とは出力を分離する。新しい出力先は
+`exp/enh_train_tflocoformer_s_whamr8k_oracle_ctf_concat_seed0`。
+
+priorityはすべて-5。CPU準備はcpu_4/30分（上限0.006ポイント）、
+GPU検証はgpu_1/20分（0.0533）、学習はgpu_1/24時間（3.84/区間）。
+同じ構造・長さのNF版での推論約24分・採点約15分を参考に、
+WHAMR推論はgpu_1/1時間（上限0.16）、採点はcpu_8/1時間（0.024）とする。
+後続制御はcpu_4/10分（0.002/回）。実投入は `.pipeline/jobs.json` に残す。
+すべて確定課金ではなく上限見積もり。時間切れ以外の異常時は停止する。

@@ -11,6 +11,7 @@ source qsub/oracle_environment.sh
 module load cuda/11.8.0
 resume=${1:-false}
 variant=${2:-concat}
-python local/check_oracle_ctf_readiness.py --variant "${variant}"
+condition=${3:-nf_whamr}
+python local/check_oracle_ctf_readiness.py --variant "${variant}" --condition "${condition}"
 bash run_oracle_ctf_concat.sh --stage 6 --stop_stage 6 --ngpu 1 \
-    --python "${CONDA_PREFIX}/bin/python" --resume "${resume}" --variant "${variant}"
+    --python "${CONDA_PREFIX}/bin/python" --resume "${resume}" --variant "${variant}" --condition "${condition}"

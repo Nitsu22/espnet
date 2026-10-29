@@ -17,7 +17,7 @@ from espnet2.bin.enh_rir_ctf_inference import SeparateSpeech
 from espnet2.tasks.enh_rir import EnhancementRIRCTFTask
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
 from espnet2.torch_utils.device_funcs import to_device
-from prepare_oracle_ctf_dump import validate_prepared_dump
+from oracle_condition import settings, validate_dump
 
 
 def read_scp(path):
@@ -31,8 +31,9 @@ def main():
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--allow-smoke', action='store_true')
+    parser.add_argument('--condition', choices=('nf_whamr', 'whamr'), default='nf_whamr')
     args = parser.parse_args()
-    manifest = validate_prepared_dump(args.dump, require_full=not args.allow_smoke)
+    manifest = validate_dump(args.dump, args.condition, require_full=not args.allow_smoke)
     if args.device == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('A CUDA allocation is required')
     set_all_random_seed(0)
@@ -51,7 +52,7 @@ def main():
     collate = EnhancementRIRCTFTask.build_collate_fn(config, train=True)
 
     def maps(split):
-        folder = args.dump / 'raw' / f'{split}_mix_clean_reverb_min_8k'
+        folder = args.dump / 'raw' / f"{split}_{settings(args.condition)['suffix']}"
         return {name: read_scp(folder / (name + '.scp'))
                 for name in ('wav', 'spk1', 'spk2', 'rir_ctf')}
 
@@ -139,6 +140,7 @@ def main():
         if len(waves) != 2 or any(w.shape != (1, 8000) or not np.isfinite(w).all() for w in waves):
             raise ValueError('Checkpoint inference output is invalid')
     report = dict(status='passed', device=args.device, counts=manifest['counts'],
+                  condition=args.condition,
                   separator=config.separator,
                   config=str(args.config.resolve()), parameters=sum(p.numel() for p in inference.enh_model.parameters()),
                   config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),

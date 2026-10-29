@@ -5,7 +5,8 @@ stage=6
 stop_stage=6
 ngpu=1
 python=python3
-dumpdir=dump_oracle_ctf_nf8k
+dumpdir=
+condition=nf_whamr
 variant=concat
 enh_config=
 enh_exp=
@@ -21,14 +22,22 @@ workers=4
 . ./cmd.sh
 . utils/parse_options.sh
 case ${variant} in concat|film) ;; *) echo 'Unknown Oracle variant' >&2; exit 2 ;; esac
-enh_config=${enh_config:-conf/tuning/train_enh_tflocoformer_s_nf8k_oracle_ctf_${variant}.yaml}
-enh_exp=${enh_exp:-exp/enh_train_tflocoformer_s_nf8k_oracle_ctf_${variant}_seed0}
+case ${condition} in
+    nf_whamr) tag=nf8k; mixture=mix_clean_reverb_min_8k ;;
+    whamr) tag=whamr8k; mixture=mix_both_reverb_min_8k
+        [[ ${variant} == concat ]] || { echo 'WHAMR uses concat' >&2; exit 2; } ;;
+    *) echo 'Unknown dataset condition' >&2; exit 2 ;;
+esac
+dumpdir=${dumpdir:-dump_oracle_ctf_${tag}}
+enh_config=${enh_config:-conf/tuning/train_enh_tflocoformer_s_${tag}_oracle_ctf_${variant}.yaml}
+enh_exp=${enh_exp:-exp/enh_train_tflocoformer_s_${tag}_oracle_ctf_${variant}_seed0}
 export PYTHONPATH="${PWD}/../../..${PYTHONPATH:+:${PYTHONPATH}}"
 [[ $# == 0 ]] || { echo 'Unexpected positional arguments' >&2; exit 2; }
 if (( stage < 1 || stage > stop_stage || stop_stage > 8 || ngpu < 0 )); then
     echo 'Use Stage 1 (precompute) or Stages 5–8' >&2; exit 2
 fi
 if (( stage <= 1 && stop_stage >= 1 )); then
+    [[ ${condition} == nf_whamr ]] || { echo "Use qsub/prepare_whamr_oracle.sh for WHAMR" >&2; exit 2; }
     "${python}" local/prepare_oracle_ctf_dump.py --mode prepare \
         --baseline-dump "${baseline_dump}" --baseline-recipe "${baseline_recipe}" \
         --baseline-reverb-data "${baseline_reverb_data}" \
@@ -36,7 +45,7 @@ if (( stage <= 1 && stop_stage >= 1 )); then
         --workers "${workers}" --output "${dumpdir}"
 fi
 if (( stop_stage < 5 )); then exit 0; fi
-"${python}" local/check_oracle_ctf_inputs.py --dump "${dumpdir}"
+"${python}" local/check_oracle_ctf_inputs.py --dump "${dumpdir}" --condition "${condition}"
 if (( stage <= 6 && stop_stage >= 6 )); then
     [[ ${ngpu} == 1 ]] || { echo 'Training requires one allocated GPU' >&2; exit 2; }
     case ${resume} in
@@ -48,7 +57,7 @@ if (( stage <= 6 && stop_stage >= 6 )); then
     opts=()
     for phase in train valid; do
         if [[ ${phase} == train ]]; then split=tr; else split=cv; fi
-        folder=${dumpdir}/raw/${split}_mix_clean_reverb_min_8k
+        folder=${dumpdir}/raw/${split}_${mixture}
         opts+=(--${phase}_data_path_and_name_and_type "${folder}/wav.scp,speech_mix,sound")
         for speaker in 1 2; do
             opts+=(--${phase}_data_path_and_name_and_type "${folder}/spk${speaker}.scp,speech_ref${speaker},sound")
@@ -70,7 +79,7 @@ if (( stage <= 6 && stop_stage >= 6 )); then
         --batch_size 4 --valid_batch_size 1 --accum_grad 1 "${opts[@]}"
 fi
 for split in cv tt; do
-    folder=${dumpdir}/raw/${split}_mix_clean_reverb_min_8k
+    folder=${dumpdir}/raw/${split}_${mixture}
     out=${enh_exp}/inference_${split}
     if (( stage <= 7 && stop_stage >= 7 )); then
         "${python}" -m espnet2.bin.enh_rir_ctf_inference \
