@@ -186,3 +186,58 @@ Use a fresh output directory. Omitting `--smoke-per-condition` selects productio
 and requires the correct native 610-ms / 3-cm archive. If any native archive is
 replaced, rerun the complete source audit with a new report path first. Cached
 audit reuse always verifies all archive hashes against the saved report.
+
+## Separation evaluation
+
+`local/evaluate_mird_separation.py` evaluates a matching-rate, mono, two-speaker
+EnhancementTask checkpoint against a validated generated dump. It computes
+zero-mean SI-SDR and improvement over the input mixture using the better of
+the two speaker permutations, with equal utterance weights. Degenerate ratios
+are clamped to +/-120 dB; silent/constant references are rejected. It fits no
+scoring-time delay alignment. Normalization follows the trained model's own
+configuration; no additional input normalization or output peak scaling is used.
+
+Two reference types are reported separately: individual reverberant sources
+(`reverb`, separation), and the operational signed peak-tap references
+(`direct`, separation plus dereverberation). A model trained to remove
+reverberation is not optimized for the reverberant reference score.
+
+On 2026-10-29, the existing eight-mixture smoke dump was scored at 8 kHz for
+both clean and noisy inputs, using the local six-layer single-channel
+TF-Locoformer reproduction checkpoint
+`enh1/exp/enh_train_enh_tflocoformer_nocashe_repro_4gpu/valid.loss.ave_5best.pth`.
+Checkpoint SHA256:
+`b68ba7f40a624e0da9be22d09bcc37847866ac8b16d5151b64af1eb53a574c70`.
+The run completed on midgar CPU in 337 seconds, with all 16 inputs scored.
+These eight-utterance results establish an executable evaluation path; they
+are not a full MIRD performance estimate or the requested 3,000-mixture run.
+
+| Input | Reference | Input SI-SDR | Output SI-SDR | SI-SDRi |
+| --- | --- | ---: | ---: | ---: |
+| Clean | Reverberant | -0.005 | 0.970 | 0.975 |
+| Noisy | Reverberant | -3.721 | 0.201 | 3.922 |
+| Clean | Direct peak tap | -8.536 | 4.048 | 12.583 |
+| Noisy | Direct peak tap | -10.644 | 3.739 | 14.383 |
+
+Results, per-utterance speaker permutations, model/config snapshots and the exact
+evaluator source used for this run are saved in
+`exp/mird_separation_smoke_tflocoformer_20261029/`. Its summary explicitly
+identifies the dataset mode as `smoke` and the original nine-condition production
+status as false. Thirty-seven MIRD tests pass, including analytic SI-SDR values,
+gain/DC invariance, permutation recovery and zero mixture-baseline improvement.
+
+```bash
+python egs2/whamr/rir_1ch/local/evaluate_mird_separation.py \
+  --dataset egs2/whamr/rir_1ch/dump_mird_2spk_smoke_native10s_20261027_v2 \
+  --output egs2/whamr/rir_1ch/exp/mird_separation_new \
+  --checkpoint egs2/whamr/enh1/exp/enh_train_enh_tflocoformer_nocashe_repro_4gpu/valid.loss.ave_5best.pth \
+  --model-config egs2/whamr/enh1/exp/enh_train_enh_tflocoformer_nocashe_repro_4gpu/config.yaml \
+  --sample-rate 8000 --device cpu --threads 2
+```
+
+Bulk generation is pending the choice between keeping the original assignments
+for the 2,666 available mixtures and redesigning a 3,000-mixture assignment over
+the eight valid recording conditions. The public 610-ms / 3-cm ZIP was rechecked
+on 2026-10-29 using only its first 1 KiB: it still contains the 360-ms / 8-cm ZIP
+as its first member and retains the same total byte size. The old university
+distribution server remained unreachable.
