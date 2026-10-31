@@ -21,11 +21,12 @@ workers=4
 . ./path.sh
 . ./cmd.sh
 . utils/parse_options.sh
-case ${variant} in concat|film) ;; *) echo 'Unknown Oracle variant' >&2; exit 2 ;; esac
+case ${variant} in concat|film|concat_glue) ;; *) echo 'Unknown Oracle variant' >&2; exit 2 ;; esac
 case ${condition} in
-    nf_whamr) tag=nf8k; mixture=mix_clean_reverb_min_8k ;;
+    nf_whamr) tag=nf8k; mixture=mix_clean_reverb_min_8k
+        [[ ${variant} != concat_glue ]] || { echo "Glue is configured for WHAMR" >&2; exit 2; } ;;
     whamr) tag=whamr8k; mixture=mix_both_reverb_min_8k
-        [[ ${variant} == concat ]] || { echo 'WHAMR uses concat' >&2; exit 2; } ;;
+        [[ ${variant} == concat || ${variant} == concat_glue ]] || { echo 'WHAMR uses concat' >&2; exit 2; } ;;
     *) echo 'Unknown dataset condition' >&2; exit 2 ;;
 esac
 dumpdir=${dumpdir:-dump_oracle_ctf_${tag}}

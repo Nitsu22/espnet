@@ -282,7 +282,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
-    parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    parser.add_argument("--variant", choices=("concat", "film", "concat_glue"), default="concat")
     parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     parser.add_argument("--exp", type=Path)
     args = parser.parse_args()

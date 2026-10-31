@@ -40,6 +40,10 @@ class TestWHAMROracle(unittest.TestCase):
         paths = settings("whamr")
         assert "whamr8k" in str(paths["exp"])
         assert paths["suffix"] == "mix_both_reverb_min_8k"
+        glue = settings("whamr", "concat_glue")
+        assert glue["dump"] == paths["dump"]
+        for field in ("config", "exp", "marker"):
+            assert glue[field] != paths[field]
         with self.assertRaises(ValueError):
             settings("whamr", "film")
         with patch.object(pipeline, "CONDITION", "whamr"), \

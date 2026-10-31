@@ -29,7 +29,7 @@ def digest(path):
 
 
 def verify_readiness(root=Path("."), variant="concat", condition="nf_whamr"):
-    if variant not in ("concat", "film"):
+    if variant not in ("concat", "film", "concat_glue"):
         raise ValueError("Unknown Oracle variant")
     root = Path(root).resolve()
     paths = settings(condition, variant)
@@ -84,7 +84,7 @@ def verify_readiness(root=Path("."), variant="concat", condition="nf_whamr"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--variant", choices=("concat", "film"), default="concat")
+    parser.add_argument("--variant", choices=("concat", "film", "concat_glue"), default="concat")
     parser.add_argument("--condition", choices=("nf_whamr", "whamr"), default="nf_whamr")
     args = parser.parse_args()
     p = verify_readiness(variant=args.variant, condition=args.condition)

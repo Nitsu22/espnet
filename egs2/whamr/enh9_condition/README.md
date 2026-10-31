@@ -221,3 +221,49 @@ GPU検証はgpu_1/20分（0.0533）、学習はgpu_1/24時間（3.84/区間）�
 WHAMR推論はgpu_1/1時間（上限0.16）、採点はcpu_8/1時間（0.024）とする。
 後続制御はcpu_4/10分（0.002/回）。実投入は `.pipeline/jobs.json` に残す。
 すべて確定課金ではなく上限見積もり。時間切れ以外の異常時は停止する。
+
+## WHAMR! Oracle時間連結＋ゼロGlue
+
+GlueなしのWHAMR実験と別checkout・別出力で、Glueだけを変える。
+`--condition whamr --variant concat_glue` は、共通の入力dumpを読み取り用symlinkで
+再利用し、同じseed0・batch4・FP32・crop・optimizer/scheduler・停止・評価条件で
+スクラッチ学習する。既存実験のcheckpointを流用しない。
+
+```text
+[CTF1:60][Glue:4][CTF2:60][Glue:4][speech:T]
+```
+
+`separator_conf.glue_frames: 4`、`glue_value: 0.0`。
+共有1×1投影の後で `[B,96,4,F]` のゼロ特徴を各話者CTFの後へ挿入する。
+CTFのRI入力をゼロにして投影するとbiasが残るため、投影後へ直接挿入する。
+Glueは全ブロックが参照する有効トークンであり、paddingとして隠さない。
+4秒音声の501フレームと合わせて629フレームになる。出力Conv前に先頭128フレームを
+除き、元の音声フレームだけをDecoder・損失・採点へ渡す。
+パラメータはGlueなしと同じ5,125,540個で、共通重みの初期値も同じ。
+モデルの既定値は `glue_frames=0` とし、既存config/checkpointの動作を保持する。
+有限の定数を `glue_value` に指定できるが、今回投入する条件は0だけ。
+
+[LExt論文](https://zqwang7.github.io/publications/Listen_to_Extract_Onset-Prompted_Target_Speaker_Extraction.pdf)
+III-Bは波形へ32 msのゼロ信号を挿入し、V-Hでは5.0のほうが良い結果を報告している。
+その5.0はgain正規化済み波形に対する値であり、本実験の学習された特徴のスケールとは
+同じ意味を持たない。まず0でGlueの有無を比較する。4トークンは音声hopでは32 msに
+相当するが、STFT後の特徴挿入なのでLExtの波形Glueを再現するものではない。
+また、Glue4フレームはConv kernel8より短く、局所演算による境界混合の完全な遮断を
+保証しない。目的は境界の手掛かりを追加することであり、最適長・最適値は未確認。
+
+```bash
+# 専用checkoutで、完成したWHAMR Oracle dumpへのsymlinkを作成してから:
+qsub -g tga-shinoda qsub/check_whamr_oracle_glue_gpu.sh
+```
+
+GPU検証では入力の全hash、Glue以外のconfig一致、実batch4のloss/gradient/update、
+最長validation、checkpoint推論を確認する。成功時だけ学習・自動継続・Stage7/8へ進む。
+検証markerは `exp/oracle_ctf_whamr_glue_cuda_check.json`、新しい出力は
+`exp/enh_train_tflocoformer_s_whamr8k_oracle_ctf_concat_glue_seed0`。
+既存のGlueなしmarker・出力を使わず、同じdata manifestを新しいpipelineに固定する。
+
+priority-5、GPU検証gpu_1/20分の上限0.0533ポイント。
+学習gpu_1/24時間は上限3.84/区間、推論gpu_1/1時間は0.16、
+採点cpu_8/1時間は0.024、後続制御cpu_4/10分は0.002/回。
+Glueなしの測定では1epoch約45.5分（学習約41分＋検証約4.5分）。
+Glueありの所要時間は未測定で、これらは確定課金ではない。

@@ -99,13 +99,17 @@ class TestOracleFiLM(unittest.TestCase):
                          - sum(p.numel() for p in baseline.parameters()), 227232)
 
     def test_native_checkpoint_inference_normalizes_wav(self):
+        import espnet2.bin.enh_inference as base_inference
         from espnet2.tasks.enh_rir import EnhancementRIRCTFTask
         from espnet2.bin.enh_rir_ctf_inference import SeparateSpeech
         folder = ROOT / "egs2/whamr/enh9_condition/conf/tuning"
         cfg = yaml.safe_load((folder / "train_enh_tflocoformer_s_nf8k_oracle_ctf_film.yaml").read_text())
         cfg["separator_conf"] = dict(SMALL, ctf_taps=3, random_ctf_swap=False)
         cfg["encoder_conf"] = cfg["decoder_conf"] = dict(n_fft=32, hop_length=8)
-        with tempfile.TemporaryDirectory() as directory:
+        # Other inference tests restore the base task after importing the RIR
+        # wrapper. Do not rely on that module's one-time import side effect.
+        with patch.object(base_inference, "EnhancementTask", EnhancementRIRCTFTask), \
+                tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             config = path / "config.yaml"
             config.write_text(yaml.safe_dump(cfg))

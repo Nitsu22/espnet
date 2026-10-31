@@ -48,6 +48,17 @@ def main():
         raise ValueError('Oracle dump requires the native 60-tap grid')
     if config.encoder_conf != {'n_fft': 256, 'hop_length': 64}:
         raise ValueError('Keep the DAI-8 speech STFT 256/hop64')
+    glue_frames = config.separator_conf.get('glue_frames', 0)
+    glue_value = config.separator_conf.get('glue_value', 0.0)
+    if glue_frames:
+        base_config = args.config.with_name(args.config.name.replace('_concat_glue.yaml', '_concat.yaml'))
+        import yaml
+        original = yaml.safe_load(base_config.read_text())
+        current = yaml.safe_load(args.config.read_text())
+        current['separator_conf'].pop('glue_frames')
+        current['separator_conf'].pop('glue_value')
+        if current != original:
+            raise ValueError('Glue comparison changed a non-Glue training setting')
     preprocess = EnhancementRIRCTFTask.build_preprocess_fn(config, train=True)
     collate = EnhancementRIRCTFTask.build_collate_fn(config, train=True)
 
@@ -140,7 +151,8 @@ def main():
         if len(waves) != 2 or any(w.shape != (1, 8000) or not np.isfinite(w).all() for w in waves):
             raise ValueError('Checkpoint inference output is invalid')
     report = dict(status='passed', device=args.device, counts=manifest['counts'],
-                  condition=args.condition,
+                  condition=args.condition, glue_frames=glue_frames, glue_value=glue_value,
+                  gpu_name=torch.cuda.get_device_name() if args.device == 'cuda' else None,
                   separator=config.separator,
                   config=str(args.config.resolve()), parameters=sum(p.numel() for p in inference.enh_model.parameters()),
                   config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
