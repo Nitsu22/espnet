@@ -8,6 +8,8 @@ set -e
 source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
 set -euo pipefail
+export PATH="/apps/t4/rhel9/uge/latest/bin/lx-amd64:${PATH}"
+command -v qsub qacct >/dev/null
 cd "${SGE_O_WORKDIR:?}"
 case ${PWD} in /gs/bs/tga-shinoda/nitsu/*) ;; *) exit 2 ;; esac
 [[ ${JOB_ID:?} =~ ^[0-9]+$ ]]
