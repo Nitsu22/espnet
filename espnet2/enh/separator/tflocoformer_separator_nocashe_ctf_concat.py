@@ -1,6 +1,8 @@
 """TF-Locoformer conditioned by a temporal prefix of Direct-to-Reverb CTFs."""
 
 from collections import OrderedDict
+import math
+from numbers import Real
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -34,6 +36,8 @@ class TFLocoformerSeparator(_BaselineSeparator):
         emb_dim: int = 128,
         ctf_taps: int = 60,
         random_ctf_swap: bool = True,
+        glue_frames: int = 0,
+        glue_value: float = 0.0,
         **kwargs,
     ):
         # Construct the complete baseline first, preserving its parameter names
@@ -45,8 +49,16 @@ class TFLocoformerSeparator(_BaselineSeparator):
             raise ValueError("ctf_taps must be a positive integer.")
         if not isinstance(random_ctf_swap, bool):
             raise ValueError("random_ctf_swap must be a bool.")
+        if isinstance(glue_frames, bool) or not isinstance(glue_frames, int) or glue_frames < 0:
+            raise ValueError("glue_frames must be a nonnegative integer.")
+        if (isinstance(glue_value, bool) or not isinstance(glue_value, Real)
+                or not math.isfinite(glue_value)
+                or abs(glue_value) > torch.finfo(torch.float32).max):
+            raise ValueError("glue_value must be a finite float32-compatible number.")
         self.ctf_taps = ctf_taps
         self.random_ctf_swap = random_ctf_swap
+        self.glue_frames = glue_frames
+        self.glue_value = float(glue_value)
         # ESPnet globally initializes the model after construction. Preserve the
         # CPU RNG here so adding a projection does not shift the shared trunk's
         # subsequent Xavier draws relative to the baseline with the same seed.
@@ -98,12 +110,25 @@ class TFLocoformerSeparator(_BaselineSeparator):
             prompts = prompts.reshape(
                 batch_size, features.shape[1], self.num_spk * self.ctf_taps, frequencies
             )
+            if self.glue_frames:
+                # Insert constants AFTER projection: zero RI input would instead
+                # become the learned projection bias. These are valid delimiter
+                # tokens, not padding, and remain visible to every block.
+                glue = prompts.new_full(
+                    (batch_size, features.shape[1], self.glue_frames, frequencies),
+                    self.glue_value,
+                )
+                prompts = torch.cat(
+                    [piece for speaker in prompts.split(self.ctf_taps, dim=2)
+                     for piece in (speaker, glue)], dim=2,
+                )
             features = torch.cat((prompts, features), dim=2)
         for block in self.blocks:
             features = block(features)
         # The output convolution sees speech frames only. In particular its
         # temporal kernel never treats a CTF tap as reconstructed speech.
-        features = features[:, :, self.num_spk * self.ctf_taps :]
+        prefix_frames = self.num_spk * (self.ctf_taps + self.glue_frames)
+        features = features[:, :, prefix_frames:]
         with torch.cuda.amp.autocast(enabled=False):
             output = self.deconv(features)
         return output.reshape(batch_size, self.num_spk, 2, frames, frequencies)

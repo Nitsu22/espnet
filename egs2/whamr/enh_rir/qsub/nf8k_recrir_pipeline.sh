@@ -13,7 +13,11 @@ command -v qsub qacct >/dev/null
 cd "${SGE_O_WORKDIR:?}"
 case ${PWD} in /gs/bs/tga-shinoda/nitsu/*) ;; *) exit 2 ;; esac
 [[ ${JOB_ID:?} =~ ^[0-9]+$ ]]
-logs=exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_film_all_seed0/.pipeline/job_${JOB_ID}
+case " $* " in
+    *' --variant concat_glue '*) suffix=concat_glue ;;
+    *) suffix=film_all ;;
+esac
+logs=exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_${suffix}_seed0/.pipeline/job_${JOB_ID}
 mkdir -p "${logs}"
 task_tmp=$(mktemp -d "${PWD}/${logs}/tmp.XXXXXX")
 export TMPDIR=${task_tmp} XDG_CACHE_HOME=${task_tmp}/cache

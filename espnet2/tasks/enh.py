@@ -179,6 +179,7 @@ separator_choices = ClassChoices(
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_recrir_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
+        tflocoformer_recrir_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_bimamba_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
@@ -626,7 +627,9 @@ class EnhancementTask(AbsTask):
             )
 
         else:
-            if args.separator == "tflocoformer_recrir_ctf_film_all":
+            if args.separator in (
+                "tflocoformer_recrir_ctf_film_all", "tflocoformer_recrir_ctf_concat"
+            ):
                 model_class = ESPnetEnhancementFrozenRecRIRModel
             elif args.separator in (
                 "tflocoformer_bimamba_ctf_film_all", "tflocoformer_bimamba_ctf_concat"

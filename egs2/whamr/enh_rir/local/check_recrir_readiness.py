@@ -11,13 +11,19 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def verify_readiness():
-    config_path = Path("conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_film_all.yaml")
+def verify_readiness(config_path=Path("conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_film_all.yaml")):
+    config_path = Path(config_path)
     config = yaml.safe_load(config_path.read_text())
     baseline = yaml.safe_load(Path("../enh7_baseline/conf/tuning/train_enh_tflocoformer_s_nf_8k.yaml").read_text())
-    for key in baseline.keys() - {"separator", "model_conf"}:
+    for key in baseline.keys() - {"separator", "separator_conf", "model_conf"}:
         if baseline[key] != config[key]:
             raise RuntimeError("Baseline training setting differs: " + key)
+    separator_conf = dict(config["separator_conf"])
+    if config["separator"] == "tflocoformer_recrir_ctf_concat":
+        if separator_conf.pop("glue_frames", None) != 4 or separator_conf.pop("glue_value", None) != 0.0:
+            raise RuntimeError("Match DAI-117: four zero Glue tokens after each CTF")
+    if separator_conf != baseline["separator_conf"]:
+        raise RuntimeError("Baseline separator trunk configuration differs")
     source = config["model_conf"]["rec_rir_checkpoint"]
     expected = config["model_conf"]["rec_rir_sha256"]
     if digest(source) != expected:
@@ -43,4 +49,7 @@ def verify_readiness():
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify_readiness(), indent=2))
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=Path("conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_film_all.yaml"))
+    print(json.dumps(verify_readiness(parser.parse_args().config), indent=2))

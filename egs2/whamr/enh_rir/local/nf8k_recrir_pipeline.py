@@ -12,10 +12,13 @@ import subprocess
 import sys
 import time
 
-from check_recrir_readiness import digest, verify_readiness
+from check_recrir_readiness import digest, verify_readiness as check_readiness
 
 EXP = Path("exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_film_all_seed0")
 STATE = EXP / ".pipeline"
+VARIANT = "film"
+CONFIG = Path("conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_film_all.yaml")
+RUNNER = "run_nf8k_recrir_ctf_film_all_s.sh"
 RESOURCES = {
     "control": ("cpu_4", "00:10:00", 0.015),
     "train": ("gpu_1", "24:00:00", 0.2),
@@ -24,6 +27,22 @@ RESOURCES = {
 }
 LIMITS = {"train": 12, "infer": 2, "score": 3}
 METRICS = ("SI_SNR", "SDR", "SIR", "SAR", "STOI", "ESTOI")
+
+
+def configure(variant):
+    global VARIANT, CONFIG, RUNNER, EXP, STATE
+    if variant not in ("film", "concat_glue"):
+        raise ValueError("Use film or concat_glue")
+    VARIANT = variant
+    suffix = "film_all" if variant == "film" else "concat_glue"
+    CONFIG = Path(f"conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_{suffix}.yaml")
+    RUNNER = f"run_nf8k_recrir_ctf_{suffix}_s.sh"
+    EXP = Path(f"exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_{suffix}_seed0")
+    STATE = EXP / ".pipeline"
+
+
+def verify_readiness():
+    return check_readiness(CONFIG)
 
 
 def save(path, value):
@@ -99,10 +118,10 @@ def submit(phase, dependency=None, previous=None):
     resource, duration, coefficient = RESOURCES[phase]
     args = ["qsub", "-terse", "-g", "tga-shinoda", "-p", "-5",
             "-l", resource + "=1", "-l", "h_rt=" + duration,
-            "-N", "recrir_" + phase]
+            "-N", ("recrir_glue_" if VARIANT == "concat_glue" else "recrir_") + phase]
     if dependency:
         args += ["-hold_jid", str(dependency)]
-    args += ["qsub/nf8k_recrir_pipeline.sh", "--phase", phase]
+    args += ["qsub/nf8k_recrir_pipeline.sh", "--variant", VARIANT, "--phase", phase]
     if previous:
         args += ["--previous-job", str(previous)]
     reply = subprocess.check_output(args, text=True).strip()
@@ -156,7 +175,7 @@ def control(previous_job=None):
 
 
 def run_stage(stage):
-    subprocess.run(["bash", "run_nf8k_recrir_ctf_film_all_s.sh", "--stage", str(stage),
+    subprocess.run(["bash", RUNNER, "--stage", str(stage),
                     "--stop_stage", str(stage), "--ngpu", "1",
                     "--python", sys.executable], check=True)
 
@@ -178,6 +197,7 @@ def train():
                            checked.get("commit") == report["commit"])
         if not valid_probe:
             subprocess.run([sys.executable, "local/check_recrir_conditioning_training.py",
+                            "--config", str(CONFIG),
                             "--dump", "exp/bimamba_nf8k_baseline_inputs", "--input-style", "baseline",
                             "--output", str(probe)], check=True)
             checked = json.loads(probe.read_text())
@@ -279,7 +299,7 @@ def score():
                 "".join(f"{uid} {waves[uid]}\n" for uid in ids))
         summary[split] = {metric: sum(sum(merged[f"{metric}_spk{s}"].values()) for s in (1, 2))
                           / (2 * len(ids)) for metric in METRICS}
-    lines = ["# Frozen Rec-RIR FiLM NF-WHAMR 8 kHz", "", "Model: valid.loss.best.pth", "",
+    lines = [f"# Frozen Rec-RIR {VARIANT} NF-WHAMR 8 kHz", "", "Model: valid.loss.best.pth", "",
              "| Split | " + " | ".join(METRICS) + " |",
              "| --- | " + " | ".join(["---"] * len(METRICS)) + " |"]
     for split, values in summary.items():
@@ -290,9 +310,11 @@ def score():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--variant", choices=("film", "concat_glue"), default="film")
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
     args = parser.parse_args()
+    configure(args.variant)
     report = verify_readiness()
     STATE.mkdir(parents=True, exist_ok=True)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()

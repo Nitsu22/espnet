@@ -1,0 +1,132 @@
+# NF-WHAMR: frozen original Rec-RIR CTF, DAI-117 temporal concatenation + zero Glue.
+seed: 0
+init: xavier_uniform
+max_epoch: 150
+use_amp: false
+train_dtype: float32
+grad_clip: 5.0
+batch_type: folded
+batch_size: 4
+num_workers: 4
+preprocessor: enh
+num_spk: 2
+iterator_type: sequence
+speech_segment: 32000
+shuffle_within_batch: true
+force_single_channel: true
+avoid_allzero_segment: true
+model_conf:
+  normalize_variance: true
+  rec_rir_checkpoint: assets/rec_rir_2spk_8k_97epoch.pth
+  rec_rir_sha256: 5fe27c7996e70d290d8646fb39f9cb6fe6a3f2972138e5f16b42730c8f4cafc8
+  rec_rir_model_conf:
+    extract_feats_in_collect_stats: false
+    sr: 8000
+    n_fft: 256
+    win_len: 256
+    hop_len: 128
+    win_type: sqrthann
+    num_spk: 2
+    dim_input: 2
+    dim_output_spch: 4
+    dim_output_CTF: 240
+    dim_hidden: 96
+    dim_squeeze: 8
+    num_freqs: 129
+    num_layers_spch: 6
+    num_layers_noise: 2
+    num_layers_CTF: 6
+    encoder_kernel_size: 5
+    dropout:
+    - 0.0
+    - 0.0
+    - 0.0
+    kernel_size:
+    - 5
+    - 3
+    conv_groups:
+    - 8
+    - 8
+    norms:
+    - LN
+    - LN
+    - LN
+    - LN
+    - LN
+    - LN
+    full_share: 0
+    attention: mamba(16,4)
+    loss_type: RIMag
+    loss_w_cln: 1.0
+    loss_w_rvb: 1.0
+    loss_w_rec: 1.0
+    normalize_by_mix: true
+    pim_sweep_duration: 8.192
+optim: adamw
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.01
+patience: 10
+early_stopping_criterion:
+- valid
+- loss
+- min
+val_scheduler_criterion:
+- valid
+- loss
+best_model_criterion:
+- - valid
+  - si_snr
+  - max
+- - valid
+  - loss
+  - min
+keep_nbest_models: 5
+scheduler: warmupreducelronplateau
+scheduler_conf:
+  warmup_steps: 4000
+  mode: min
+  factor: 0.5
+  patience: 3
+encoder: stft
+encoder_conf:
+  n_fft: 256
+  hop_length: 64
+separator: tflocoformer_recrir_ctf_concat
+separator_conf:
+  num_spk: 2
+  n_layers: 4
+  emb_dim: 96
+  norm_type: rmsgroupnorm
+  num_groups: 4
+  tf_order: ft
+  n_heads: 4
+  flash_attention: false
+  ffn_type:
+  - swiglu_conv1d
+  - swiglu_conv1d
+  ffn_hidden_dim:
+  - 128
+  - 128
+  conv1d_kernel: 8
+  conv1d_shift: 1
+  dropout: 0.0
+  eps: 1.0e-05
+  glue_frames: 4
+  glue_value: 0.0
+decoder: stft
+decoder_conf:
+  n_fft: 256
+  hop_length: 64
+criterions:
+- name: si_snr
+  conf:
+    eps: 1.0e-07
+  wrapper: pit
+  wrapper_conf:
+    weight: 1.0
+    independent_perm: true
+valid_batch_size: 1
+num_att_plot: 0
+log_interval: 50

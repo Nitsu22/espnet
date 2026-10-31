@@ -99,11 +99,33 @@ def main():
     if train["speech_mix"].shape != (4, segment):
         raise ValueError("Expected physical batch four and aligned four-second crops")
     optimizer = torch.optim.AdamW(model.parameters(), **options.optim_conf)
+    glue = {}
+    hooks = []
+    if hasattr(model.separator, "glue_frames"):
+        if model.separator.glue_frames != 4 or model.separator.glue_value != 0.0:
+            raise RuntimeError("Expected DAI-117's four post-projection zero Glue tokens")
+        def inspect_prefix(module, inputs):
+            features = inputs[0]
+            if features.shape[2] != 629:
+                raise RuntimeError("Four-second Glue training must have 629 frames")
+            if torch.count_nonzero(features[:, :, 60:64]) or torch.count_nonzero(features[:, :, 124:128]):
+                raise RuntimeError("Glue tokens are not exactly zero after CTF projection")
+            glue["prefix_shape"] = list(features.shape)
+        def inspect_output(module, inputs):
+            if inputs[0].shape[2] != 501:
+                raise RuntimeError("CTF and Glue tokens reached the output convolution")
+            glue["decoder_frames"] = inputs[0].shape[2]
+        hooks = [model.separator.blocks[0].register_forward_pre_hook(inspect_prefix),
+                 model.separator.deconv.register_forward_pre_hook(inspect_output)]
     torch.cuda.reset_peak_memory_stats()
     loss, _, _ = model(**train)
+    for hook in hooks:
+        hook.remove()
     if not torch.isfinite(loss):
         raise RuntimeError("Nonfinite conditioned separation loss")
     loss.backward()
+    if glue and model.separator.ctf_projection.weight.grad.abs().sum().item() <= 0:
+        raise RuntimeError("No gradient reached the CTF prompt projection")
     for name, parameter in model.named_parameters():
         if name.startswith("frozen_ctf."):
             if parameter.requires_grad or parameter.grad is not None:
@@ -126,6 +148,7 @@ def main():
         source_sha256=model.rec_rir_sha256,
         sample_rate=sample_rate,
         cuda_startup=diagnostics,
+        glue=glue,
     )
     model.zero_grad(set_to_none=True)
     del optimizer, loss, train
