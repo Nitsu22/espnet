@@ -26,6 +26,9 @@ from espnet2.enh.espnet_model_ctf import ESPnetEnhancementCTFModel
 from espnet2.enh.espnet_model_frozen_bimamba import (
     ESPnetEnhancementFrozenBiMambaModel,
 )
+from espnet2.enh.espnet_model_frozen_recrir import (
+    ESPnetEnhancementFrozenRecRIRModel,
+)
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
 from espnet2.enh.loss.criterions.tfgridnet_roland import RolandTFL1, RolandTFMCPIT
 from espnet2.enh.loss.criterions.tfgridnet_wav_mag_mc import (
@@ -175,6 +178,7 @@ separator_choices = ClassChoices(
         tflocoformer_split=TFLocoformerSplitSeparator,
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
+        tflocoformer_recrir_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_bimamba_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
         tflocoformer_nocashe_aeafusion=TFLocoformerSeparatorNocasheAEAFusion,
@@ -622,7 +626,9 @@ class EnhancementTask(AbsTask):
             )
 
         else:
-            if args.separator in (
+            if args.separator == "tflocoformer_recrir_ctf_film_all":
+                model_class = ESPnetEnhancementFrozenRecRIRModel
+            elif args.separator in (
                 "tflocoformer_bimamba_ctf_film_all", "tflocoformer_bimamba_ctf_concat"
             ):
                 model_class = ESPnetEnhancementFrozenBiMambaModel
@@ -646,6 +652,8 @@ class EnhancementTask(AbsTask):
 
         if isinstance(model, ESPnetEnhancementFrozenBiMambaModel):
             model.restore_bimamba_source()
+        if isinstance(model, ESPnetEnhancementFrozenRecRIRModel):
+            model.restore_rec_rir_source()
 
         return model
 
