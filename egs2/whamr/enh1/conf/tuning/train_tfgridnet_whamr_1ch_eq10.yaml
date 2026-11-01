@@ -1,0 +1,69 @@
+# TASLP 2023 Table VIII, DNN1, SI-SDR-SE+MC (10).
+# Batch, seed, epoch limit, early stopping and checkpoint policy are our choices.
+seed: 0
+num_workers: 4
+iterator_type: sequence
+batch_type: unsorted
+batch_size: 4
+valid_batch_size: 1
+drop_last_iter: false
+max_epoch: 150
+patience: 5
+val_scheduler_criterion: [valid, loss]
+early_stopping_criterion: [valid, loss, min]
+best_model_criterion: [[valid, loss, min]]
+keep_nbest_models: 1
+grad_clip: 1.0
+accum_grad: 1
+train_dtype: float32
+use_amp: false
+cudnn_deterministic: true
+cudnn_benchmark: false
+init: xavier_uniform
+init_param: []
+optim: adam
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.0
+scheduler: reducelronplateau
+scheduler_conf:
+  mode: min
+  factor: 0.5
+  patience: 3
+log_interval: 50
+use_tensorboard: true
+encoder: same
+decoder: same
+separator: tfgridnet
+separator_conf:
+  n_srcs: 2
+  n_fft: 256
+  stride: 64
+  window: sqrt_hann
+  n_imics: 1
+  n_layers: 4
+  lstm_hidden_units: 192
+  attn_n_head: 4
+  attn_approx_qk_dim: 512
+  emb_dim: 24
+  emb_ks: 8
+  emb_hs: 1
+  activation: prelu
+  eps: 1.0e-05
+  ref_channel: 0
+  return_loss_metadata: true
+  length_aware_normalization: true
+criterions:
+  - name: tfgridnet_si_sdr_se
+    conf: {eps: 1.0e-08}
+    wrapper: tfgridnet_si_sdr_mc_pit
+    wrapper_conf: {weight: 1.0}
+preprocessor: enh
+preprocessor_conf:
+  speech_segment: 32000
+  avoid_allzero_segment: false
+num_spk: 2
+sample_rate: 8000
+force_single_channel: true
+speech_volume_normalize: null

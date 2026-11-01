@@ -27,6 +27,10 @@ from espnet2.enh.espnet_model_frozen_bimamba import (
     ESPnetEnhancementFrozenBiMambaModel,
 )
 from espnet2.enh.loss.criterions.abs_loss import AbsEnhLoss
+from espnet2.enh.loss.criterions.tfgridnet_si_sdr_mc import (
+    TFGridNetSISDRMCPIT,
+    TFGridNetSISDRSE,
+)
 from espnet2.enh.loss.criterions.tfgridnet_roland import RolandTFL1, RolandTFMCPIT
 from espnet2.enh.loss.criterions.tfgridnet_wav_mag_mc import (
     TFGridNetWavMag,
@@ -208,6 +212,7 @@ loss_wrapper_choices = ClassChoices(
     name="loss_wrappers",
     classes=dict(
         pit=PITSolver,
+        tfgridnet_si_sdr_mc_pit=TFGridNetSISDRMCPIT,
         tfgridnet_wav_mag_mc_pit=TFGridNetWavMagMCPIT,
         roland_tf_mc_pit=RolandTFMCPIT,
         fixed_order=FixedOrderSolver,
@@ -224,6 +229,7 @@ criterion_choices = ClassChoices(
     name="criterions",
     classes=dict(
         ci_sdr=CISDRLoss,
+        tfgridnet_si_sdr_se=TFGridNetSISDRSE,
         tfgridnet_wav_mag=TFGridNetWavMag,
         roland_tf_l1=RolandTFL1,
         coh=FrequencyDomainAbsCoherence,

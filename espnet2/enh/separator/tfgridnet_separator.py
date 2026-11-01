@@ -73,6 +73,7 @@ class TFGridNet(AbsSeparator):
         use_builtin_complex=False,
         ref_channel=-1,
         return_loss_metadata=False,
+        length_aware_normalization=False,
     ):
         super().__init__()
         self.n_srcs = n_srcs
@@ -82,6 +83,7 @@ class TFGridNet(AbsSeparator):
         n_freqs = n_fft // 2 + 1
         self.ref_channel = ref_channel
         self.return_loss_metadata = return_loss_metadata
+        self.length_aware_normalization = length_aware_normalization
 
         self.enc = STFTEncoder(
             n_fft, n_fft, stride, window=window, use_builtin_complex=use_builtin_complex
@@ -140,7 +142,18 @@ class TFGridNet(AbsSeparator):
             assert len(input.shape) == 2
             input = input[..., None]  # [B, N, M]
 
-        mix_std_ = torch.std(input, dim=(1, 2), keepdim=True)  # [B, 1, 1]
+        if self.length_aware_normalization:
+            # Short segments are retained in padded minibatches. Normalize each
+            # mixture using only its actual samples (sample variance, ddof=1).
+            mask = torch.arange(n_samples, device=input.device)[None, :, None]
+            mask = mask < ilens[:, None, None]
+            count = ilens[:, None, None] * input.shape[2]
+            mean = (input * mask).sum((1, 2), keepdim=True) / count.clamp_min(1)
+            variance = ((input - mean).square() * mask).sum((1, 2), keepdim=True)
+            variance = variance / (count - 1).clamp_min(1)
+            mix_std_ = variance.clamp_min(1e-16).sqrt()
+        else:
+            mix_std_ = torch.std(input, dim=(1, 2), keepdim=True)  # [B, 1, 1]
         input = input / mix_std_  # RMS normalization
 
         batch = self.enc(input, ilens)[0]  # [B, T, M, F]
