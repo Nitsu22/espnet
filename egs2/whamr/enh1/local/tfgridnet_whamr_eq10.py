@@ -36,7 +36,7 @@ def prepare(args):
         if len(lengths) != expected or seen.intersection(lengths):
             raise ValueError(f"Unexpected or overlapping {split} keys")
         seen.update(lengths)
-        shapes = args.output / "stats" / split
+        shapes = args.output / "enh_stats_8k" / split
         shapes.mkdir(parents=True, exist_ok=True)
         sampled = {
             next(iter(lengths)),

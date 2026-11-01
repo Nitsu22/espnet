@@ -24,6 +24,8 @@ export PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}"
 export PATH="$(dirname "$python_bin"):${PATH}"
 export NUMBA_CACHE_DIR="${TMPDIR}/numba" XDG_CACHE_HOME="${TMPDIR}/cache"
 export MPLCONFIGDIR="${TMPDIR}/cache/matplotlib"
+export CUDA_CACHE_PATH="${TMPDIR}/cache/cuda"
+export TORCH_HOME="${TMPDIR}/cache/torch"
 export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
 export CUDA_VISIBLE_DEVICES=3
 check_gpu() {
@@ -55,7 +57,7 @@ common=(
     --train_set tr_mix_both_reverb_min_8k --valid_set cv_mix_both_reverb_min_8k
     --test_sets tt_mix_both_reverb_min_8k --fs 8k --ref_num 2 --ref_channel 0
     --audio_format wav --dumpdir "${run_dir}/dump" --expdir "${run_dir}"
-    --enh_stats_dir "${run_dir}/stats" --enh_exp "${run_dir}/seed0"
+    --enh_exp "${run_dir}/seed0"
     --enh_config "${config}" --use_noise_ref false --use_dereverb_ref false
     --inference_model valid.loss.best.pth
 )

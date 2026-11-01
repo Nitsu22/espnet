@@ -43,6 +43,12 @@ The test functions were run directly with `runpy` because pytest is absent in
 the existing environment. The exact 5,425,552-parameter model also passed a
 real-data four-item 1,024-sample CPU update and checkpoint round-trip.
 
+The tensor GPU 3 smoke test also passed 12 real-data 4-second/batch-4 updates,
+all-parameter finite gradients, full longest-validation input (122,907 samples),
+permutation/scale invariance and checkpoint restoration. Warm update median was
+2.364 seconds; peak allocated/reserved memory was 25.888/26.416 GiB. This repeats
+one minibatch and is not an end-to-end epoch timing or a convergence result.
+
 Host: tensor, physical GPU index 3 (A100 40GB). Python:
 `/home/kslab/nitsu/.conda/envs/tf-locoformer/bin/python`.
 Code is isolated in the `codex/tfgridnet-whamr-eq10-20261101` worktree,
