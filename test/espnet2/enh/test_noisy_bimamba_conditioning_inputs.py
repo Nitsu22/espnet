@@ -113,9 +113,24 @@ class NoisyInputsTests(unittest.TestCase):
         paths = [RECIPE / 'run_whamr8k_bimamba_ctf_concat_s.sh',
                  RECIPE / 'run_nf16k_bimamba_ctf_film_all_s.sh',
                  RECIPE / 'qsub/prepare_whamr8k_bimamba_concat_s.sh',
+                 RECIPE / 'qsub/eval_whamr8k_bimamba_ctf_concat_s.sh',
                  RECIPE / 'qsub/train_whamr8k_bimamba_ctf_concat_s_nodeq.sh']
         for path in paths:
             subprocess.run(['bash', '-n', str(path)], check=True)
+
+    def test_evaluation_matches_baseline_and_guards_dependency(self):
+        wrapper = (RECIPE / 'run_nf16k_bimamba_ctf_film_all_s.sh').read_text()
+        self.assertIn('normalize_output_wav=false', wrapper)
+        self.assertIn('inference_tag=inference', wrapper)
+        self.assertIn('--normalize_output_wav "${normalize_output_wav}"', wrapper)
+        script = (RECIPE / 'qsub/eval_whamr8k_bimamba_ctf_concat_s.sh').read_text()
+        self.assertIn('--inference_model valid.loss.best.pth --normalize_output_wav true', script)
+        self.assertIn('job_${previous_job}/exit_status', script)
+        self.assertIn('sha256sum -c', script)
+        self.assertIn('test ! -e', script)
+        # bash -n alone cannot validate embedded Python.
+        for block in script.split("python - <<'PY'\n")[1:]:
+            compile(block.split('\nPY\n', 1)[0], '<evaluation heredoc>', 'exec')
 
 
 if __name__ == '__main__':
