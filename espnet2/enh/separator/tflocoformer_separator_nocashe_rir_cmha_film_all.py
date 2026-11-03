@@ -44,7 +44,9 @@ class RIRCMHAFiLMBlock(nn.Module):
         """Restore identity FiLM after ESPnet-wide initialization."""
         self.init_film_identity()
 
-    def forward(self, speech: torch.Tensor, rir: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, speech: torch.Tensor, rir: torch.Tensor, context_transform=None
+    ) -> torch.Tensor:
         """Modulate speech features with RIR context.
 
         Args:
@@ -67,6 +69,8 @@ class RIRCMHAFiLMBlock(nn.Module):
         context, _ = self.mha(query, key_value, key_value, need_weights=False)
         context = context.reshape(bsz, n_freqs, t1, ch).permute(0, 3, 2, 1)
         context = context.contiguous()
+        if context_transform is not None:
+            context = context_transform(torch.cat((speech, context), dim=1))
         gamma = self.gamma_proj(context)
         beta = self.beta_proj(context)
         return speech * gamma + beta
@@ -205,6 +209,12 @@ class TFLocoformerSeparator(AbsSeparator):
 
         self.deconv = nn.ConvTranspose2d(emb_dim, num_spk * 2, ks, padding=padding)
 
+    def _encode_rir(self, rir_feat):
+        return self.rir_conv(rir_feat)
+
+    def _condition_speech(self, index, speech, rir):
+        return self.rir_films[index](speech, rir)
+
     def forward(
         self,
         input: torch.Tensor,
@@ -242,12 +252,12 @@ class TFLocoformerSeparator(AbsSeparator):
 
         with torch.cuda.amp.autocast(enabled=False):
             batch = self.conv(batch)  # [B, -1, T, F]
-            rir_batch = self.rir_conv(rir_feat)  # [B, -1, T2, F]
+            rir_batch = self._encode_rir(rir_feat)  # [B, -1, T2, F]
 
         # separation
         for ii in range(self.n_layers):
             with torch.cuda.amp.autocast(enabled=False):
-                batch = self.rir_films[ii](batch, rir_batch)  # [B, -1, T, F]
+                batch = self._condition_speech(ii, batch, rir_batch)  # [B, -1, T, F]
             batch = self.blocks[ii](batch)  # [B, -1, T, F]
 
         with torch.cuda.amp.autocast(enabled=False):

@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 
 import numpy as np
 import soundfile as sf
@@ -18,9 +19,11 @@ from check_bimamba_conditioning_data import read_scp
 from espnet2.tasks.enh import EnhancementTask
 
 
-def digest_parameters(module):
+def digest_parameters(module, exclude_prefix=None):
     digest = hashlib.sha256()
     for name, value in module.state_dict().items():
+        if exclude_prefix is not None and name.startswith(exclude_prefix):
+            continue
         digest.update(name.encode())
         digest.update(value.detach().cpu().contiguous().numpy().tobytes())
     return digest.hexdigest()
@@ -62,6 +65,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     model = EnhancementTask.build_model(options).cuda().train()
+    common_separator_sha256 = digest_parameters(model.separator, "joint_fusions.")
     before = digest_parameters(model.frozen_ctf)
     # Check the exact public inference API and its causal tap convention.
     example = torch.randn(1, 8000, device="cuda")
@@ -135,6 +139,34 @@ def main():
                 raise RuntimeError(f"Missing/nonfinite separation gradient: {name}")
     torch.nn.utils.clip_grad_norm_(model.parameters(), options.grad_clip)
     optimizer.step()
+    # Identity-initialized FiLM blocks the context gradient on the first step.
+    # Verify that the condition path learns on subsequent real-data updates.
+    step_seconds = []
+    for _ in range(3):
+        optimizer.zero_grad(set_to_none=True)
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        loss, _, _ = model(**train)
+        if not torch.isfinite(loss):
+            raise RuntimeError("Nonfinite conditioning probe loss after an update")
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            if parameter.requires_grad and (
+                parameter.grad is None or not torch.isfinite(parameter.grad).all()
+            ):
+                raise RuntimeError("Invalid probe gradient after update: " + name)
+        if hasattr(model.separator, "joint_fusions"):
+            for layer in model.separator.joint_fusions:
+                if layer[0].weight.grad.abs().sum().item() == 0:
+                    raise RuntimeError("Joint audio/CTF MLP received no learning signal")
+        if hasattr(model.separator, "rir_films"):
+            for layer in model.separator.rir_films:
+                if layer.mha.in_proj_weight.grad.abs().sum().item() == 0:
+                    raise RuntimeError("CTF cross-attention received no learning signal")
+        torch.nn.utils.clip_grad_norm_(model.parameters(), options.grad_clip)
+        optimizer.step()
+        torch.cuda.synchronize()
+        step_seconds.append(time.perf_counter() - start)
     if before != digest_parameters(model.frozen_ctf):
         raise RuntimeError("Pretrained Rec-RIR changed during the separation update")
     if any(not torch.isfinite(p).all() for p in model.parameters()):
@@ -148,6 +180,9 @@ def main():
         source_sha256=model.rec_rir_sha256,
         sample_rate=sample_rate,
         cuda_startup=diagnostics,
+        common_separator_initial_sha256=common_separator_sha256,
+        training_step_seconds=step_seconds,
+        training_step_seconds_mean=sum(step_seconds) / len(step_seconds),
         glue=glue,
     )
     model.zero_grad(set_to_none=True)

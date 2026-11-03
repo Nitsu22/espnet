@@ -97,6 +97,9 @@ from espnet2.enh.separator.tflocoformer_separator_nocashe_ctf_concat import (
 from espnet2.enh.separator.tflocoformer_separator_nocashe_rir_cmha_film_all_ctf import (
     TFLocoformerSeparator as TFLocoformerBiMambaFiLMSeparator,
 )
+from espnet2.enh.separator.tflocoformer_separator_recrir_ctf_ablations import (
+    TFLocoformerSeparator as TFLocoformerRecRIRCTFAblationSeparator,
+)
 from espnet2.enh.separator.tflocoformer_separator_nocashe_aeafusion import (
     TFLocoformerSeparator as TFLocoformerSeparatorNocasheAEAFusion,
 )
@@ -179,6 +182,7 @@ separator_choices = ClassChoices(
         tflocoformer_nocashe_ctf=TFLocoformerCTFSeparator,
         tflocoformer_bimamba_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
         tflocoformer_recrir_ctf_film_all=TFLocoformerBiMambaFiLMSeparator,
+        tflocoformer_recrir_ctf_ablation=TFLocoformerRecRIRCTFAblationSeparator,
         tflocoformer_recrir_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_bimamba_ctf_concat=TFLocoformerCTFConcatSeparator,
         tflocoformer_nocashe_bigdeltanet=TFLocoformerBiGatedDeltaNetSeparator,
@@ -628,7 +632,8 @@ class EnhancementTask(AbsTask):
 
         else:
             if args.separator in (
-                "tflocoformer_recrir_ctf_film_all", "tflocoformer_recrir_ctf_concat"
+                "tflocoformer_recrir_ctf_film_all", "tflocoformer_recrir_ctf_concat",
+                "tflocoformer_recrir_ctf_ablation",
             ):
                 model_class = ESPnetEnhancementFrozenRecRIRModel
             elif args.separator in (

@@ -25,18 +25,22 @@ RESOURCES = {
     "infer": ("gpu_1", "04:00:00", 0.2),
     "score": ("cpu_8", "06:00:00", 0.03),
 }
-LIMITS = {"train": 12, "infer": 2, "score": 3}
+LIMITS = {"train": 9, "infer": 1, "score": 1}
+VARIANTS = ("film", "concat_glue", "lag_position", "joint_mlp", "multiscale")
 METRICS = ("SI_SNR", "SDR", "SIR", "SAR", "STOI", "ESTOI")
 
 
 def configure(variant):
     global VARIANT, CONFIG, RUNNER, EXP, STATE
-    if variant not in ("film", "concat_glue"):
-        raise ValueError("Use film or concat_glue")
+    if variant not in VARIANTS:
+        raise ValueError(f"Use one of {VARIANTS}")
     VARIANT = variant
-    suffix = "film_all" if variant == "film" else "concat_glue"
+    suffix = {"film": "film_all", "concat_glue": "concat_glue"}.get(
+        variant, "film_" + variant
+    )
     CONFIG = Path(f"conf/tuning/train_enh_tflocoformer_s_nf8k_recrir_ctf_{suffix}.yaml")
-    RUNNER = f"run_nf8k_recrir_ctf_{suffix}_s.sh"
+    RUNNER = ("run_nf8k_recrir_ctf_concat_glue_s.sh" if variant == "concat_glue"
+              else "run_nf8k_recrir_ctf_film_all_s.sh")
     EXP = Path(f"exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_{suffix}_seed0")
     STATE = EXP / ".pipeline"
 
@@ -118,7 +122,7 @@ def submit(phase, dependency=None, previous=None):
     resource, duration, coefficient = RESOURCES[phase]
     args = ["qsub", "-terse", "-g", "tga-shinoda", "-p", "-5",
             "-l", resource + "=1", "-l", "h_rt=" + duration,
-            "-N", ("recrir_glue_" if VARIANT == "concat_glue" else "recrir_") + phase]
+            "-N", "recrir_" + VARIANT + "_" + phase]
     if dependency:
         args += ["-hold_jid", str(dependency)]
     args += ["qsub/nf8k_recrir_pipeline.sh", "--variant", VARIANT, "--phase", phase]
@@ -177,6 +181,7 @@ def control(previous_job=None):
 def run_stage(stage):
     subprocess.run(["bash", RUNNER, "--stage", str(stage),
                     "--stop_stage", str(stage), "--ngpu", "1",
+                    "--enh_config", str(CONFIG), "--enh_exp", str(EXP),
                     "--python", sys.executable], check=True)
 
 
@@ -310,7 +315,7 @@ def score():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--variant", choices=("film", "concat_glue"), default="film")
+    parser.add_argument("--variant", choices=VARIANTS, default="film")
     parser.add_argument("--phase", choices=tuple(RESOURCES), required=True)
     parser.add_argument("--previous-job")
     args = parser.parse_args()

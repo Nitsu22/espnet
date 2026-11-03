@@ -15,6 +15,9 @@ case ${PWD} in /gs/bs/tga-shinoda/nitsu/*) ;; *) exit 2 ;; esac
 [[ ${JOB_ID:?} =~ ^[0-9]+$ ]]
 case " $* " in
     *' --variant concat_glue '*) suffix=concat_glue ;;
+    *' --variant lag_position '*) suffix=film_lag_position ;;
+    *' --variant joint_mlp '*) suffix=film_joint_mlp ;;
+    *' --variant multiscale '*) suffix=film_multiscale ;;
     *) suffix=film_all ;;
 esac
 logs=exp/enh_train_tflocoformer_s_nf8k_recrir_ctf_${suffix}_seed0/.pipeline/job_${JOB_ID}

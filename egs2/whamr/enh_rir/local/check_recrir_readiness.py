@@ -19,6 +19,11 @@ def verify_readiness(config_path=Path("conf/tuning/train_enh_tflocoformer_s_nf8k
         if baseline[key] != config[key]:
             raise RuntimeError("Baseline training setting differs: " + key)
     separator_conf = dict(config["separator_conf"])
+    if config["separator"] == "tflocoformer_recrir_ctf_ablation":
+        if separator_conf.pop("conditioning_variant", None) not in (
+            "lag_position", "joint_mlp", "multiscale"
+        ):
+            raise RuntimeError("Unknown single-component conditioning ablation")
     if config["separator"] == "tflocoformer_recrir_ctf_concat":
         if separator_conf.pop("glue_frames", None) != 4 or separator_conf.pop("glue_value", None) != 0.0:
             raise RuntimeError("Match DAI-117: four zero Glue tokens after each CTF")
