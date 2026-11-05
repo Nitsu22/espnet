@@ -340,7 +340,14 @@ class RIRTask(AbsTask):
 
             model_conf = dict(args.model_conf)
             model_conf.pop("normalize_variance", None)
-            model = ESPnetRecRIRPITModel(**model_conf)
+            if model_conf.pop("length_aware", False):
+                from espnet2.rir.rec_rir.espnet_model_pit_length_aware import (
+                    ESPnetRecRIRPITLengthAwareModel,
+                )
+
+                model = ESPnetRecRIRPITLengthAwareModel(**model_conf)
+            else:
+                model = ESPnetRecRIRPITModel(**model_conf)
             if args.init is not None:
                 initialize(model, args.init)
             return model
