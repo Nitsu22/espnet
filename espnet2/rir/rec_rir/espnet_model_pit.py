@@ -74,7 +74,7 @@ class ESPnetRecRIRPITModel(AbsESPnetModel):
             win_type=win_type,
             win_len=win_len,
         )
-        self.rec_rir = self.rec_rir_network_class(
+        self.rec_rir = self._build_rec_rir_network(
             dim_input=dim_input,
             dim_output_spch=dim_output_spch,
             dim_output_CTF=dim_output_CTF,
@@ -95,6 +95,9 @@ class ESPnetRecRIRPITModel(AbsESPnetModel):
         )
         self.pim = RecRIRPIM(sr=sr, sweep_duration=pim_sweep_duration)
         self.permutations = tuple(itertools.permutations(range(self.num_spk)))
+
+    def _build_rec_rir_network(self, **network_conf):
+        return self.rec_rir_network_class(**network_conf)
 
     def forward(
         self,

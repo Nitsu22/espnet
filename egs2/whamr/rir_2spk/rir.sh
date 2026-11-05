@@ -110,6 +110,7 @@ if ! "${skip_data_prep}"; then
         done
       elif [ "${rir_model_type}" = rec_rir_pit ] \
         || [ "${rir_model_type}" = tflocoformer_ctf_pit ] \
+        || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
         || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
         for name in speech_direct1 speech_direct2 speech_reverb1 speech_reverb2; do
           if [ ! -f "data/${dset}/${name}.scp" ]; then
@@ -154,6 +155,7 @@ if ! "${skip_data_prep}"; then
         done
       elif [ "${rir_model_type}" = rec_rir_pit ] \
         || [ "${rir_model_type}" = tflocoformer_ctf_pit ] \
+        || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
         || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
         for name in speech_direct1 speech_direct2 speech_reverb1 speech_reverb2; do
           cp "${data_feats}/org/${dset}/${name}.scp" \
@@ -192,6 +194,7 @@ if ! "${skip_train}"; then
     train_speech_mix_scp=wav.scp
     valid_speech_mix_scp=wav.scp
     if [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
       || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       if [ -f "${train_dir}/speech_mix_pit.scp" ]; then
         train_speech_mix_scp=speech_mix_pit.scp
@@ -250,6 +253,7 @@ if ! "${skip_train}"; then
       valid_data_param+="--valid_data_path_and_name_and_type ${valid_dir}/speech_reverb.scp,speech_reverb,sound "
     elif [ "${rir_model_type}" = rec_rir_pit ] \
       || [ "${rir_model_type}" = tflocoformer_ctf_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
       || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
@@ -295,6 +299,7 @@ if ! "${skip_train}"; then
     train_speech_mix_scp=wav.scp
     valid_speech_mix_scp=wav.scp
     if [ "${rir_model_type}" = rec_rir_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
       || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       if [ -f "${train_dir}/speech_mix_pit.scp" ]; then
         train_speech_mix_scp=speech_mix_pit.scp
@@ -349,6 +354,7 @@ if ! "${skip_train}"; then
       fold_length_param+="--fold_length ${speech_fold_length} "
     elif [ "${rir_model_type}" = rec_rir_pit ] \
       || [ "${rir_model_type}" = tflocoformer_ctf_pit ] \
+      || [ "${rir_model_type}" = rec_rir_pit_lag_relation ] \
       || [ "${rir_model_type}" = rec_rir_pit_ctf_split ]; then
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct1.scp,speech_direct1,sound "
       train_data_param+="--train_data_path_and_name_and_type ${train_dir}/speech_direct2.scp,speech_direct2,sound "
