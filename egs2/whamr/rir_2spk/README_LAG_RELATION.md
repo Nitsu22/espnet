@@ -10,6 +10,8 @@ NB版とFull版を用意する。話者別投影は追加せず、最後のLinea
 forward/backward、学習、推論、評価、GPUメモリ計測は実施していない。
 動作と性能は未検証であり、既存Baselineとの公平な比較条件も実験開始前に確認する。
 その後のTSUBAME比較実験の共通条件・投入手順は `README_FAIR_COMPARISON.md` を参照する。
+現在の実行方針は`README_ORIGINAL_BASELINE_COMPARISON.md`の学習済み元Baseline条件。
+`length_aware: false`で元のpadding・損失処理を使い、NB/Fullだけを学習する。
 
 ## 形状と処理
 

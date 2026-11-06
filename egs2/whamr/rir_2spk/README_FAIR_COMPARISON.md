@@ -1,5 +1,8 @@
 # NF-WHAMR 8 kHz：Rec-RIR Baseline / 遅延関係NB / 遅延関係Full
 
+この3条件再学習は旧方針。現在はユーザー指定により、学習済み元Baselineに合わせて
+提案NB/Fullだけを学習する。`README_ORIGINAL_BASELINE_COMPARISON.md`を参照する。
+
 ## 比較条件
 
 3条件を新規学習し、CTF Headの構造を比較する。Baselineは元の

@@ -1,0 +1,214 @@
+# Training options copied from the trained original 3-loss baseline.
+# Only the CTF head and relocated file paths differ.
+log_level: INFO
+drop_last_iter: false
+dry_run: false
+iterator_type: sequence
+valid_iterator_type: null
+ngpu: 1
+seed: 0
+num_workers: 4
+num_att_plot: 3
+dist_backend: nccl
+multiprocessing_distributed: false
+unused_parameters: false
+sharded_ddp: false
+cudnn_enabled: true
+cudnn_benchmark: false
+cudnn_deterministic: true
+collect_stats: false
+write_collected_feats: false
+max_epoch: 100
+patience: 10
+val_scheduler_criterion:
+- valid
+- loss
+early_stopping_criterion:
+- valid
+- loss
+- min
+best_model_criterion:
+- - valid
+  - loss
+  - min
+keep_nbest_models: 5
+nbest_averaging_interval: 0
+grad_clip: 1.0
+grad_clip_type: 2.0
+grad_noise: false
+accum_grad: 1
+no_forward_run: false
+resume: false
+train_dtype: float32
+use_amp: true
+log_interval: null
+use_matplotlib: true
+use_tensorboard: true
+create_graph_in_tensorboard: false
+use_wandb: false
+wandb_project: null
+wandb_id: null
+wandb_entity: null
+wandb_name: null
+wandb_model_log_interval: -1
+detect_anomaly: false
+use_adapter: false
+adapter: lora
+save_strategy: all
+adapter_conf: {}
+pretrain_path: null
+init_param: []
+ignore_init_mismatch: false
+freeze_param: []
+num_iters_per_epoch: null
+batch_size: 4
+valid_batch_size: null
+batch_bins: 1000000
+valid_batch_bins: null
+train_shape_file:
+- exp/original_baseline_inputs/stats/train/speech_mix_shape
+- exp/original_baseline_inputs/stats/train/speech_direct1_shape
+- exp/original_baseline_inputs/stats/train/speech_direct2_shape
+- exp/original_baseline_inputs/stats/train/speech_reverb1_shape
+- exp/original_baseline_inputs/stats/train/speech_reverb2_shape
+valid_shape_file:
+- exp/original_baseline_inputs/stats/valid/speech_mix_shape
+- exp/original_baseline_inputs/stats/valid/speech_direct1_shape
+- exp/original_baseline_inputs/stats/valid/speech_direct2_shape
+- exp/original_baseline_inputs/stats/valid/speech_reverb1_shape
+- exp/original_baseline_inputs/stats/valid/speech_reverb2_shape
+batch_type: folded
+valid_batch_type: null
+fold_length:
+- 32000
+- 32000
+- 32000
+- 32000
+- 32000
+sort_in_batch: descending
+shuffle_within_batch: false
+sort_batch: descending
+multiple_iterator: false
+chunk_length: 500
+chunk_shift_ratio: 0.5
+num_cache_chunks: 1024
+chunk_excluded_key_prefixes: []
+chunk_default_fs: null
+train_data_path_and_name_and_type:
+- - exp/original_baseline_inputs/raw/tr_mix_clean_reverb_min_8k/speech_mix_pit.scp
+  - speech_mix
+  - sound
+- - exp/original_baseline_inputs/raw/tr_mix_clean_reverb_min_8k/speech_direct1.scp
+  - speech_direct1
+  - sound
+- - exp/original_baseline_inputs/raw/tr_mix_clean_reverb_min_8k/speech_direct2.scp
+  - speech_direct2
+  - sound
+- - exp/original_baseline_inputs/raw/tr_mix_clean_reverb_min_8k/speech_reverb1.scp
+  - speech_reverb1
+  - sound
+- - exp/original_baseline_inputs/raw/tr_mix_clean_reverb_min_8k/speech_reverb2.scp
+  - speech_reverb2
+  - sound
+valid_data_path_and_name_and_type:
+- - exp/original_baseline_inputs/raw/cv_mix_clean_reverb_min_8k/speech_mix_pit.scp
+  - speech_mix
+  - sound
+- - exp/original_baseline_inputs/raw/cv_mix_clean_reverb_min_8k/speech_direct1.scp
+  - speech_direct1
+  - sound
+- - exp/original_baseline_inputs/raw/cv_mix_clean_reverb_min_8k/speech_direct2.scp
+  - speech_direct2
+  - sound
+- - exp/original_baseline_inputs/raw/cv_mix_clean_reverb_min_8k/speech_reverb1.scp
+  - speech_reverb1
+  - sound
+- - exp/original_baseline_inputs/raw/cv_mix_clean_reverb_min_8k/speech_reverb2.scp
+  - speech_reverb2
+  - sound
+allow_variable_data_keys: false
+max_cache_size: 0.0
+max_cache_fd: 32
+allow_multi_rates: false
+valid_max_cache_size: null
+exclude_weight_decay: false
+exclude_weight_decay_conf: {}
+optim: adamw
+optim_conf:
+  lr: 0.001
+  eps: 1.0e-08
+  weight_decay: 0.0
+scheduler: cosineannealingwarmrestarts
+scheduler_conf:
+  T_0: 10124
+  T_mult: 1
+  eta_min: 0.0
+init: null
+model_conf:
+  extract_feats_in_collect_stats: false
+  sr: 8000
+  n_fft: 256
+  win_len: 256
+  hop_len: 128
+  win_type: sqrthann
+  num_spk: 2
+  dim_input: 2
+  dim_output_spch: 4
+  dim_hidden: 96
+  dim_squeeze: 8
+  num_freqs: 129
+  num_layers_spch: 6
+  num_layers_noise: 2
+  num_layers_CTF: 6
+  encoder_kernel_size: 5
+  dropout:
+  - 0.0
+  - 0.0
+  - 0.0
+  kernel_size:
+  - 5
+  - 3
+  conv_groups:
+  - 8
+  - 8
+  norms:
+  - LN
+  - LN
+  - LN
+  - LN
+  - LN
+  - LN
+  full_share: 0
+  attention: mamba(16,4)
+  loss_type: RIMag
+  loss_w_cln: 1.0
+  loss_w_rvb: 1.0
+  loss_w_rec: 1.0
+  normalize_by_mix: true
+  pim_sweep_duration: 8.192
+  ctf_length: 60
+  ctf_block_type: nb
+  relation_checkpoint: true
+  length_aware: false
+rir_model_type: rec_rir_pit_lag_relation
+criterions:
+- name: mrstft
+  conf: {}
+  wrapper: fixed_order
+  wrapper_conf:
+    weight: 1.0
+sample_rate: 8000
+force_single_channel: true
+speech_segment: null
+avoid_allzero_segment: true
+encoder: stft
+encoder_conf: {}
+separator: tflocoformer
+separator_conf: {}
+decoder: stft
+decoder_conf: {}
+preprocessor: rec_rir_pit
+preprocessor_conf:
+  num_spk: 2
+  speech_segment: 32000
+  force_single_channel: true
