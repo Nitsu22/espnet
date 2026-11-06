@@ -194,7 +194,11 @@ def main():
         torch.cuda.reset_peak_memory_stats()
         first = next(model.parameters())
         before = first.detach().clone()
-        for step in range(4):
+        overflows = []
+        # Match Trainer: early AMP overflows skip the optimizer update and
+        # lower GradScaler's scale. Require four actual finite updates, not
+        # four attempts at the initial (usually excessive) scale of 65536.
+        for attempt in range(32):
             optimizer.zero_grad(set_to_none=True)
             torch.cuda.synchronize()
             start = time.perf_counter()
@@ -206,13 +210,30 @@ def main():
             missing = [name for name, parameter in model.named_parameters()
                        if parameter.requires_grad and parameter.grad is None]
             assert not missing, missing
-            assert all(torch.isfinite(parameter.grad).all() for parameter in model.parameters()
-                       if parameter.grad is not None)
+            nonfinite = [name for name, parameter in model.named_parameters()
+                         if parameter.grad is not None
+                         and not torch.isfinite(parameter.grad).all()]
+            if nonfinite:
+                if not cfg.use_amp:
+                    raise AssertionError(f'Nonfinite FP32 gradients: {nonfinite}')
+                old_scale = scaler.get_scale()
+                # GradScaler found the overflow in unscale_ and will skip step.
+                scaler.step(optimizer)
+                scaler.update()
+                assert scaler.get_scale() < old_scale
+                overflows.append(dict(attempt=attempt, scale=old_scale,
+                                      next_scale=scaler.get_scale(),
+                                      nonfinite_parameters=nonfinite[:8]))
+                print(variant, 'AMP scale calibration', json.dumps(overflows[-1]), flush=True)
+                continue
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             scaler.step(optimizer)
             scaler.update()
             torch.cuda.synchronize()
             durations.append(time.perf_counter() - start)
+            if len(durations) == 4:
+                break
+        assert len(durations) == 4, 'AMP did not reach four finite optimizer updates'
         assert not torch.equal(before, first)
         handle.remove()
         assert shapes[0] == [[4, 2, 2, 129, 251], [4, 2, 2, 129, 60],
@@ -244,6 +265,8 @@ def main():
                     train_peak_gib=peak, valid_peak_gib=torch.cuda.max_memory_allocated() / 2**30,
                     update_seconds=float(np.median(durations[1:])),
                     initial_loss=float(loss.detach()), batch_size=4,
+                    amp_calibration_overflows=overflows, final_grad_scale=scaler.get_scale(),
+                    successful_optimizer_updates=len(durations),
                     output_shapes=shapes[0], longest_valid_samples=int(length),
                     shared_speech_initialization=True, finite_gradients=True,
                     padding_invariant=True, utterance_mean=True, common_pit=True,

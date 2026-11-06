@@ -12,9 +12,11 @@ phase=${1:?Specify prepare, profile or train}
 variant=${2:-all}
 wall_seconds=${3:-86400}
 resume=${4:-false}
+submit_after_profile=${5:-false}
 case ${phase} in prepare|profile|train) ;; *) exit 2 ;; esac
 case ${variant} in all|baseline|nb|full) ;; *) exit 2 ;; esac
 case ${resume} in true|false) ;; *) exit 2 ;; esac
+case ${submit_after_profile} in true|false) ;; *) exit 2 ;; esac
 [[ ${wall_seconds} =~ ^[0-9]+$ && ${wall_seconds} -ge 600 && ${wall_seconds} -le 86400 ]]
 cd "${SGE_O_WORKDIR:?}"
 case ${PWD} in /gs/bs/tga-shinoda/nitsu/*/egs2/whamr/rir_2spk) ;; *) exit 2 ;; esac
@@ -61,6 +63,24 @@ module load cuda/11.8.0
 if [[ ${phase} == profile ]]; then
     python local/profile_lag_relation_comparison.py --dump "${dump}" --output "${profile}" \
         2>&1 | tee "${logs}/profile.log"
+    # Submit GPU training only after the complete three-model gate succeeds.
+    # A failed gate should not consume three GPU allocations just to fail on
+    # a missing ready.json. Persist each job ID immediately for recovery.
+    if [[ ${submit_after_profile} == true ]]; then
+        for head in baseline nb full; do
+            submission="${profile}/submitted_${head}.job"
+            [[ ! -e ${submission} ]]
+            train_job=$(qsub -g tga-shinoda -terse -p -5 -l gpu_1=1 \
+                -l h_rt=24:00:00 -N "recrir_fair_${head}" -hold_jid "${JOB_ID}" \
+                qsub/lag_relation_comparison.sh train "${head}" 86400 false)
+            [[ ${train_job} =~ ^[0-9]+$ ]]
+            printf '%s\n' "${train_job}" > "${submission}"
+            printf '%s\t%s\tgpu_1=1\t86400\n' "${head}" "${train_job}" \
+                | tee -a exp/lag_relation_comparison/submitted_jobs.tsv
+            printf 'Submitted %s: %s; priority -5, gpu_1=1, h_rt=24h, upper points 3.8400\n' \
+                "${head}" "${train_job}"
+        done
+    fi
     exit 0
 fi
 [[ ${variant} != all ]]

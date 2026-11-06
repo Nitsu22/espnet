@@ -48,11 +48,16 @@ CUDA確認では、実データbatch 4のAMP更新、全勾配の有限性、出
 Checkpointingの出力・勾配一致、CTF側パラメータの独立性を検査する。
 Baselineのstate_dict互換性と、音声側初期重みの完全一致も確認する。
 成功時だけ`ready.json`を書き、各学習ジョブがcommit・設定・データ・初期重みのSHAを確認する。
+AMPの初期loss scaleで勾配がoverflowした場合は、本学習のTrainerと同じく更新をskipして
+scaleを下げる。最大32試行以内に4回の有限な更新が必要で、調整履歴も確認結果へ保存する。
 どの条件もこの確認用更新を学習に引き継がず、共通の未学習重みから再開する。
 
 TSUBAME専用checkoutへGit同期後、レシピのディレクトリから投入する。
 準備CPUジョブ → CUDA確認GPUジョブ → 学習3ジョブの順でhold_jidを指定する。
 依存先の終了だけでは成功を保証しないため、後続では必要な完了ファイルも検査する。
+CUDA確認の第5引数に`true`を渡すと、成功後にだけ学習3ジョブを自動投入する。
+既存の共通データ・shapeが完成済みの場合、準備ジョブを再実行する必要はない。
+各学習ジョブIDは`profile/submitted_{baseline,nb,full}.job`へ直ちに保存する。
 
 ```bash
 qsub -g tga-shinoda -l cpu_8=1 -l h_rt=01:00:00 -p -5 \
@@ -64,6 +69,9 @@ qsub -g tga-shinoda -l gpu_1=1 -l h_rt=24:00:00 -p -5 \
   -hold_jid PROFILE_JOB -N recrir_fair_nb \
   qsub/lag_relation_comparison.sh train nb 86400 false
 ```
+
+確認後に自動投入する場合は、学習を別途投入せず、2つ目のコマンドを
+`qsub/lag_relation_comparison.sh profile all 1200 false true`で実行する。
 
 `baseline`と`full`も最後と同じ形式で投入する。全条件を同じ最大epochとearly stopping
 で学習するため、24時間内に終わらない場合だけ、保存済みcheckpointから同じ条件で
