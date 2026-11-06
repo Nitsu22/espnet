@@ -7,6 +7,8 @@
 set -eo pipefail
 source /gs/bs/tga-shinoda/nitsu/anaconda3/etc/profile.d/conda.sh
 conda activate tf-locoformer
+export PATH="/apps/t4/rhel9/uge/latest/bin/lx-amd64:${PATH}"
+command -v qsub >/dev/null
 set -u
 phase=${1:?Specify verify, profile or train}
 variant=${2:-all}
